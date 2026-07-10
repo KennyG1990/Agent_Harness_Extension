@@ -6,12 +6,14 @@ import { createConfiguredProvider, OpenRouterProvider, Provider } from './provid
 import { resolvePatchTargetByContent, WorkspaceTools } from './tools';
 import { Firewall } from './firewall';
 import { VerificationOracles, OracleResult } from './oracles';
+import { assemblePromptWithinBudget, PromptSection } from './contextBudget';
 
 const MAX_REPAIR_ATTEMPTS = 2;
 const MAX_NO_PROGRESS_TURNS = 4;
 const MAX_REFLECTION_ATTEMPTS = 3;
 const ESCALATE_AFTER_REFLECTIONS = 2;
 const DEFAULT_MAX_WALL_CLOCK_MS = 30 * 60 * 1000;
+export const DEFAULT_PROMPT_CHAR_BUDGET = 96_000;
 
 export const TOOL_SCHEMA = {
   type: 'object',
@@ -180,6 +182,8 @@ export class AgentHarnessLoop {
     state.runStats = state.runStats || this.createRunStats();
     state.runStats.roleHandoffRefreshes = state.runStats.roleHandoffRefreshes || 0;
     state.runStats.retrievalRefreshes = state.runStats.retrievalRefreshes || 0;
+    state.runStats.contextCompactions = state.runStats.contextCompactions || 0;
+    state.runStats.toolResultSectionsCleared = state.runStats.toolResultSectionsCleared || 0;
     state.runStats.safetyCheckpoints = state.runStats.safetyCheckpoints || 0;
     state.runStats.safetyReverts = state.runStats.safetyReverts || 0;
     state.runStats.reviewerCritiques = state.runStats.reviewerCritiques || 0;
@@ -633,59 +637,55 @@ export class AgentHarnessLoop {
     const handoffTasks = handoff.openTasks.map(item => `- ${item}`).join('\n') || '- none';
     const handoffContext = handoff.recentContext.map(item => `- ${item}`).join('\n') || '- none';
     const toolGuidance = this.toolGuidanceForTask(activeTask);
-    return `You are a Forge Agent worker. The harness owns correctness.
-Goal: ${state.goalContract.goal}
-Active task: ${activeTask.title}
-Allowed behavior: propose one structured tool call only. The deterministic firewall validates, then commits. Success requires run_tests pass and evidence ledger proof.
-
-Role handoff:
-Role: ${handoff.role}
-Allowed tools: ${handoff.allowedTools.join(', ')}
-Responsibilities:
-${handoffResponsibilities}
-Role open tasks:
-${handoffTasks}
-Role recent context:
-${handoffContext}
-Handoff summary: ${handoff.handoffSummary}
-
-Tool contract:
-- repo_search: {"query":"text"}
-- symbol_search: {"query":"symbol"}
-- read_file: {"path":"workspace-relative/path"}
-- read_range: {"path":"workspace-relative/path","startLine":1,"endLine":80}
-- apply_patch: {"path":"workspace-relative/path","patchContent":"<<<<<<< SEARCH\\nold\\n=======\\nnew\\n>>>>>>> REPLACE"}
-- run_command: {"command":"safe non-destructive command"}
-- run_tests: {}
-- get_diff: {}
-- update_plan: {"planMd":"# PLAN.md..."}
-- update_tasks: {"tasks":[...]}
-- record_evidence: {"observation":"what passed"}
-- declare_success: {}
-
-Task guidance: ${toolGuidance}
-
-Known files:
-${fileMemory}
-
-Retrieval candidates:
-${retrievalCandidates}
-
-Open task state:
-${openTasks}
-
-Scratchpad summary:
-${context.scratchpadSummary}
-
-Recent harness log:
-${recentLogs || 'none'}
-
-Recent reflection failures to address:
-${recentReflections}
-${wholeFileGuidance}
-
-Recent escalation routing:
-${recentEscalations}`;
+    const sections: PromptSection[] = [
+      {
+        id: 'identity-contract',
+        required: true,
+        priority: 100,
+        content: 'You are a Forge Agent worker. The harness owns correctness.\nAllowed behavior: propose one structured tool call only. The deterministic firewall validates, then commits. Success requires run_tests pass and evidence ledger proof.'
+      },
+      { id: 'goal-contract', required: true, priority: 100, content: `Goal: ${state.goalContract.goal}` },
+      { id: 'active-task', required: true, priority: 100, content: `Active task: ${activeTask.title}` },
+      {
+        id: 'role-handoff',
+        required: true,
+        priority: 100,
+        content: `Role handoff:\nRole: ${handoff.role}\nAllowed tools: ${handoff.allowedTools.join(', ')}\nResponsibilities:\n${handoffResponsibilities}\nRole open tasks:\n${handoffTasks}\nRole recent context:\n${handoffContext}\nHandoff summary: ${handoff.handoffSummary}`
+      },
+      {
+        id: 'tool-contract',
+        required: true,
+        priority: 100,
+        content: `Tool contract:\n- repo_search: {"query":"text"}\n- symbol_search: {"query":"symbol"}\n- read_file: {"path":"workspace-relative/path"}\n- read_range: {"path":"workspace-relative/path","startLine":1,"endLine":80}\n- apply_patch: {"path":"workspace-relative/path","patchContent":"<<<<<<< SEARCH\\nold\\n=======\\nnew\\n>>>>>>> REPLACE"}\n- run_command: {"command":"safe non-destructive command"}\n- run_tests: {}\n- get_diff: {}\n- update_plan: {"planMd":"# PLAN.md..."}\n- update_tasks: {"tasks":[...]}\n- record_evidence: {"observation":"what passed"}\n- declare_success: {}`
+      },
+      { id: 'task-guidance', required: true, priority: 100, content: `Task guidance: ${toolGuidance}` },
+      { id: 'known-files', priority: 90, content: `Known files:\n${fileMemory}` },
+      { id: 'retrieval-candidates', priority: 85, content: `Retrieval candidates:\n${retrievalCandidates}` },
+      { id: 'open-task-state', required: true, priority: 100, content: `Open task state:\n${openTasks}` },
+      { id: 'reflection-failures', priority: 75, toolResult: true, content: `Recent reflection failures to address:\n${recentReflections}` },
+      ...(wholeFileGuidance ? [{ id: 'recovery-guidance', required: true, priority: 100, content: wholeFileGuidance.trim() }] : []),
+      { id: 'scratchpad-summary', priority: 60, toolResult: true, content: `Scratchpad summary:\n${context.scratchpadSummary}` },
+      { id: 'escalation-routing', priority: 55, toolResult: true, content: `Recent escalation routing:\n${recentEscalations}` },
+      { id: 'recent-harness-log', priority: 40, toolResult: true, content: `Recent harness log:\n${recentLogs || 'none'}` }
+    ];
+    const scheduled = assemblePromptWithinBudget(sections, DEFAULT_PROMPT_CHAR_BUDGET);
+    context.promptCharBudget = scheduled.budgetChars;
+    context.promptChars = scheduled.promptChars;
+    context.promptTokenEstimate = scheduled.estimatedTokens;
+    context.includedSections = scheduled.includedSections;
+    context.clearedSections = scheduled.clearedSections;
+    context.truncatedSections = scheduled.truncatedSections;
+    context.droppedChars = scheduled.droppedChars;
+    context.compacted = scheduled.compacted;
+    context.compactionReason = scheduled.compacted
+      ? `Prompt budget ${scheduled.budgetChars} chars cleared ${scheduled.clearedSections.length} section(s), truncated ${scheduled.truncatedSections.length}, dropped ${scheduled.droppedChars} chars.`
+      : undefined;
+    if (scheduled.compacted) {
+      state.runStats.contextCompactions += 1;
+    }
+    const clearedToolResults = sections.filter(section => section.toolResult && scheduled.clearedSections.includes(section.id)).length;
+    state.runStats.toolResultSectionsCleared += clearedToolResults;
+    return scheduled.text;
   }
 
   private toolGuidanceForTask(activeTask: TaskItem): string {
@@ -733,6 +733,8 @@ ${recentEscalations}`;
       contextRefreshes: 0,
       roleHandoffRefreshes: 0,
       retrievalRefreshes: 0,
+      contextCompactions: 0,
+      toolResultSectionsCleared: 0,
       safetyCheckpoints: 0,
       safetyReverts: 0,
       commandEffectCaptures: 0,
@@ -1146,7 +1148,14 @@ ${recentEscalations}`;
         'Carry open blockers, reflections, escalations, and reviewer notes into the next proposal.'
       ],
       tokenEstimate: 0,
-      compacted: false
+      compacted: false,
+      promptCharBudget: DEFAULT_PROMPT_CHAR_BUDGET,
+      promptChars: 0,
+      promptTokenEstimate: 0,
+      includedSections: [],
+      clearedSections: [],
+      truncatedSections: [],
+      droppedChars: 0
     };
   }
 
@@ -1162,6 +1171,7 @@ ${recentEscalations}`;
     const retrievalCandidates = this.rankRetrievalCandidates(state, activeTask, 10);
     const scratchTail = state.scratchpadMd.slice(-6000);
     const scratchpadSummary = summarizeText(scratchTail, 1200) || 'No scratchpad entries yet.';
+    const previous = state.contextBundle;
     const bundle: ContextBundle = {
       generatedAt: new Date().toISOString(),
       goal: state.goalContract.goal,
@@ -1181,7 +1191,15 @@ ${recentEscalations}`;
         'Rehydrate goal, open tasks, recent files, reflections, escalations, and reviewer notes after compaction.'
       ],
       tokenEstimate: estimateTokens([state.goalContract.goal, ...openTasks, ...recentFiles, ...retrievalCandidates.map(candidate => candidate.path), scratchpadSummary].join('\n')),
-      compacted: state.scratchpadMd.length > 6000 || Object.keys(state.files).length > 8
+      compacted: previous?.compacted || false,
+      promptCharBudget: previous?.promptCharBudget || DEFAULT_PROMPT_CHAR_BUDGET,
+      promptChars: previous?.promptChars || 0,
+      promptTokenEstimate: previous?.promptTokenEstimate || 0,
+      includedSections: previous?.includedSections || [],
+      clearedSections: previous?.clearedSections || [],
+      truncatedSections: previous?.truncatedSections || [],
+      droppedChars: previous?.droppedChars || 0,
+      compactionReason: previous?.compactionReason
     };
     state.contextBundle = bundle;
     state.runStats.contextRefreshes += 1;

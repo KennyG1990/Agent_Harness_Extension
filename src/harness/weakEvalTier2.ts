@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
+import { randomUUID } from 'crypto';
 import { Firewall } from './firewall';
 import { VerificationOracles } from './oracles';
 import { OpenRouterProvider, Provider, ChatOptions, ChatUsage, ModelDescriptor } from './provider';
@@ -79,6 +80,8 @@ export interface Tier2TaskResult {
 }
 
 export interface Tier2EvalReport {
+  runId: string;
+  startedAt: string;
   passed: boolean;
   status: 'uplift_observed' | 'no_uplift_observed';
   partial?: boolean;
@@ -101,6 +104,7 @@ export interface Tier2EvalReport {
   cost: number;
   liveCanary?: { ok: boolean; proposalName: string; argumentKeys: string[]; pathNonEmpty: boolean };
   reportPath?: string;
+  archivePath?: string;
   tasks: Tier2TaskResult[];
 }
 
@@ -260,6 +264,9 @@ export class Tier2EvalRunner {
 
   public async run(options: Tier2EvalOptions = {}): Promise<Tier2EvalReport> {
     const live = options.live === true;
+    const tier = options.tier || 2;
+    const startedAt = new Date().toISOString();
+    const runId = createEvalRunId(tier, live, startedAt);
     const provider = options.providerCallTimeoutMs
       ? new TimeoutProvider(this.providerFactory(live), options.providerCallTimeoutMs)
       : this.providerFactory(live);
@@ -275,7 +282,9 @@ export class Tier2EvalRunner {
     const suite = options.tasks && options.tasks.length ? options.tasks : tier2Tasks();
     const tasks = suite.slice(0, Math.max(1, options.taskLimit || suite.length));
     const results: Tier2TaskResult[] = [];
-    const reportPath = path.join(options.reportRoot || process.cwd(), '.forge', 'evals', `latest-weak-model-eval-tier${options.tier || 2}.json`);
+    const reportRoot = options.reportRoot || process.cwd();
+    const reportPath = path.join(reportRoot, '.forge', 'evals', `latest-weak-model-eval-tier${tier}.json`);
+    const archivePath = path.join(reportRoot, '.forge', 'evals', 'runs', `tier-${tier}`, `${runId}.json`);
     for (const task of tasks) {
       const bareRoot = createFixture(task, 'bare');
       const harnessRoot = createFixture(task, 'harness');
@@ -316,6 +325,9 @@ export class Tier2EvalRunner {
         results,
         totalTaskCount: tasks.length,
         reportPath,
+        archivePath,
+        runId,
+        startedAt,
         partial: results.length < tasks.length
       }));
       if (options.keepFixtures === false) {
@@ -329,7 +341,7 @@ export class Tier2EvalRunner {
         }
       }
     }
-    const report = buildReport({ options, modelId, live, liveCanary, results, totalTaskCount: tasks.length, reportPath, partial: false });
+    const report = buildReport({ options, modelId, live, liveCanary, results, totalTaskCount: tasks.length, reportPath, archivePath, runId, startedAt, partial: false });
     persistTierReport(report);
     return report;
   }
@@ -824,9 +836,12 @@ function buildReport(input: {
   results: Tier2TaskResult[];
   totalTaskCount: number;
   reportPath: string;
+  archivePath: string;
+  runId: string;
+  startedAt: string;
   partial: boolean;
 }): Tier2EvalReport {
-  const { options, modelId, live, liveCanary, results, totalTaskCount, reportPath, partial } = input;
+  const { options, modelId, live, liveCanary, results, totalTaskCount, reportPath, archivePath, runId, startedAt, partial } = input;
   const routedSolved = (result: Tier2TaskResult) => result.dispatchLane === 'swarm' ? result.swarm?.solved === true : result.harness?.solved === true;
   const byKind: Tier2EvalReport['byKind'] = {};
   for (const result of results) {
@@ -860,13 +875,15 @@ function buildReport(input: {
     ? (dispatchSolved || 0)
     : Math.max(harnessSolved, swarmSolved || 0, architectSolved || 0);
   return {
+    runId,
+    startedAt,
     passed: headline > bareSolved,
     status: headline > bareSolved ? 'uplift_observed' : 'no_uplift_observed',
     partial,
     completedTaskCount: results.length,
     lastUpdatedAt: new Date().toISOString(),
     tier: options.tier || 2,
-    generatedAt: new Date().toISOString(),
+    generatedAt: startedAt,
     modelId,
     live,
     taskCount: totalTaskCount,
@@ -882,6 +899,7 @@ function buildReport(input: {
     cost: sum(results, result => result.bare.cost + (result.harness?.cost || 0) + (result.swarm?.cost || 0) + (result.architect?.cost || 0)),
     liveCanary,
     reportPath,
+    archivePath,
     tasks: results
   };
 }
@@ -891,7 +909,17 @@ function persistTierReport(report: Tier2EvalReport): void {
     return;
   }
   fs.mkdirSync(path.dirname(report.reportPath), { recursive: true });
-  fs.writeFileSync(report.reportPath, JSON.stringify(report, null, 2), 'utf8');
+  const serialized = JSON.stringify(report, null, 2);
+  fs.writeFileSync(report.reportPath, serialized, 'utf8');
+  if (report.archivePath) {
+    fs.mkdirSync(path.dirname(report.archivePath), { recursive: true });
+    fs.writeFileSync(report.archivePath, serialized, 'utf8');
+  }
+}
+
+function createEvalRunId(tier: number, live: boolean, startedAt: string): string {
+  const timestamp = startedAt.replace(/[-:.]/g, '');
+  return `tier${tier}-${live ? 'live' : 'mock'}-${timestamp}-${randomUUID().slice(0, 8)}`;
 }
 
 function rejectProtectedWorkspaceTestMutation(task: Tier2Task, proposal: ToolProposal): string {

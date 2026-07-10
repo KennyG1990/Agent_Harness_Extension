@@ -1,10 +1,47 @@
 # Research-to-Implementation Gap Analysis
 
+## Reconciled Current Status (2026-07-09)
+
+The delivered product has crossed both requested capability thresholds once, but repeatability and evidence retention are not yet strong enough to close the research objective. Console evidence records Qwen 7B architect at Tier-3 5/5 and DeepSeek-v4-pro architect with Qwen 7B executor at Tier-4 3/4. Those live reports were later overwritten by mocked validation because every run writes the same `latest-weak-model-eval-tier<n>.json` path. The current retained Tier-3/Tier-4 JSON files are mock reports (`live: false`), so the live results remain credible historical evidence but are not durable machine-verifiable artifacts.
+
+Current gap priority:
+
+1. Preserve immutable per-run evaluation evidence, then repeat Tier-4 live runs for means and task-level variance.
+2. Use repeated results to decide architect-aware terrain dispatch rather than routing from an n=1 comparison.
+3. Implement Phase 53 context engineering and test it on context-limited tasks.
+4. Run Tier-3/4 slice 2 against real repositories in Phase-35 worktrees.
+5. Finish Phase 55 session/history/right-rail UX and the remaining Phase 54 interaction gaps.
+6. Add true worker isolation/parallelism, network side-effect capture, and OS/container sandboxing before unattended real-repository use.
+
+## Phase 58 - Immutable Evaluation Evidence (implemented; local gates PASS, live archive pending credential)
+
+Problem: `.forge/evals/latest-weak-model-eval-tier<n>.json` is a mutable convenience path. Mock regression runs replaced the live Qwen/DeepSeek reports, defeating the project's artifact-first trust rule and preventing a requirement-by-requirement completion audit.
+
+Build slice: allocate one `runId` and `startedAt` before each Tier-2/3/4 run; persist every partial and final report to both the existing latest path and `.forge/evals/runs/tier-<n>/<runId>.json`; expose `archivePath` in the report and CLI summary. Parallel or later runs may update `latest`, but must never share an archive path.
+
+Validation contract: compile and smoke gates; two sequential scripted runs against one report root produce distinct archives; after run two, run one's archive remains present and still identifies run one; partial writes and final closure use the same archive; mocked Tier-3 and Tier-4 CLI runs print their durable archive paths. Live repeat remains a named open gate when no OpenRouter credential is available.
+
+Implemented result: each shared tier run now receives `runId`, `startedAt`, and `archivePath`. Partial and final payloads dual-write the compatibility `latest` path and one tier-scoped run archive. Two-run negative proof preserved run one byte-for-byte after run two advanced `latest`; a delayed two-task proof observed `partial:true` at completed count 1 and `partial:false` at count 2 in the same archive. Mocked Tier-3 architect remained 5/5 and mocked Tier-4 remained the expected pattern-blind 0/4, each printing its archive path. Compile, smoke, visual, package, and extension-host E2E gates pass. The lean VSIX contains only package metadata, icon, compiled extension/harness code, and compiled webview assets. Antigravity now lists installed `kennyg.forge-agent@0.58.0`. This is ◐ rather than fully closed because `OPENROUTER_API_KEY` is absent from the current shell, so no fresh live Qwen/DeepSeek archive was created.
+
+Non-goals: changing prompts, task fixtures, judges, lane solve accounting, model routing, or reconstructing missing live task-level JSON from console summaries.
+
+## Phase 53.1 - Deterministic Context Budget Scheduler (implemented; local gates PASS, live uplift pending)
+
+Reconciled gap: `ContextBundle.compacted` currently becomes true when scratchpad/files cross fixed thresholds, but that flag does not change provider prompt content. `tokenEstimate` measures only a subset of the actual prompt and excludes role handoff, tool contract, logs, reflections, and escalations. Forge therefore records compaction without performing it.
+
+Selected design: preserve full-fidelity details in filesystem artifacts and assemble each provider system prompt from named priority sections under a hard character budget sized for a 32k-class model with output reserve. Required goal, active task, role/tool contract, task guidance, and open task state survive. Lower-priority scratchpad, logs, reflections, and escalations clear from the prompt first. Every included, cleared, or truncated section and every dropped character is persisted; no artifact is deleted.
+
+Validation contract: scheduler unit proof stays within budget; negative proof retains goal/open tasks while stale tool output clears; a long scripted-provider fixture refuses oversized prompts and must still reach terminal success; persisted context bundle exposes actual prompt chars/tokens, budget, included/cleared/truncated sections, dropped chars, and compaction reason. Regression gates cover compile, smoke, Tier-3, Tier-4, E2E, visual, and package. Live-model uplift is not claimed without a fresh live run.
+
+Implemented result: `assemblePromptWithinBudget` now bounds named prompt sections under a 96,000-character working-set budget for a 32k-class model with reserve. Goal, active task, role/tool contract, task guidance, and open tasks are required; optional known-file/retrieval state and stale scratchpad/log/reflection/escalation outputs clear by priority when they do not fit. `ContextBundle` persists prompt budget/size/token estimate, included/cleared/truncated sections, dropped characters, and reason; `RunStats` counts compactions and cleared tool-result sections. A 140k-character goal fixture held all three provider prompts to exactly 96,000 characters, retained goal/task/open-task markers, edited a failing file, passed tests, and terminaled success with persisted accounting. Validation first exposed and fixed a fair-share defect where short required sections were falsely truncated and unused budget was not reallocated. Compile, smoke, E2E, visual, package, mocked Tier-3 architect 5/5, and expected pattern-blind Tier-4 0/4 pass. Installed Antigravity version is `kennyg.forge-agent@0.58.1`. Live uplift remains unclaimed because the current shell has no OpenRouter credential.
+
+Non-goals: embeddings, semantic retrieval, model-written summaries, isolated worker memory, changing eval truncation physics, or claiming 32k live improvement from a synthetic proof.
+
 ## Executive Verdict
 
 Forge Agent is now a real VS Code/Antigravity extension with a basic success-harness shape, not a cloned IDE. It has an installable VSIX, compact agent UI, OpenRouter provider layer, typed tool registry, deterministic firewall, persistent run artifacts, an autonomous run command, and an early weak-model eval.
 
-It is not yet a mature success-driven coding agent by the standard of the full research blueprint. The biggest gap is no longer UI or packaging. The biggest gap is harness depth: repair/no-progress/accountability, bounded reflection, a first reviewer diff gate, reviewer critique artifacts, blocking pre-commit review artifacts, verification fixture matrix, bounded escalation routing, first-pass context bundle rehydration, persisted role handoff artifacts, deterministic retrieval candidates, manifest-backed safety checkpoints, command side-effect capture with sanitized command environment metadata, explicit wall-clock/cost budget halts, isolated workspace-copy execution, and a 15-task mocked weak-model eval now exist, but true git worktree execution, OS/container sandboxing, semantic retrieval, and larger live eval coverage are still missing or proof-level.
+It is not yet a mature success-driven coding agent by the standard of the full research blueprint. The deterministic loop, repair gradient, reviewer gates, verification fixtures, budgets, artifact ledgers, role handoffs, worktree isolation, and multi-tier eval harness exist. The remaining hard gaps are repeated durable live evaluation, real-repository use of the worktree path, context engineering and semantic retrieval, true isolated/parallel worker contexts, network side-effect capture, and OS/container sandboxing.
 
 Blunt status: Forge has reached an early Founding-release harness, but not the Quality or Triple-A research target.
 

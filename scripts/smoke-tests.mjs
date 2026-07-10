@@ -37,6 +37,13 @@ assert.match(tools, /sanitizedEnv: true/, 'command results must record sanitized
 assert.match(tools, /blockedEnvKeys/, 'command sandbox must report blocked env key names');
 
 const loop = read('src/harness/loop.ts');
+assert.ok(fs.existsSync(path.join(root, 'src/harness/contextBudget.ts')), 'context budget scheduler module must exist');
+const contextBudget = fs.existsSync(path.join(root, 'src/harness/contextBudget.ts')) ? read('src/harness/contextBudget.ts') : '';
+assert.match(contextBudget, /assemblePromptWithinBudget/, 'context scheduler must expose deterministic prompt assembly');
+assert.match(contextBudget, /required/, 'context scheduler must protect required sections');
+assert.match(contextBudget, /clearedSections/, 'context scheduler must report prompt-only clearing');
+assert.match(contextBudget, /truncatedSections/, 'context scheduler must report deterministic truncation');
+assert.match(contextBudget, /budgetChars/, 'context scheduler must enforce a hard character budget');
 assert.match(loop, /hasGreenEvidence/, 'loop must gate success on green evidence');
 assert.doesNotMatch(loop, /No pending tasks left\. Harness halting/, 'loop must not mark success from task count only');
 assert.match(loop, /ESCALATE_AFTER_REFLECTIONS/, 'loop must define bounded escalation threshold');
@@ -44,6 +51,9 @@ assert.match(loop, /selectModelForTask/, 'loop must route model selection throug
 assert.match(loop, /escalations\.json/, 'loop must persist escalation artifacts');
 assert.match(loop, /context-bundle\.json/, 'loop must persist context bundle artifacts');
 assert.match(loop, /refreshContextBundle/, 'loop must refresh a rehydratable context bundle');
+assert.match(loop, /assemblePromptWithinBudget/, 'product loop must assemble prompts through the context budget scheduler');
+assert.match(loop, /contextCompactions/, 'product loop must count actual context compactions');
+assert.match(loop, /toolResultSectionsCleared/, 'product loop must count cleared stale tool-result sections');
 assert.match(loop, /retrievalPolicy/, 'context bundle must include retrieval policy');
 assert.match(loop, /retrieval-index\.json/, 'loop must persist retrieval index artifacts');
 assert.match(loop, /rankRetrievalCandidates/, 'loop must rank retrieval candidates deterministically');
@@ -190,9 +200,18 @@ assert.match(tier2, /class TimeoutProvider implements Provider/, 'provider timeo
 assert.match(tier2, /persistTierReport\(buildReport/, 'tier eval reports must be flushed after completed tasks');
 assert.match(tier2, /partial: results\.length < tasks\.length/, 'mid-suite reports must be marked partial');
 assert.match(tier2, /completedTaskCount: results\.length/, 'partial reports must expose completed task count');
+assert.match(tier2, /runId: string/, 'tier eval reports must expose a durable run identity');
+assert.match(tier2, /startedAt: string/, 'tier eval reports must expose a stable run start time');
+assert.match(tier2, /archivePath\?: string/, 'tier eval reports must expose an immutable archive path');
+assert.match(tier2, /evals', 'runs', `tier-\$\{tier\}`/, 'tier eval archives must be separated by tier');
+assert.match(tier2, /report\.archivePath/, 'tier eval persistence must write the immutable archive');
 assert.match(read('scripts/weak-model-eval-tier2.mjs'), /--call-timeout-ms/, 'tier-2 CLI must expose provider call timeout control');
 assert.match(read('scripts/weak-model-eval-tier3.mjs'), /--call-timeout-ms/, 'tier-3 CLI must expose provider call timeout control');
 assert.match(read('scripts/weak-model-eval-tier4.mjs'), /--call-timeout-ms/, 'tier-4 CLI must expose provider call timeout control');
+for (const cli of ['scripts/weak-model-eval-tier2.mjs', 'scripts/weak-model-eval-tier3.mjs', 'scripts/weak-model-eval-tier4.mjs']) {
+  assert.match(read(cli), /runId: report\.runId/, `${cli} must print the durable run identity`);
+  assert.match(read(cli), /archivePath: report\.archivePath/, `${cli} must print the immutable archive path`);
+}
 assert.match(read('scripts/weak-model-eval-tier4.mjs'), /providerCallTimeoutMs = 90000/, 'tier-4 live eval must default to a conservative provider timeout');
 
 const tier4 = read('src/harness/weakEvalTier4.ts');

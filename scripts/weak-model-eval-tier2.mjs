@@ -27,6 +27,7 @@ const options = readArgs(process.argv.slice(2));
 const report = await new Tier2EvalRunner().run(options);
 
 console.log(JSON.stringify({
+  runId: report.runId,
   status: report.status,
   tier: report.tier,
   modelId: report.modelId,
@@ -42,7 +43,8 @@ console.log(JSON.stringify({
   providerFailures: report.providerFailures,
   partial: report.partial,
   completedTaskCount: report.completedTaskCount,
-  reportPath: report.reportPath
+  reportPath: report.reportPath,
+  archivePath: report.archivePath
 }, null, 2));
 
 if (!report.reportPath) {

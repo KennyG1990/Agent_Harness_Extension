@@ -1,7 +1,8 @@
 Forge-agent-harness/**
 node_modules/**
 src/**
-scripts/*.mjs
+scripts/**
+docs/**
 artifacts/**
 .forge/**
 .tmp/**
@@ -17,5 +18,11 @@ evidence_ledger.json
 vite.config.*
 tsconfig.json
 package-lock.json
+.gitignore
+BUILD_LOG.md
+FORGE_UI_SPEC.md
+HANDOFF_OPUS.md
+RESEARCH_IMPLEMENTATION_GAP_ANALYSIS.md
+out/test/**
 OpenRouter First Blueprint for a Success Driven AI Coding IDE__.md
 OpenRouter First Blueprint for a Success Driven AI Coding Agent FULL RESEARCH.md

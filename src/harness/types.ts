@@ -166,6 +166,14 @@ export interface ContextBundle {
   retrievalPolicy: string[];
   tokenEstimate: number;
   compacted: boolean;
+  promptCharBudget: number;
+  promptChars: number;
+  promptTokenEstimate: number;
+  includedSections: string[];
+  clearedSections: string[];
+  truncatedSections: string[];
+  droppedChars: number;
+  compactionReason?: string;
 }
 
 export interface AarTriggerCounts {
@@ -289,6 +297,8 @@ export interface RunStats {
   contextRefreshes: number;
   roleHandoffRefreshes: number;
   retrievalRefreshes: number;
+  contextCompactions: number;
+  toolResultSectionsCleared: number;
   safetyCheckpoints: number;
   safetyReverts: number;
   commandEffectCaptures: number;

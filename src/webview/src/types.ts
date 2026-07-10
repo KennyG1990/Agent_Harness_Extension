@@ -127,6 +127,14 @@ export interface ContextBundle {
   retrievalPolicy: string[];
   tokenEstimate: number;
   compacted: boolean;
+  promptCharBudget?: number;
+  promptChars?: number;
+  promptTokenEstimate?: number;
+  includedSections?: string[];
+  clearedSections?: string[];
+  truncatedSections?: string[];
+  droppedChars?: number;
+  compactionReason?: string;
 }
 
 export interface RunStats {
@@ -146,6 +154,8 @@ export interface RunStats {
   reviewerApprovals: number;
   escalationCount: number;
   contextRefreshes: number;
+  contextCompactions?: number;
+  toolResultSectionsCleared?: number;
   budgetHalts: number;
   noProgressTurns: number;
   lastProgressSignature: string;

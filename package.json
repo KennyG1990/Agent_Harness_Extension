@@ -1,8 +1,8 @@
 {
   "name": "forge-agent",
   "displayName": "Forge Agent",
-  "description": "Forge Agent Harness VS Code Extension (Phase 57.5: installed Antigravity product proof)",
-  "version": "0.57.5",
+  "description": "Forge Agent Harness VS Code Extension (Phase 53.1: deterministic context budgeting)",
+  "version": "0.58.1",
   "publisher": "kennyg",
   "engines": {
     "vscode": "^1.80.0"

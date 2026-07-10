@@ -19,6 +19,16 @@ export async function run(): Promise<void> {
   const { Firewall } = await import('../../harness/firewall');
   const { WorkspaceTools } = await import('../../harness/tools');
   const { runIsolatedAgentGoal } = await import('../../harness/isolation');
+  const { assemblePromptWithinBudget } = await import('../../harness/contextBudget');
+  const budgetedPrompt = assemblePromptWithinBudget([
+    { id: 'goal', required: true, priority: 100, content: `GOAL-MARKER ${'g'.repeat(1400)}` },
+    { id: 'open-tasks', required: true, priority: 100, content: `OPEN-TASK-MARKER ${'t'.repeat(1400)}` },
+    { id: 'stale-tool-output', priority: 10, toolResult: true, content: `STALE-TOOL-MARKER ${'x'.repeat(5000)}` }
+  ], 1024);
+  assert.ok(budgetedPrompt.promptChars <= 1024, 'context scheduler must enforce its hard prompt budget.');
+  assert.ok(budgetedPrompt.text.includes('GOAL-MARKER') && budgetedPrompt.text.includes('OPEN-TASK-MARKER'), 'required goal and open-task state must survive compaction.');
+  assert.ok(!budgetedPrompt.text.includes('STALE-TOOL-MARKER'), 'stale optional tool output must clear before required state.');
+  assert.ok(budgetedPrompt.clearedSections.includes('stale-tool-output'), 'cleared tool output must be explicitly accounted.');
   const loop = new AgentHarnessLoop();
   let state = await loop.initializeHarness('Validate fixture workspace.');
   assert.ok(state.sessionId, 'state should include a session id.');
@@ -52,6 +62,8 @@ export async function run(): Promise<void> {
   assert.ok(state.runStats.contextRefreshes > 0, 'context bundle refreshes should be counted.');
   assert.ok(state.runStats.roleHandoffRefreshes > 0, 'role handoff refreshes should be counted.');
   assert.ok(state.runStats.retrievalRefreshes > 0, 'retrieval refreshes should be counted.');
+  assert.ok(typeof state.runStats.contextCompactions === 'number', 'context compactions should be counted.');
+  assert.ok(typeof state.runStats.toolResultSectionsCleared === 'number', 'cleared tool-result sections should be counted.');
   assert.ok(state.runStats.safetyCheckpoints > 0, 'mutating proposals should create safety checkpoints.');
   assert.ok(Object.keys(state.roleHandoffs || {}).length > 0, 'role handoffs should be captured during a real run.');
   assert.ok(state.safetyCheckpoints.some((checkpoint: any) => checkpoint.manifestPath && checkpoint.protectedPaths?.length), 'safety checkpoints should include manifest paths and protected path scopes.');
@@ -59,6 +71,10 @@ export async function run(): Promise<void> {
   assert.equal(persistedContext.goal, state.goalContract.goal, 'context bundle should rehydrate the goal.');
   assert.ok(Array.isArray(persistedContext.openTasks), 'context bundle should persist open task state.');
   assert.ok(Array.isArray(persistedContext.retrievalCandidates) && persistedContext.retrievalCandidates.length > 0, 'context bundle should persist retrieval candidates.');
+  assert.ok(typeof persistedContext.promptCharBudget === 'number' && persistedContext.promptCharBudget > 0, 'context bundle should persist the prompt budget.');
+  assert.ok(typeof persistedContext.promptChars === 'number' && persistedContext.promptChars <= persistedContext.promptCharBudget, 'persisted prompt accounting must stay within budget.');
+  assert.ok(Array.isArray(persistedContext.includedSections), 'context bundle should persist included prompt sections.');
+  assert.ok(Array.isArray(persistedContext.clearedSections), 'context bundle should persist cleared prompt sections.');
   const persistedRetrieval = JSON.parse(fs.readFileSync(path.join(workspace, '.forge', 'retrieval-index.json'), 'utf8'));
   assert.ok(Array.isArray(persistedRetrieval) && persistedRetrieval.some((candidate: any) => typeof candidate.path === 'string' && typeof candidate.score === 'number'), 'retrieval index should persist scored file candidates.');
   const persistedHandoffs = JSON.parse(fs.readFileSync(path.join(workspace, '.forge', 'role-handoffs.json'), 'utf8'));
