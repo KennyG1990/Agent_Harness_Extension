@@ -1,0 +1,21 @@
+Forge-agent-harness/**
+node_modules/**
+src/**
+scripts/*.mjs
+artifacts/**
+.forge/**
+.tmp/**
+.vscode-test/**
+.vscode/**
+*.vsix
+*.map
+**/*.map
+PLAN.md
+SCRATCHPAD.md
+todos.json
+evidence_ledger.json
+vite.config.*
+tsconfig.json
+package-lock.json
+OpenRouter First Blueprint for a Success Driven AI Coding IDE__.md
+OpenRouter First Blueprint for a Success Driven AI Coding Agent FULL RESEARCH.md

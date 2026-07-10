@@ -1,0 +1,164 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;550;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Inter", var(--font-sans);
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+
+  /* Small radii - 2px to 4px instead of rounded pills */
+  --radius-lg: 3px;
+  --radius-md: 2px;
+  --radius-sm: 1px;
+  --radius: 2px;
+  --radius-full: 2px;
+
+  /* Near black dark theme background */
+  --color-slate-950: #0d0d10;
+  --color-slate-900: #141416;
+  --color-slate-850: #1b1b1f;
+  --color-slate-800: #222227;
+  --color-slate-750: #27272d;
+  --color-slate-700: #2e2e35;
+  --color-slate-600: #52525b;
+  --color-slate-500: #71717a;
+  --color-slate-400: #a1a1aa;
+  --color-slate-300: #d4d4d8;
+  --color-slate-200: #e4e4e7;
+  --color-slate-100: #f4f4f5;
+
+  /* Retrained desaturated blue accent mapping */
+  --color-indigo-600: #3b698f;
+  --color-indigo-500: #4a7ba5;
+  --color-indigo-400: #5e8fba;
+  --color-indigo-300: #7fa8cd;
+  --color-indigo-200: #abc6df;
+  --color-indigo-100: #d5e3f1;
+
+  /* Kill saturated pink/violet/fuchsia/purple - map to desaturated blue check/tabs */
+  --color-pink-600: #3b698f;
+  --color-pink-500: #4a7ba5;
+  --color-pink-400: #5e8fba;
+  
+  --color-fuchsia-600: #3b698f;
+  --color-fuchsia-500: #4a7ba5;
+  --color-fuchsia-400: #5e8fba;
+
+  --color-purple-600: #3b698f;
+  --color-purple-500: #4a7ba5;
+  --color-purple-400: #5e8fba;
+
+  --color-violet-600: #3b698f;
+  --color-violet-500: #4a7ba5;
+  --color-violet-400: #5e8fba;
+
+  --color-cyan-600: #3b698f;
+  --color-cyan-500: #4a7ba5;
+  --color-cyan-400: #5e8fba;
+
+  --color-blue-600: #3b698f;
+  --color-blue-500: #4a7ba5;
+  --color-blue-400: #5e8fba;
+
+  /* Muted semantic states - desaturated green/red/amber */
+  --color-emerald-600: #274b35;
+  --color-emerald-500: #356346;
+  --color-emerald-450: #3f7352;
+  --color-emerald-400: #4e8a64;
+  --color-emerald-300: #6cae84;
+
+  --color-rose-600: #6b2d2d;
+  --color-rose-500: #8c3b3b;
+  --color-rose-450: #9e4343;
+  --color-rose-400: #b55353;
+  --color-rose-300: #d67a7a;
+
+  --color-amber-600: #664b21;
+  --color-amber-500: #85612a;
+  --color-amber-450: #9c7231;
+  --color-amber-400: #b8873a;
+  --color-amber-300: #dbab5b;
+}
+
+/* Custom fade-in animations etc. */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(2px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.15s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Custom scrollbars - IDE Style */
+.scrollbar-thin::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: #0d0d10;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: #222227;
+  border-radius: 2px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: #2e2e35;
+}
+
+/* Global inputs resetting */
+input, textarea, select {
+  font-family: inherit;
+}
+
+.forge-primary,
+.forge-secondary,
+.forge-link-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  border-radius: 3px;
+  padding: 0.5rem 0.625rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1rem;
+  transition: border-color 120ms ease, background-color 120ms ease, color 120ms ease;
+}
+
+.forge-primary {
+  border: 1px solid #dfff2e;
+  background: #dfff2e;
+  color: #050505;
+}
+
+.forge-primary:disabled,
+.forge-secondary:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.forge-secondary {
+  border: 1px solid #2e2e35;
+  background: #202024;
+  color: #d4d4d8;
+}
+
+.forge-secondary:hover:not(:disabled),
+.forge-link-button:hover {
+  border-color: #4a7ba5;
+  background: #222227;
+  color: #f4f4f5;
+}
+
+.forge-link-button {
+  width: 100%;
+  justify-content: flex-start;
+  border: 1px solid #222227;
+  background: #0c0c0f;
+  color: #d4d4d8;
+}
+

@@ -1,0 +1,238 @@
+{
+  "name": "forge-agent",
+  "displayName": "Forge Agent",
+  "description": "Forge Agent Harness VS Code Extension (Phase 57.5: installed Antigravity product proof)",
+  "version": "0.57.5",
+  "publisher": "kennyg",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onView:forge-agent.studio",
+    "onCommand:forge-agent.openStudio",
+    "onCommand:forge-agent.diagnostics",
+    "onCommand:forge-agent.runBlueprintProof",
+    "onCommand:forge-agent.runBlueprintProofMatrix",
+    "onCommand:forge-agent.getProofReport",
+    "onCommand:forge-agent.runWeakModelEval",
+    "onCommand:forge-agent.runVerificationFixtureMatrix",
+    "onCommand:forge-agent.getWeakModelEvalReport",
+    "onCommand:forge-agent.openArtifact",
+    "onCommand:forge-agent.openNativeSettings",
+    "onCommand:forge-agent.openTerminal",
+    "onCommand:forge-agent.openDiff",
+    "onCommand:forge-agent.chat",
+    "onCommand:forge-agent.runAgentGoal",
+    "onCommand:forge-agent.runIsolatedAgentGoal",
+    "onCommand:forge-agent.runReflectionAbEval",
+    "onCommand:forge-agent.setGoal",
+    "onCommand:forge-agent.pauseGoal",
+    "onCommand:forge-agent.resumeGoal",
+    "onCommand:forge-agent.steerGoal",
+    "onCommand:forge-agent.resumeAgentGoal"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "forge-agent.openStudio",
+        "title": "Forge Studio: Open Panel"
+      },
+      {
+        "command": "forge-agent.diagnostics",
+        "title": "Forge Studio: Diagnostics"
+      },
+      {
+        "command": "forge-agent.runBlueprintProof",
+        "title": "Forge Studio: Run Blueprint Proof"
+      },
+      {
+        "command": "forge-agent.runBlueprintProofMatrix",
+        "title": "Forge Studio: Run Blueprint Proof Matrix"
+      },
+      {
+        "command": "forge-agent.getProofReport",
+        "title": "Forge Studio: Get Proof Report"
+      },
+      {
+        "command": "forge-agent.runWeakModelEval",
+        "title": "Forge Studio: Run Weak Model Eval"
+      },
+      {
+        "command": "forge-agent.runVerificationFixtureMatrix",
+        "title": "Forge Studio: Run Verification Fixture Matrix"
+      },
+      {
+        "command": "forge-agent.getWeakModelEvalReport",
+        "title": "Forge Studio: Get Weak Model Eval Report"
+      },
+      {
+        "command": "forge-agent.openArtifact",
+        "title": "Forge Agent: Open Artifact"
+      },
+      {
+        "command": "forge-agent.openNativeSettings",
+        "title": "Forge Agent: Open Native Settings"
+      },
+      {
+        "command": "forge-agent.openTerminal",
+        "title": "Forge Agent: Open Native Terminal"
+      },
+      {
+        "command": "forge-agent.openDiff",
+        "title": "Forge Agent: Open Native Diff"
+      },
+      {
+        "command": "forge-agent.chat",
+        "title": "Forge Agent: Chat"
+      },
+      {
+        "command": "forge-agent.runAgentGoal",
+        "title": "Forge Agent: Run Goal"
+      },
+      {
+        "command": "forge-agent.runIsolatedAgentGoal",
+        "title": "Forge Agent: Run Isolated Goal"
+      },
+      {
+        "command": "forge-agent.runReflectionAbEval",
+        "title": "Forge Agent: Run Reflection A/B Eval"
+      },
+      {
+        "command": "forge-agent.setGoal",
+        "title": "Forge Agent: Set Goal (/goal)"
+      },
+      {
+        "command": "forge-agent.pauseGoal",
+        "title": "Forge Agent: Pause Goal"
+      },
+      {
+        "command": "forge-agent.resumeGoal",
+        "title": "Forge Agent: Resume Goal"
+      },
+      {
+        "command": "forge-agent.steerGoal",
+        "title": "Forge Agent: Steer Goal Mid-Run"
+      },
+      {
+        "command": "forge-agent.resumeAgentGoal",
+        "title": "Forge Agent: Resume Goal Run From Disk"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "forge-agent-container",
+          "title": "Forge Agent",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "forge-agent-container": [
+        {
+          "type": "webview",
+          "id": "forge-agent.studio",
+          "name": "Forge Studio"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Forge Agent Settings",
+      "properties": {
+        "forge.openRouterApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "API Key for OpenRouter"
+        },
+        "forge.providerDefault": {
+          "type": "string",
+          "default": "openrouter",
+          "enum": ["openrouter", "openai-compatible"],
+          "description": "Default model provider."
+        },
+        "forge.maxCostUsd": {
+          "type": "number",
+          "default": 1,
+          "description": "Budget cap: halt the run (as gave_up) once provider spend reaches this many USD."
+        },
+        "forge.maxWallClockMinutes": {
+          "type": "number",
+          "default": 30,
+          "description": "Budget cap: halt the run once wall-clock exceeds this many minutes."
+        },
+        "forge.maxSteps": {
+          "type": "number",
+          "default": 30,
+          "description": "Maximum harness steps per run."
+        },
+        "forge.reflectionEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Bounded reflection: on failures, feed the reason back and retry (proven +100pt solve-rate delta). Disable only for A/B experiments."
+        },
+        "forge.architectModel": {
+          "type": "string",
+          "default": "",
+          "description": "Optional stronger planning model for architect-mode evals (plan big, execute small)."
+        },
+        "forge.openAiCompatibleBaseUrl": {
+          "type": "string",
+          "default": "http://localhost:11434/v1",
+          "description": "OpenAI-compatible fallback endpoint."
+        },
+        "forge.defaultCodingModel": {
+          "type": "string",
+          "default": "openrouter/pareto-code",
+          "description": "Default coding model route."
+        },
+        "forge.defaultMixedModel": {
+          "type": "string",
+          "default": "openrouter/auto",
+          "description": "Default mixed/non-coding model route."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "build": "tsc -p ./tsconfig.json && vite build",
+    "watch": "tsc -watch -p ./tsconfig.json",
+    "compile": "tsc -p ./tsconfig.json && vite build",
+    "test": "node scripts/smoke-tests.mjs",
+    "test:e2e": "node scripts/e2e-smoke.mjs",
+    "test:visual": "node scripts/visual-smoke.mjs",
+    "eval": "npm run compile && node scripts/weak-model-eval.mjs",
+    "eval:reflection": "npm run compile && node scripts/reflection-ab-eval.mjs",
+    "eval:tier2": "npm run compile && node scripts/weak-model-eval-tier2.mjs",
+    "eval:tier3": "npm run compile && node scripts/weak-model-eval-tier3.mjs",
+    "eval:tier4": "npm run compile && node scripts/weak-model-eval-tier4.mjs",
+    "package": "vsce package --no-dependencies --allow-missing-repository"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.14",
+    "@types/glob": "^8.1.0",
+    "@types/node": "^20.2.5",
+    "@types/react": "^19.0.1",
+    "@types/react-dom": "^19.0.1",
+    "@types/vscode": "^1.80.0",
+    "@vitejs/plugin-react": "^5.0.4",
+    "@vscode/test-electron": "^3.0.0",
+    "@vscode/vsce": "^3.9.2",
+    "playwright": "^1.61.0",
+    "tailwindcss": "^4.1.14",
+    "typescript": "^5.1.3",
+    "vite": "^6.2.3"
+  },
+  "dependencies": {
+    "@google/genai": "^2.4.0",
+    "dotenv": "^17.2.3",
+    "lucide-react": "^0.546.0",
+    "motion": "^12.23.24",
+    "react": "^19.0.1",
+    "react-dom": "^19.0.1"
+  }
+}

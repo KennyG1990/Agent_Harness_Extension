@@ -1,0 +1,525 @@
+# Forge Agent Build Log
+
+Environment: Windows, workspace `F:\DEV_ENV\projects\Agent_Harness_Extension`
+Git: not a repository, commit/hash unavailable.
+
+## 2026-06-22 Slim Sidebar Refactor
+
+- Phase 0 - `npm run compile` - PASS - no git repository / sha unavailable
+  - `tsc -p ./tsconfig.json && vite build` exited 0.
+  - Extension host and slim webview assets emitted under `out/`.
+- Phase 1 - `npm run test` - PASS - no git repository / sha unavailable
+  - Static invariants verified OpenRouter routing, JSON schema response format, firewall/patch safety, oracle-gated success, proof report fields, native host commands, and absence of cloned IDE webview selectors/components in `App.tsx`.
+- Phase 2 - `npm run test:e2e` - PASS - no git repository / sha unavailable
+  - VS Code Extension Development Host activated Forge Agent.
+  - Fixture run produced `.forge` artifacts, green evidence, latest proof report, native artifact opens, native terminal creation, and diff artifact/native diff fallback.
+- Phase 3 - `npm run test:visual` - PASS - no git repository / sha unavailable
+  - Playwright clicked Run -> Proof -> Settings in the compact sidebar.
+  - Screenshot artifact: `artifacts/visual-smoke.png`.
+- Phase 4 - `npm run build` - PASS - no git repository / sha unavailable
+  - `tsc -p ./tsconfig.json && vite build` exited 0.
+- Phase 5 - `npm run package` - PASS - no git repository / sha unavailable
+  - Output: `forge-agent-0.0.1.vsix`, 27 files, 115.02 KB.
+  - VSIX includes runtime files only: `out/`, `media/icon.svg`, `package.json`, `BUILD_LOG.md`, and `scripts/proof-api-usage.md`.
+- Phase 8 - OpenRouter catalog/search refactor - PASS - no git repository / sha unavailable
+  - Removed the 75-model OpenRouter catalog cap.
+  - Added refreshable searchable model pickers for coding, planning, and review roles.
+  - Static invariants verify picker selectors and role-ranking logic.
+- Phase 9 - Agent chat surface - PASS - no git repository / sha unavailable
+  - Added `forge-agent.chat` and a compact Run-tab chat panel.
+  - Chat uses the configured provider/model path and is advisory only; mutations still require the firewalled run loop.
+  - `npm run compile`, `npm run test`, `npm run test:e2e`, `npm run test:visual`, and `npm run package` exited 0.
+- Phase 10 - Default UI simplification - PASS - no git repository / sha unavailable
+  - Reduced the Run tab to chat, compact goal/start controls, and one status line.
+  - Moved run internals, firewall details, logs, evidence, and artifact links behind collapsed detail sections.
+  - `npm run compile`, `npm run test`, `npm run test:e2e`, `npm run test:visual`, and `npm run package` exited 0.
+- Phase 11 - Bottom composer UI - PASS - no git repository / sha unavailable
+  - Removed the second visible goal input from the default Run view.
+  - Moved chat to a bottom composer with role/model/inference chips and compact action icons for run, step, proof, settings, artifacts, and send.
+  - `npm run compile`, `npm run test`, `npm run test:e2e`, `npm run test:visual`, and `npm run package` exited 0.
+- Phase 12 - KLIO composer function gap pass - PASS - no git repository / sha unavailable
+  - Added role menu, searchable model menu with favorites, inference menu, indexing status action, permission toggle, prompt enhancement, and voice input hook.
+  - Composer chat now routes through the selected role/model/inference context.
+  - `npm run compile`, `npm run test`, `npm run test:e2e`, `npm run test:visual`, and `npm run package` exited 0.
+- Phase 13 - Settings dropdown cleanup - PASS - no git repository / sha unavailable
+  - Collapsed settings model pickers by default.
+  - Searchable model lists now open only when the user expands a picker.
+  - `npm run compile`, `npm run test`, `npm run test:e2e`, `npm run test:visual`, and `npm run package` exited 0.
+- Phase 14 - Weak-model harness eval - PASS - no git repository / sha unavailable
+  - Added `forge-agent.runWeakModelEval`, `forge-agent.getWeakModelEvalReport`, `npm run eval`, and Proof-tab controls for the weak-model scorecard.
+  - Weak selector prefers cheap/small legacy candidates such as `qwen/qwen2.5-coder-7b-instruct` and explicitly excludes routers, frontier models, and new agentic coding specialists.
+  - `npm run eval -- --model qwen/qwen2.5-coder-7b-instruct` exited 0.
+  - Offline mocked scorecard: `bareSolved=1`, `harnessSolved=5`, `solveRateDelta=0.8`, `actuallyModelDriven=5`, `fallbackSolved=0`.
+  - Scorecard artifact: `.forge/evals/latest-weak-model-eval.json`.
+- Phase 15 - OpenRouter catalog sorting - PASS - no git repository / sha unavailable
+  - Verified live OpenRouter `/api/v1/models` returned 340 models from this machine.
+  - Added provider metadata for prompt price, completion price, created timestamp, and supported parameters.
+  - Added model sort controls for recommended role fit, largest context, reasoning rank, coding rank, lowest cost, and newest in composer/settings model pickers.
+  - Raised picker display windows from tiny slices to 80 visible ranked entries while search still scans the full loaded catalog.
+  - `npm run compile`, `npm run test`, `npm run test:e2e`, `npm run test:visual`, `npm run eval -- --model qwen/qwen2.5-coder-7b-instruct`, and `npm run package` exited 0.
+- Phase 16 - OpenRouter partial-catalog hardening - PASS - no git repository / sha unavailable
+  - Verified the configured Antigravity OpenRouter key returns 340 models from `/api/v1/models` outside the extension host.
+  - Updated provider catalog refresh to merge authenticated and anonymous OpenRouter catalog responses, preventing a partial authenticated response from shrinking the UI list.
+  - Corrected cost sorting so actual free models sort as free while unknown/special pricing displays as `$?`.
+  - Compiled provider check returned `count=340`.
+  - `npm run compile`, `npm run test`, `npm run test:e2e` rerun, `npm run test:visual`, and `npm run eval -- --model qwen/qwen2.5-coder-7b-instruct` exited 0.
+- Phase 17 - Real agent loop agency - PASS - no git repository / sha unavailable
+  - Replaced the test-only default task graph with inspect, plan, edit, verify, and evidence phases.
+  - The run button now starts `run-agent-loop`, which drives firewalled steps to terminal success/failure instead of stopping after initialization.
+  - Added `forge-agent.runAgentGoal` command API for end-to-end autonomous goal runs.
+  - Tool results are captured into `SCRATCHPAD.md`, `.forge/state.json`, and `state.files` so later proposals have workspace memory.
+  - Proof runner now exercises the full loop to terminal state with Explorer/Architect/Editor/Reviewer bindings.
+  - `npm run compile`, `npm run test`, `npm run test:e2e`, `npm run test:visual`, and `npm run eval -- --model qwen/qwen2.5-coder-7b-instruct` exited 0.
+- Phase 18 - Agency accountability hardening - PASS - no git repository / sha unavailable
+  - Persisted normal-run stats in `.forge/state.json`: provider calls/failures, model-driven proposals, fallback proposals/actions, repair attempts, schema failures, validation failures, no-progress turns, and `actuallyModelDriven`.
+  - Added bounded JSON/schema repair retries before deterministic fallback.
+  - Added no-progress detection with honest `gave_up` after repeated unchanged state.
+  - Added compact Run-console counters: tests, model proposals, fallback actions, and repair attempts.
+  - Extension-host tests now force malformed provider output and verify the repaired response counts as model-driven rather than fallback.
+  - `npm run compile`, `npm run test`, `npm run test:e2e`, `npm run test:visual`, `npm run eval -- --model qwen/qwen2.5-coder-7b-instruct`, and `npm run package` exited 0.
+  - Visual evidence: `artifacts/visual-smoke-run.png` and `artifacts/visual-smoke.png`.
+  - VSIX output: `forge-agent-0.0.1.vsix`, 20 files, 122.88 KB.
+- Phase 19 - Bounded reflection retries - PASS - no git repository / sha unavailable
+  - Added persisted reflection entries for firewall rejection, tool failure, and red-oracle failure.
+  - Reflection entries are appended to `SCRATCHPAD.md`, persisted in `.forge/state.json`, exposed through run stats, and included in the next proposal prompt.
+  - Added bounded reflection counters: total, firewall, tool-failure, and oracle reflections.
+  - Extension-host tests now verify firewall reflection and failing-verification reflection avoid immediate terminal failure while the cap remains.
+  - Visual smoke injects a reflected run state and captures the compact status line showing `reflect 1`.
+  - `npm run compile`, `npm run test`, `npm run test:e2e`, `npm run test:visual`, `npm run eval -- --model qwen/qwen2.5-coder-7b-instruct`, and `npm run package` exited 0.
+  - Visual evidence: `artifacts/visual-smoke-run.png` and `artifacts/visual-smoke.png`.
+  - VSIX output: `forge-agent-0.0.1.vsix` from the final package command.
+- Phase 20 - Reviewer diff gate - PASS - no git repository / sha unavailable
+  - Added persisted diff review entries and `.forge/diff-reviews.json`.
+  - Final success now requires green oracle evidence and a reviewer diff gate.
+  - The deterministic fallback path requests `get_diff` before final evidence/success when review evidence is missing.
+  - Evidence entries include the latest reviewed diff excerpt when relevant.
+  - Extension-host tests verify successful runs include reviewer approval and persisted diff-review artifacts.
+  - Visual smoke injects a reviewer-approved run state and captures the compact status line showing `review 1`.
+  - `npm run compile`, `npm run test`, `npm run test:e2e`, `npm run test:visual`, and `npm run eval -- --model qwen/qwen2.5-coder-7b-instruct` exited 0.
+  - Visual evidence: `artifacts/visual-smoke-run.png` and `artifacts/visual-smoke.png`.
+- Phase 21 - Verification fixture matrix - PASS - no git repository / sha unavailable
+  - Split typecheck/build oracle handling from lint oracle handling.
+  - Added `runVerificationFixtureMatrix` with disposable cases for passing tests, failing tests, missing test suite, typecheck failure, lint failure, malformed patch, out-of-workspace path, and blocked command rejection.
+  - Added `forge-agent.runVerificationFixtureMatrix`, Proof-tab controls, and native artifact open path for `.forge/verification-fixture-matrix.json`.
+  - Extension-host tests verify all 8 fixture cases and persisted matrix artifact.
+  - Visual smoke captures the Proof tab showing verification fixture matrix `PASS` with 8 cases.
+  - `npm run compile`, `npm run test`, `npm run test:e2e`, `npm run test:visual`, `npm run eval -- --model qwen/qwen2.5-coder-7b-instruct`, and `npm run package` exited 0.
+  - Visual evidence: `artifacts/visual-smoke-proof.png`.
+- Phase 22 - Bounded escalation routing - PASS - no git repository / sha unavailable
+  - Added escalation entries, `.forge/escalations.json`, escalation counters, and run status `esc`.
+  - After repeated reflection-triggering failures, the next provider proposal routes to `Escalation`, `escalation`, `review`, or `Reviewer` model binding instead of the weak/code binding.
+  - Extension-host tests force two firewall reflections and verify the third provider call uses the escalation model.
+  - Visual smoke captures the Run console showing `esc 1`.
+  - `npm run compile`, `npm run test`, `npm run test:e2e`, `npm run test:visual`, and `npm run eval -- --model qwen/qwen2.5-coder-7b-instruct` exited 0.
+  - Visual evidence: `artifacts/visual-smoke-run.png`.
+- Phase 23 - Unsolvable fixture and Node matrix portability - PASS - no git repository / sha unavailable
+  - Added `unsolvable-step-cap` to the verification fixture matrix.
+  - The fixture proves an exhausted run terminates as `gave_up` and does not record green evidence.
+  - Fixed `AgentHarnessLoop` to lazy-load VS Code APIs so `verificationMatrix.js` can also run from plain Node.
+  - Repo-local matrix artifact now reports 9 passing cases at `.forge/verification-fixture-matrix.json`.
+  - Visual smoke captures the Proof tab showing verification fixture matrix `PASS` with 9 cases.
+  - `npm run compile`, `npm run test`, `npm run test:e2e`, `npm run test:visual`, `npm run eval -- --model qwen/qwen2.5-coder-7b-instruct`, `npm run package`, and a direct Node matrix run exited 0.
+  - Visual evidence: `artifacts/visual-smoke-proof.png`.
+- Phase 24 - Context bundle rehydration - PASS - no git repository / sha unavailable
+  - Added persisted `.forge/context-bundle.json`.
+  - Context bundle includes goal, active/open tasks, recent files, recent reflections, escalations, reviewer notes, scratchpad summary, retrieval policy, token estimate, and compaction flag.
+  - Proposal prompts now consume the context bundle instead of assembling all context ad hoc.
+  - Added native artifact open path `context`.
+  - Extension-host tests verify context bundle persistence, goal rehydration, open task rehydration, retrieval policy, and native editor open.
+  - Visual smoke captures the Run console showing `ctx 2`.
+  - `npm run compile`, `npm run test`, `npm run test:e2e`, `npm run test:visual`, and `npm run eval -- --model qwen/qwen2.5-coder-7b-instruct` exited 0.
+  - Visual evidence: `artifacts/visual-smoke-run.png`.
+- Phase 25 - Role handoff artifacts - PASS - no git repository / sha unavailable
+  - Added `RoleHandoff` state with active role, scoped allowed tools, responsibilities, role-open tasks, recent context, and handoff summary.
+  - Proposal prompts now consume the active role's handoff slice.
+  - Persisted `.forge/role-handoffs.json` and added native artifact open path `handoffs`.
+  - Added compact Run-console counter `hand` instead of a new always-visible panel.
+  - Extension-host tests verify role handoff persistence, allowed tool scopes, native artifact opening, and autonomous-run stats.
+  - Visual smoke captures the Run console showing `hand 1`.
+  - `npm run compile`, `npm run test`, `npm run test:e2e`, `npm run test:visual`, `npm run eval -- --model qwen/qwen2.5-coder-7b-instruct`, and `npm run package` exited 0.
+  - Weak eval summary: model `qwen/qwen2.5-coder-7b-instruct`, mocked 5-task run, bare solved 1/5, harness solved 5/5, fallback solved 0.
+  - Visual evidence: `artifacts/visual-smoke-run.png`.
+  - VSIX output: `forge-agent-0.0.1.vsix`, 21 files, 132.99 KB after final log-only repackage.
+- Phase 26 - Deterministic retrieval index - PASS - no git repository / sha unavailable
+  - Added `RetrievalCandidate` entries to the context bundle.
+  - Added deterministic lexical ranking from goal/task text across workspace files while excluding dependencies, build output, `.git`, `.forge`, test runtime, and visual artifacts.
+  - Proposal prompts now include ranked retrieval candidates before unrelated file reads.
+  - Persisted `.forge/retrieval-index.json` and added native artifact open path `retrieval`.
+  - Added compact Run-console counter `ret`.
+  - Extension-host tests verify retrieval candidates persist in `.forge/context-bundle.json`, `.forge/retrieval-index.json` contains scored file candidates, native artifact opening works, and autonomous-run stats expose retrieval refreshes.
+  - Visual smoke captures the Run console showing `ret 1`.
+  - `npm run compile`, `npm run test`, `npm run test:e2e`, `npm run test:visual`, `npm run eval -- --model qwen/qwen2.5-coder-7b-instruct`, and `npm run package` exited 0.
+  - Weak eval summary: model `qwen/qwen2.5-coder-7b-instruct`, mocked 5-task run, bare solved 1/5, harness solved 5/5, fallback solved 0.
+  - Visual evidence: `artifacts/visual-smoke-run.png`.
+  - VSIX output: `forge-agent-0.0.1.vsix`.
+- Phase 27 - Manifest-backed safety checkpoints - PASS - no git repository / sha unavailable
+  - Replaced opaque checkpoint ids with persisted checkpoint records containing strategy, proposal name, protected paths, manifest path, and timestamp.
+  - Added targeted file snapshots for path-scoped mutations and workspace snapshots for broader mutating proposals.
+  - Checkpoint manifests persist under `.forge/checkpoints/<id>/manifest.json`; the run-level ledger persists under `.forge/safety-checkpoints.json`.
+  - Added native artifact open path `safety` and compact Run-console counter `safe`.
+  - Extension-host tests verify targeted checkpoint restore returns original file content, normal runs persist safety checkpoint manifests, native artifact opening works, and autonomous-run stats expose safety checkpoints.
+  - Visual smoke captures the Run console showing `safe 1`.
+  - `npm run compile`, `npm run test`, `npm run test:e2e`, `npm run test:visual`, `npm run eval -- --model qwen/qwen2.5-coder-7b-instruct`, and `npm run package` exited 0.
+  - Weak eval summary: model `qwen/qwen2.5-coder-7b-instruct`, mocked 5-task run, bare solved 1/5, harness solved 5/5, fallback solved 0.
+  - Visual evidence: `artifacts/visual-smoke-run.png`.
+  - VSIX output: `forge-agent-0.0.1.vsix`.
+- Phase 28 - Reviewer critique artifacts - PASS - no git repository / sha unavailable
+  - Added `ReviewerCritiqueEntry` state and `.forge/reviewer-critiques.json`.
+  - `get_diff` now records both the deterministic diff-review gate and a reviewer critique artifact.
+  - If `review` or `Reviewer` model binding is configured, the harness requests structured JSON critique from that model; otherwise it records an explicit deterministic fallback critique.
+  - Added native artifact open path `critiques` and compact Run-console counter `crit`.
+  - Extension-host tests verify deterministic critique persistence, configured reviewer-model critique with fake provider, native artifact opening, and autonomous-run critique stats.
+  - Visual smoke captures the Run console showing `crit 1`.
+  - `npm run compile`, `npm run test`, `npm run test:e2e`, `npm run test:visual`, `npm run eval -- --model qwen/qwen2.5-coder-7b-instruct`, and `npm run package` exited 0.
+  - Weak eval summary: model `qwen/qwen2.5-coder-7b-instruct`, mocked 5-task run, bare solved 1/5, harness solved 5/5, fallback solved 0.
+  - Visual evidence: `artifacts/visual-smoke-run.png`.
+  - VSIX output: `forge-agent-0.0.1.vsix`.
+- Phase 29 - Blocking pre-commit review - PASS - no git repository / sha unavailable
+  - Added `PreCommitReviewEntry` state and `.forge/precommit-reviews.json`.
+  - Mutating proposals now create a pre-commit review after deterministic firewall validation and before COMMIT.
+  - If `review` or `Reviewer` model binding is configured, the harness requests structured JSON pre-commit review from that model; otherwise it records deterministic approval after schema/scope/policy/applicability validation.
+  - A model response of `blocked` prevents filesystem mutation, increments `preCommitBlocks`, records the review artifact, and queues bounded reflection.
+  - Added native artifact open path `precommit` and compact Run-console counter `pre`.
+  - Extension-host tests verify normal pre-commit review persistence, native artifact opening, autonomous-run stats, and a fake reviewer model blocking an `apply_patch` before the target file changes.
+  - Visual smoke captures the Run console showing `pre 1`.
+  - `npm run compile`, `npm run test`, `npm run test:e2e`, `npm run test:visual`, `npm run eval -- --model qwen/qwen2.5-coder-7b-instruct`, and `npm run package` exited 0.
+  - Weak eval summary: model `qwen/qwen2.5-coder-7b-instruct`, mocked 5-task run, bare solved 1/5, harness solved 5/5, fallback solved 0.
+  - Visual evidence: `artifacts/visual-smoke-run.png`.
+  - VSIX output: `forge-agent-0.0.1.vsix`.
+- Phase 30 - Command side-effect capture - PASS - no git repository / sha unavailable
+  - Added `CommandSideEffectEntry` state and `.forge/command-effects.json`.
+  - `run_command` now snapshots workspace files before and after command execution and records created, modified, and deleted files plus command output excerpt.
+  - Added native artifact open path `commandEffects` and compact Run-console counter `cmd`.
+  - Extension-host tests verify a command-created file appears on disk, is recorded in state, and persists in `.forge/command-effects.json`.
+  - Visual smoke captures the Run console showing `cmd 1`.
+  - `npm run compile`, `npm run test`, `npm run test:e2e`, `npm run test:visual`, `npm run eval -- --model qwen/qwen2.5-coder-7b-instruct`, and `npm run package` exited 0.
+  - Weak eval summary: model `qwen/qwen2.5-coder-7b-instruct`, mocked 5-task run, bare solved 1/5, harness solved 5/5, fallback solved 0.
+  - Visual evidence: `artifacts/visual-smoke-run.png`.
+  - VSIX output: `forge-agent-0.0.1.vsix`.
+- Phase 31 - Expanded weak-model eval benchmark - PASS - no git repository / sha unavailable
+  - Expanded the mocked weak-model disposable benchmark from 5 to 15 fixture tasks.
+  - Added fixture coverage for empty arrays, off-by-one slicing, case-insensitive checks, defaulting, parse validation, dedupe, clamping, promise returns, avoiding input mutation, and non-mutating sort behavior.
+  - Updated the Proof-tab weak-eval action to run 15 tasks and display the scorecard task count.
+  - Static invariant now requires at least 15 weak-eval fixture tasks.
+  - Visual smoke captures the Proof tab showing `Tasks 15`, `Bare solved 1`, `Harness solved 15`, and `Fallback solved 0`.
+  - `npm run compile`, `npm run build`, `npm run test`, `npm run test:e2e`, `npm run test:visual`, `npm run eval -- --model qwen/qwen2.5-coder-7b-instruct`, and `npm run package` exited 0.
+  - Weak eval summary: model `qwen/qwen2.5-coder-7b-instruct`, mocked 15-task run, bare solved 1/15, harness solved 15/15, actually model-driven 15, fallback solved 0.
+  - Scorecard artifact: `.forge/evals/latest-weak-model-eval.json`.
+  - Visual evidence: `artifacts/visual-smoke-proof.png`.
+  - VSIX output: `forge-agent-0.0.1.vsix`.
+- Phase 32 - Explicit run budget caps - PASS - no git repository / sha unavailable
+  - Added `RunBudget` state with `startedAt`, `maxWallClockMs`, `maxCostUsd`, `lastCheckedAt`, and halt reason.
+  - Runs now persist `.forge/budget.json`.
+  - Wall-clock caps halt as `gave_up` before provider calls or tool work.
+  - Cost caps halt as `gave_up` after provider usage is recorded and before validation/commit can mutate files.
+  - Added `budgetHalts` run stat and compact Run-console display for cost cap and halt count.
+  - Added native artifact open path `budget`.
+  - Extension-host tests verify wall-clock halt makes zero provider calls, cost halt blocks an over-budget patch before filesystem mutation, and `.forge/budget.json` persists the halt reason.
+  - Visual smoke captures the Run console showing compact cost/cap status.
+  - `npm run compile`, `npm run test`, `npm run test:e2e`, `npm run test:visual`, and `npm run eval -- --model qwen/qwen2.5-coder-7b-instruct` exited 0.
+  - Weak eval summary: model `qwen/qwen2.5-coder-7b-instruct`, mocked 15-task run, bare solved 1/15, harness solved 15/15, actually model-driven 15, fallback solved 0.
+  - Visual evidence: `artifacts/visual-smoke-run.png`.
+- Phase 33 - Isolated workspace-copy runs - PASS - no git repository / sha unavailable
+  - Added `runIsolatedAgentGoal` API in `src/harness/isolation.ts`.
+  - Added extension command `forge-agent.runIsolatedAgentGoal` and webview bridge command `run-isolated-agent-goal`.
+  - Isolated runs copy the source workspace to a temp root, execute the normal harness against that copy, compare source before/after, and persist `.forge/isolated-runs/latest-isolated-run.json` plus `.forge/isolated-runs/latest-isolated-run.diff`.
+  - Added native artifact open paths `isolatedRun` and `isolatedDiff`.
+  - Added Proof-tab Isolated Run controls and compact report summary.
+  - Extension-host tests verify an isolated patch reaches success in the temp copy, records `src/math.js` as changed, leaves the source workspace file unchanged, and opens the isolated-run report through the native artifact command.
+  - Local isolated smoke command wrote `.forge/isolated-runs/latest-isolated-run.json` with `sourceMutated: false`.
+  - Visual smoke captures the Proof tab showing `Source mutated false`.
+  - `npm run compile`, `npm run test`, `npm run test:e2e`, `npm run test:visual`, `npm run eval -- --model qwen/qwen2.5-coder-7b-instruct`, local isolated smoke, and `npm run package` exited 0.
+  - Weak eval summary: model `qwen/qwen2.5-coder-7b-instruct`, mocked 15-task run, bare solved 1/15, harness solved 15/15, actually model-driven 15, fallback solved 0.
+  - Visual evidence: `artifacts/visual-smoke-proof.png`.
+- Phase 34 - Command process sandbox metadata - PASS - no git repository / sha unavailable
+  - `run_command` now executes with a curated environment allowlist instead of blindly inheriting the host process environment.
+  - Command results carry sandbox metadata: cwd, timeout, duration, exit code, signal, sanitized-env flag, inherited env key count, allowed env key names, and blocked env key names.
+  - `.forge/command-effects.json` now persists the sandbox metadata with file side effects.
+  - Extension-host tests verify `FORGE_SANDBOX_SECRET` is blocked from command inheritance and appears only in blocked env key names, not allowed env key names.
+  - Local command sandbox smoke wrote command-effects evidence where the child process printed `false`, `sanitizedEnv` was true, `blockedSecret` was true, and `allowedSecret` was false.
+  - Added `.vscodeignore` excludes for generated root run artifacts so local proof runs do not contaminate VSIX contents.
+  - `npm run compile`, `npm run test`, `npm run test:e2e`, `npm run test:visual`, `npm run eval -- --model qwen/qwen2.5-coder-7b-instruct`, local command sandbox smoke, and `npm run package` exited 0.
+  - Weak eval summary: model `qwen/qwen2.5-coder-7b-instruct`, mocked 15-task run, bare solved 1/15, harness solved 15/15, actually model-driven 15, fallback solved 0.
+  - Visual evidence: `artifacts/visual-smoke-run.png`.
+- Phase 6 - VS Code install smoke - PASS - no git repository / sha unavailable
+  - `code --install-extension .\forge-agent-0.0.1.vsix --force` exited 0.
+- Phase 7 - Antigravity IDE install smoke - PASS at disk/registry level - no git repository / sha unavailable
+  - Correct executable path checked: `C:\Users\Moshi\AppData\Local\Programs\Antigravity IDE\Antigravity IDE.exe`.
+  - Refreshed extension from the same VSIX at `C:\Users\Moshi\.antigravity-ide\extensions\kennyg.forge-agent-0.0.1`.
+  - Verified refreshed runtime files: `out\extension.js` and `out\webview\assets\index.js`.
+  - Verified registry contains `kennyg.forge-agent` pointing at `kennyg.forge-agent-0.0.1`.
+  - `Antigravity IDE.exe --list-extensions` produced no usable output in this session, so UI open/click proof remains manual.
+- Phase 35 - True git worktree isolated execution - PASS (sandbox gates) / host gates pending - no git repository / sha unavailable
+  - `runIsolatedAgentGoal` now executes git-backed sources in a real detached `git worktree` under a temp root instead of a plain workspace copy.
+  - Dirty source state is overlaid into the worktree before the run: modified tracked files, untracked files, renames, and deletions, recorded as `dirtyFilesOverlaid`.
+  - Report now records `requestedIsolationMode`, `isolationMode`, `isolationFallbackReason`, `baseCommit`, `dirtyFilesOverlaid`, and `sourceDirtyStatusPreserved`.
+  - Non-git sources fall back to workspace-copy isolation with an explicit fallback reason; forcing `isolationMode: 'worktree'` on a non-git source fails honestly with a reasoned error.
+  - Non-kept worktrees are removed with `git worktree remove --force`, temp roots deleted, and registrations pruned with `git worktree prune`.
+  - Source dirty status is captured as normalized `git status --porcelain` before/after (excluding `.forge`) to prove uncommitted local edits and untracked files survive isolated runs.
+  - Extension-host tests added: worktree mode selection, base commit hash, linked `.git` file proof, dirty overlay content, success inside worktree, source non-mutation, dirty-state preservation, registration cleanup after non-kept runs, copy-fallback fields on non-git sources, and forced-worktree rejection.
+  - Static smoke invariants added for worktree add/remove/prune, isolation mode, fallback reason, base commit, dirty overlay, and dirty-status preservation.
+  - Sandbox verification: `tsc -p ./tsconfig.json` exited 0; smoke invariants PASS; standalone behavioral proof of all Phase 35 worktree assertions PASS against `out/harness/isolation.js`; `node scripts/weak-model-eval.mjs --model qwen/qwen2.5-coder-7b-instruct` exited 0.
+  - Weak eval summary: model `qwen/qwen2.5-coder-7b-instruct`, mocked 15-task run, bare solved 1/15, harness solved 15/15, actually model-driven 15, fallback solved 0.
+  - HOST GATES PENDING (Linux sandbox cannot run them: npm registry 403 on Linux esbuild/rollup binaries; only win32 VS Code test archive cached): `npm run compile` (vite build step), `npm run test:e2e`, `npm run test:visual`, `npm run package`. Run these on the Windows host to close out Phase 35.
+  - No UI change in this phase; no new screenshot required.
+- Phase 36 - Reflection A/B eval (blueprint Phase 5 gate) - PASS (sandbox gates) / host gates pending - no git repository / sha unavailable
+  - Suggested commit title: "Phase 36: reflection A/B eval proves harness reflection carries recovery (+1.00 solve-rate delta)".
+  - `HarnessState.reflectionEnabled` (default on) threads through `initializeHarness`; when off, `scheduleReflection` suppresses (counted in `runStats.reflectionSuppressed`) and existing red-oracle/tool-failure halt branches fire.
+  - New `src/harness/reflectionAb.ts`: `runReflectionAbEval` runs the REAL `AgentHarnessLoop` per lane on disposable fixtures; the scripted provider emits a plausible-but-wrong patch first and only produces the correct patch after harness-injected reflection context (`red_oracle:` marker) appears in the prompt, so solving is causally dependent on reflection.
+  - Scorecard persists at `.forge/evals/latest-reflection-ab.json`; CLI `scripts/reflection-ab-eval.mjs` + `npm run eval:reflection`; extension command `forge-agent.runReflectionAbEval`; artifact open path `reflectionAb`; smoke invariants and e2e assertions added.
+  - Verified A/B number: reflection ON solved 5/5; reflection OFF solved 0/5 with 5/5 honest `failed` halts citing the red oracle; solveRateDelta +1.00; off lanes recorded `reflectionSuppressed: 1`, on lanes `reflectionAttempts: 1`.
+  - Sandbox verification (shadow-tree due to mount staleness; see AAR): `tsc -p ./tsconfig.json` exited 0; smoke invariants PASS; `node scripts/reflection-ab-eval.mjs` exited 0 with `reflection_uplift_observed`; weak eval regression unchanged (bare 1/15, harness 15/15, model-driven 15).
+  - HOST GATES PENDING (same environment limits as Phase 35): `npm run compile` (vite), `npm run test:e2e`, `npm run test:visual`, `npm run package`. Note e2e now also covers Phase 36 assertions.
+  - No UI change; no screenshot required.
+  - AAR: SUSTAIN scripted-causality A/B design (off-lane cannot accidentally solve) and running the real loop instead of a parallel mini-lane. WORK: plan was documented before build this time; keep that ordering. TOOLS (triggers fired): host->sandbox mount served stale-size truncated content for EDITED files (new files synced fine) - banked workaround is tail-splice: take truncated mount body, fetch missing tail via host-side reads, splice in /tmp shadow tree, validate there; second occurrence of this failure mode in one session, so treat mount reads of any host-edited file as suspect until size-verified.
+- Phase 37 - Terminal-state AAR hook + durable lessons - PASS (sandbox gates) / host gates pending - no git repository / sha unavailable
+  - Suggested commit title: "Phase 37: terminal-state AAR banks durable lessons and rehydrates them into future run context".
+  - `persistStateToDisk` is the single choke point: on any terminal status (`success`/`failed`/`gave_up`) it fires `recordAar` exactly once (guarded by `state.aar`), covering every halt path including budget and no-progress halts.
+  - `.forge/aar.json` records deterministic trigger counts (reflections, suppressed reflections, escalations, budget halts, pre-commit blocks, validation/provider failures, repair attempts, safety reverts, no-progress turns), derived sustain/improve-work/improve-tools notes, `clean` flag, and banked lesson signatures. The AAR is embedded in `state.json`. The model never authors AAR content.
+  - Non-clean runs bank signature-deduped lessons (`category:status:goal-slice`) to `.forge/lessons.json`, capped at 50, with occurrence counting.
+  - `refreshContextBundle` now rehydrates `recentLessons` (last 3) into the context bundle, so past AARs inform future proposals - AAR feeds RECONCILE.
+  - Extension artifact open paths `aar` and `lessons`; smoke invariants (7 new) and e2e assertions (AAR on both reflection A/B lanes, embedded state AAR, native artifact open) added.
+  - Sandbox verification (shadow-tree round 2): `tsc` exited 0; smoke invariants + phase-37 delta asserts PASS; behavioral proof PASS on four paths - reflected success closes non-clean with banked lesson and sustain note; suppressed-reflection failure cites suppression in improve-tools; zero-trigger run closes `clean: true` with no lessons file (negative path - no lesson spam); second run in the same workspace rehydrates the banked lesson into `contextBundle.recentLessons`.
+  - Regressions green: reflection A/B still `reflection_uplift_observed` (exit 0); weak eval unchanged (bare 1/15, harness 15/15).
+  - Structural-only coverage (named honestly): `gave_up` AAR shares the identical proven choke point but was not behaviorally isolated; lesson dedupe-on-repeat is code-verified, not behaviorally exercised.
+  - HOST GATES PENDING (same four): `npm run compile` (vite), `npm run test:e2e`, `npm run test:visual`, `npm run package`.
+  - No UI change; no screenshot required.
+  - AAR (meta): SUSTAIN tail-splice shadow validation now takes minutes (twice-proven technique) and behavioral negative-path proofs. WORK: plan documented before build; spec review caught two structural-only coverages and named them instead of overclaiming. TOOLS (trigger: mount staleness recurred, expected): treat it as the session norm - every host-edited file needs splicing before sandbox validation; consider asking the host to run gates earlier in future sessions to shrink the feedback loop.
+- Phase 38 - Proposal schema fix + live-eval guards (live-run root cause) - PASS (sandbox gates) / live re-run pending fresh key - no git repository / sha unavailable
+  - Suggested commit title: "Phase 38: enumerate tool-argument schema properties; live constrained decoders no longer empty arguments".
+  - Root cause from first live runs (2026-07-08): `arguments: { type: 'object' }` with no properties inside a strict schema made live grammar engines force `arguments: {}` on all 75 calls; every proposal had an empty path and was correctly firewalled (live 0/15 both lanes, fallback 15/15, zero false successes - honest accounting held under total proposal failure). Also found `qwen/qwen2.5-coder-7b-instruct` and `mistralai/mistral-7b-instruct` delisted from OpenRouter; `qwen/qwen-2.5-7b-instruct` is live.
+  - Fix: `TOOL_SCHEMA` (loop.ts) and `ACTION_SCHEMA` (weakEval.ts) enumerate path/patchContent/content/command/query/startLine/endLine/planMd/tasks/observation as optional properties; both exported for regression tests; inline comments document the failure mode.
+  - Guards: `assertModelEndpointsLive` fails fast on delisted slugs (graceful on network failure); `runLiveSchemaCanary` makes one cheap call before the suite and aborts with an actionable error if arguments round-trip empty; canary result persists in the scorecard as `liveCanary`.
+  - Verified in sandbox (shadow-tree round 3): tsc exit 0; strict-decoder simulation reproduces the empty-arguments bug on the OLD schema and proves path/patchContent survive the NEW schema; full harness loop reaches success behind simulated grammar enforcement; canary logic passes on healthy round-trip and fails on empty arguments; liveness probe (stubbed fetch) rejects dead slug, accepts live slug, degrades gracefully on network failure; smoke invariants incl. negative invariant (no property-less arguments object may ever return) PASS; regressions green (reflection A/B uplift observed; mocked weak eval 1/15 -> 15/15).
+  - HOST GATES PENDING: `npm run test:e2e`, `npm run test:visual`, `npm run package` (compile already passed live on host during eval runs), plus the live eval re-run: `npm run eval -- --live --model qwen/qwen-2.5-7b-instruct` with a fresh OPENROUTER_API_KEY.
+  - AAR: SUSTAIN honest fallback accounting (it converted a total failure into a precise diagnosis) and reading live per-task errors before theorizing. WORK: the live canary should have existed before the first live run - a one-call preflight would have saved 150 calls; lesson generalized as "canary every new live integration before batch runs". TOOLS (trigger: two hardcoded weak slugs were dead): model catalogs rot; probe liveness at run time, never trust a hardcoded slug list; banked into the eval itself as code, not just documentation.
+- Phase 39 - Edit-format exemplar + firewall rejection feedback in eval lanes - PASS (sandbox gates) / live re-run pending - no git repository / sha unavailable
+  - Suggested commit title: "Phase 39: show the patch format and feed rejection reasons back - harness now beats bare on format errors".
+  - Second live run diagnosis: canary passed and all 75 calls succeeded, but 0/15 both lanes with dominant error `Malformed patch: expected SEARCH/REPLACE hunk` - the model produced patches in the wrong format; the eval prompt named the format without showing it, and harness retries did not say WHY the previous attempt was rejected, leaving bare and harness lanes nearly identical on format errors.
+  - Fix: `PATCH_FORMAT_EXEMPLAR` (real hunk, verbatim fence tokens, copy-character-for-character rule) added to eval task prompts; harness-lane retries inject `REJECTED by deterministic validation: <reason>` plus the exemplar; lane results persist `lastValidationError` and a 500-char `rejectedPatchSample` for future diagnosis without re-running.
+  - Behavioral proof (shadow-tree round 4): a format-confused provider that only corrects itself after seeing the rejection feedback scores bare 0/1 vs harness 1/1 (`passed: true`, recovery at step >= 2); diagnostics captured in both lanes. Mocked 15-task regression unchanged (1/15 -> 15/15). tsc + smoke invariants + phase delta asserts PASS.
+  - HOST GATES PENDING: `npm run test:e2e`, `npm run test:visual`, `npm run package`, and the live re-run `npm run eval -- --live --model qwen/qwen-2.5-7b-instruct`.
+  - AAR: SUSTAIN diagnosing from captured per-task errors before theorizing (two live runs, two precise root causes) and adding diagnostics capture so the NEXT failure ships with its own evidence. WORK: the harness lane's silent-retry-on-rejection was a design gap violating our own verification-feedback thesis - when a validator rejects, the reason must reach the model; generalize this to every retry path. TOOLS (trigger: prompt named a format without an exemplar): weak models need the format SHOWN, not described - one-line lesson now encoded in the prompt itself.
+- MILESTONE - First live weak-model baseline: THESIS CONFIRMED LIVE - 2026-07-08 - no git repository / sha unavailable
+  - `npm run eval -- --live --model qwen/qwen-2.5-7b-instruct` (run 3, post Phase 38+39 fixes): bare 2/15, harness 13/15, solveRateDelta +0.733, actuallyModelDriven 13, fallbackSolved 1, providerCalls 58, providerFailures 0. Total cost across ALL live runs: under $0.01.
+  - Same model, same tasks, one variable: the harness. All 13 harness solves were genuinely model-driven (fallback separately accounted). Zero false successes across three live runs.
+  - Run-3 misses define the ratchet: `syntax-error` failed on exact SEARCH-block matching (whitespace drift -> next rung: lenient matching); `sort-copy` did not converge in 4 harness steps; diagnostics show early empty-path proposals still occur and are recovered by Phase 39 rejection feedback (candidate rung: deterministic path repair).
+  - The three live runs also validated the failure ladder itself: run 1 caught dead slugs + schema-forced empty arguments; run 2 caught format-without-exemplar and silent retries; run 3 delivered uplift. Each failure produced one precise fix.
+  - Baseline is now the ratchet floor: future harness changes must not regress bare-vs-harness delta below +0.73 on this suite.
+- Phase 40 - Whitespace-lenient SEARCH matching + eval-lane path repair - PASS (sandbox gates) / live run 4 pending - no git repository / sha unavailable
+  - Suggested commit title: "Phase 40: lenient patch matching + visible path repair - both run-3 failure modes closed".
+  - Shared `findLenientMatch` in tools.ts: exact substring match wins (legacy semantics preserved); otherwise sliding-window comparison of trimmed lines; a UNIQUE window applies with the replacement target rebuilt from the file's actual bytes (lenient application never invents content); multiple windows reject as ambiguous with a count and guidance; zero windows reject as not found. Used by both `firewall.validatePatchApplicability` and `tools.applyPatch`; lenient applications are named in tool output.
+  - Eval harness lane: empty apply_patch paths are deterministically repaired to the task's single fixture file and counted in `pathRepairs` - harness assistance is allowed but always visible; the bare lane gets no repair by definition.
+  - Verified in sandbox (shadow-tree round 5): tsc exit 0; matcher unit proofs (exact/lenient/ambiguous/not_found, file-bytes preservation); combined run-3 failure-mode e2e (drifted SEARCH + empty path): bare 0/1 vs harness 1/1 with pathRepairs=1 and lenient apply; reflection A/B and mocked 15-task regressions green; smoke invariants PASS with new asserts (shared matcher, visible lenient note, counted path repairs).
+  - HOST GATES PENDING: `npm run test:e2e`, `npm run test:visual`, `npm run package`, live run 4 `npm run eval -- --live --model qwen/qwen-2.5-7b-instruct` (target: beat the +0.73 ratchet floor; stretch: 15/15).
+  - AAR: SUSTAIN designing the behavioral proof around the exact live failure modes (drifted+empty-path provider reproduces run 3 in one test). WORK: one test-authoring stumble - my ambiguity case used a bare substring, which the exact path legitimately matches; lesson: when adding lenient layers, write tests that FAIL the strict layer first. TOOLS: legacy exact-substring semantics were deliberately preserved to avoid changing behavior for strong models; recorded here so a future phase does not "fix" it blind.
+- Live run 4 (post Phase 40) - harness 13/15 held, efficiency up, variance observed - 2026-07-08
+  - bare 4/15 (run-3: 2/15 - live variance ~+/-2 on this suite; single-run deltas are noisy), harness 13/15, delta +0.60, actuallyModelDriven 13, fallbackSolved 2, providerCalls 40 (run-3: 58 - Phase 40 cut retry burn ~30%).
+  - Phase 40 machinery verified live: pathRepairs fired on 9+ tasks (1-4 each); lenient matching recovered failing-test mid-run.
+  - Remaining misses (syntax-error, promise-return): model repeatedly emits STRUCTURALLY MALFORMED hunks on these shapes even after format feedback - not a matching problem; a diff-format-capability problem. Next rung per research (Aider): whole-file rewrite recovery for the weakest tier.
+  - Ratchet note: floor metric revised - harness absolute (13/15) is stable across runs; bare-vs-harness delta fluctuates with bare-lane variance, so the floor is now "harness >= 13/15 AND delta > 0" pending a multi-run mean.
+- Phase 41 - Whole-file rewrite recovery after repeated malformed patches - PASS (sandbox gates) / live run 5 pending - no git repository / sha unavailable
+  - Suggested commit title: "Phase 41: whole-file rewrite recovery - the harness stops asking for diffs a model cannot produce".
+  - Run-4 diagnosis: the two persistent misses emit STRUCTURALLY malformed hunks on specific task shapes even after format feedback - a diff-format capability limit of the 7B, exactly the case Aider solves with whole-file format for weak models.
+  - Eval harness lane: after 2 consecutive malformed-patch rejections, the retry prompt switches to "STOP emitting patches - emit write_file with the COMPLETE corrected content"; ACTION_SCHEMA gains `write_file` + `content`; recoveries counted in `wholeFileRecoveries` (assistance visible, never silent); step cap 4->6 (successful tasks exit early; cost grows only on failure paths); bare lane unaided by definition.
+  - Verified in sandbox (shadow-tree round 6): tsc exit 0; fence-blind provider proof - bare 0/1 vs harness 1/1 with wholeFileRecoveries=1 kicking in at step 3; reflection A/B and mocked 15-task regressions green; smoke delta asserts PASS.
+  - HOST GATES PENDING: e2e/visual/package, live run 5 `npm run eval -- --live --model qwen/qwen-2.5-7b-instruct` (target: 15/15; floor: harness >= 13 AND delta > 0).
+  - AAR: SUSTAIN diagnosing failure CLASS before building (matching problem vs format-capability problem led to different rungs). WORK: none fired - clean phase. TOOLS: the ladder pattern is now visible in the code itself: exact match -> lenient match -> format feedback -> whole-file recovery, each rung visible in the scorecard; future rungs should preserve this gradient-of-assistance property.
+- MILESTONE - Live run 5: 15/15, SUITE SATURATED - 2026-07-08
+  - `qwen/qwen-2.5-7b-instruct` live: bare 0/15, harness 15/15, delta +1.00, actuallyModelDriven 15, fallbackSolved 0, providerCalls 46, providerFailures 0.
+  - Control validity: taskPrompt improvements (format exemplar) are shared by BOTH lanes; bare received every prompt improvement and scored 0. The uplift is the loop, not the prompt.
+  - Solve anatomy (gradient of assistance, all visible in the scorecard): 10 tasks via patches in 1-2 steps; 2 via rejection-feedback recovery (3 steps); 3 chronic diff-format failures (syntax-error, promise-return, object-copy) via whole-file recovery at steps 3-5 - exactly the tasks run-4 diagnosis predicted. pathRepairs fired on ~13 tasks (decoder empties path habitually; every repair counted).
+  - Bare-lane variance across runs 3-5: 2, 4, 0 - single-run bare numbers are noise; harness absolute went 13 -> 13 -> 15 with each rung added.
+  - Five live runs total cost: under $0.02.
+  - CONSEQUENCE: this suite can no longer measure improvement. Next: tier-2 task suite (multi-file, no-test-suite, small features) and multi-agent context multiplication (blueprint Phase 6) measured against it.
+- Phases 42-44 - Goal interface: /goal elicitation, mid-run steering, session-spanning resume - PASS (sandbox gates) / host gates pending - no git repository / sha unavailable
+  - Suggested commit title: "Phases 42-44: /goal elicitation, pause/steer/resume, and session-spanning resume - Codex /goal machinery, firewalled".
+  - Phase 42 (elicitation): `src/harness/goalContract.ts` parses `/goal <text>` with `done when:` / `constraints:` / `non-goals:` / `budget: $N` / `max steps: N` sections. User doneWhen criteria ADD to the mandatory oracle gates - they can never remove them; the model still cannot argue with the stop condition. `initializeHarness` accepts goalOverrides (doneWhen/constraints/nonGoals -> contract, budgetUsd -> runBudget.maxCostUsd, maxSteps -> state). Commands: `forge-agent.setGoal` (parse+preview); `runAgentGoal` accepts /goal text; the chat bridge intercepts `/goal` messages and returns the compiled contract instead of a chat completion.
+  - Phase 43 (steering): `.forge/control.json` written by `pauseGoal`/`resumeGoal`/`steerGoal`; `runStep` applies control BEFORE proposing. Pause -> status `paused` with zero further provider calls; goal edits merge into the live contract without restarting (task graph and evidence retained, steer logged in state+scratchpad); all driving loops exit on `paused` as a resumable non-terminal state.
+  - Phase 44 (resume): `loop.resumeFromDisk` rehydrates `.forge/state.json` across sessions - terminal success/failure returned as-is (no zombie resurrection), budget halts resume only via explicit `allowBudgetHaltResume`, resume grants a fresh wall-clock window and `currentStepIndex + N` step allowance while cost spent is retained. Command: `forge-agent.resumeAgentGoal`.
+  - Behavioral proof (shadow-tree round 7), all PASS: parser (full syntax/partial/non-directive; gates always present); overrides flow into a live contract/budget/step-cap; pause after step 1 -> zero provider calls while paused; steer mid-run changes goal + step cap with task graph unrestarted; resume in a FRESH loop instance (session boundary) continues from the same step index with the steered goal intact and reaches success; terminal success refuses resume. Regressions green (reflection A/B, mocked 15/15 weak eval, smoke v2 + delta asserts).
+  - Named ◐: extension-host e2e assertions for the five new commands are not yet written (behavioral proofs cover the underlying machinery; command-layer e2e rides with the next host-gate run). Webview UI surfaces deliberately deferred (no visual claims made).
+  - HOST GATES PENDING: e2e/visual/package (now covering Phases 35-44).
+  - AAR: SUSTAIN one-pass trilogy build with a single splice round (7th) - the shadow validation technique is now routine at ~5 minutes per round. WORK: spec'd all three phases in the gap doc before touching code and the build followed the spec 1:1; keep batching tightly-coupled phases. TOOLS: none fired beyond the known mount staleness (session norm, handled).
+- Phase 45 - Tier-2 task suite: multi-file, missing-test, features, HELD-OUT judge - PASS (sandbox gates) / live tier-2 baseline pending - no git repository / sha unavailable
+  - Suggested commit title: "Phase 45: tier-2 suite with held-out judging - the model can never grade its own homework".
+  - New `src/harness/weakEvalTier2.ts`: 7 tasks - 3 multi-file bugs (bug behind a re-export, ignored config default, misnamed import), 2 missing-test tasks (no oracle exists; the harness must AUTHOR test.js first - authored oracles counted in `authoredTest`), 2 features (new function + export wiring, inherently multi-step/multi-file).
+  - Integrity property: final `solved` is decided by a runner-owned held-out judge executed after the run and never shown to the model; the model-visible oracle is tracked separately (`workspaceOracleGreen`). Full gradient of assistance carried over; single-file path repair disabled where multiple files make the target ambiguous.
+  - CLI `scripts/weak-model-eval-tier2.mjs` + `npm run eval:tier2` (reuses endpoint liveness probe + schema canary for --live). Report at `.forge/evals/latest-weak-model-eval-tier2.json` with per-kind breakdown.
+  - Verified in sandbox (shadow round 8): tsc exit 0; mock mechanics run - bare 0/7 vs harness 7/7 with held-out judging, oracle authoring, and multi-step features all asserted; tier-1 mocked regression and reflection A/B green. Smoke asserts added (host `npm run test` validates the package script - shadow package.json predates it, named honestly).
+  - HOST GATES PENDING: e2e/visual/package (Phases 35-45), and the LIVE tier-2 baseline: `npm run eval:tier2 -- --live --model qwen/qwen-2.5-7b-instruct`.
+  - AAR: SUSTAIN the held-out-judge design (borrowed from eval research; prevents the self-grading failure mode BEFORE it could occur, unlike phases 38-41 which fixed failures after). WORK: one design flaw caught in review-before-validate (mock feature fixes needed prompt-awareness for multi-step) - catching it pre-validation beats catching it in the run; keep reviewing mocks as adversarially as product code. TOOLS: mount synced same-session-created files reliably all day - staleness applies to files predating the session; refined lesson banked.
+- MILESTONE - First live TIER-2 baseline - 2026-07-08
+  - `npm run eval:tier2 -- --live --model qwen/qwen-2.5-7b-instruct`: bare 1/7, harness 5/7, delta +0.571. By kind: multi-file bugs 2/3, missing-test 1/2, features 2/2. providerFailures 0.
+  - Notable behaviors: BOTH features landed (multi-step, multi-file work); the harness forced genuine oracle authoring (authoredTest fired, including on the solved clamp task, which also needed 3 whole-file recoveries); bare's single solve was a trivial single-file shape passing the held-out judge without a test.
+  - Loss analysis: t2-broken-import burned all 8 steps on empty-path proposals (multi-file fixtures disable single-file path repair, so the known decoder quirk went unrepaired - dominant fixable loss); t2-missing-test-dedupe authored an oracle but could not land the fix in 8 steps.
+  - Next rung identified: content-addressed path repair - empty path + SEARCH block matching exactly ONE workspace file = deterministically unambiguous target, valid for multi-file fixtures. Honest and counted like all assistance.
+  - TIER-2 RATCHET FLOOR: harness >= 5/7 AND delta > 0. This is the number the multi-agent (Phase 6) swarm must beat.
+- Phase 46 - Content-addressed path repair for multi-file fixtures - PASS (sandbox gates) / live tier-2 re-run pending - no git repository / sha unavailable
+  - Suggested commit title: "Phase 46: content-addressed path repair - SEARCH blocks identify their target when exactly one file matches".
+  - `resolvePatchTargetByContent` (tools.ts): fires only for apply_patch with an empty path; EVERY hunk must match (exact or lenient) in EXACTLY ONE candidate source file; zero or multiple matches refuse resolution - ambiguity is never guessed away; write_file gets no content guessing, ever. Candidates are the task's declared source files read from current disk state; the model-authored test is never a candidate.
+  - Tier-2 lane wiring: successful resolutions counted in `contentAddressedRepairs` (+pathRepairs); failed resolutions append "matched N candidate files - emit the path argument explicitly" to the retry feedback, giving the model an actionable recovery channel.
+  - Verified in sandbox (shadow round 9, edits applied programmatically after full mount staleness): tsc exit 0; resolver units (unique exact, unique lenient, ambiguous-2 refused, zero-match, malformed); e2e reproducing the exact live t2-broken-import failure mode (correct patches, always-empty paths) - now solved with contentAddressedRepairs=1, bare still fails; ambiguity-feedback round-trip proven; tier-1 and tier-2 mock regressions green.
+  - HOST GATES PENDING: e2e/visual/package, live tier-2 re-run `npm run eval:tier2 -- --live --model qwen/qwen-2.5-7b-instruct` (floor 5/7; target 6/7).
+  - AAR: SUSTAIN designing the e2e proof as an exact replay of the live failure mode. WORK: one smoke-assert ordering bug (TDZ - asserted a const before its declaration) caught immediately; lesson: place new asserts inside the section that declares their subject. TOOLS (trigger: mount fully stale even for same-session files): refined again - staleness is universal and lag-based, not age-based; the programmatic-edit shadow technique (apply known replacements to last-good copies, assert anchor counts) is faster and safer than tail-splicing when edits are exact strings; prefer it going forward.
+- Live tier-2 run 2 (post Phase 46) - rung verified at kind level - 2026-07-08
+  - bare 1/7, harness 5/7, delta +0.571, providerCalls 38 (run 1: 48). MULTI-FILE BUGS 3/3 (was 2/3) - content-addressed path repair closed t2-broken-import exactly as designed. Features 2/2 stable. Missing-test 0/2 (was 1/2) - the hardest kind is live-variance dominated; noted as the primary axis for the swarm A/B and/or a step-budget rung.
+  - Pattern holding across both tiers: headline numbers are noisy; kind-level movement tracks each rung precisely.
+- Phase 47 - Swarm lane: explorer workers, handoff artifact, focused implementer - PASS (sandbox gates) / live swarm A/B pending - no git repository / sha unavailable
+  - Suggested commit title: "Phase 47: the swarm - explorer workers with fresh contexts feed a focused implementer through a handoff artifact".
+  - Third A/B lane in the tier-2 runner (`--swarm`): one explorer worker per source file, each a FRESH session seeing only its file + the goal, returning schema-constrained {summary, suspicionScore, keyLines}; findings compile into `.forge/swarm-handoff.json` (context partitioned via artifacts, never transcripts); a single harnessed implementer (full gradient of assistance) works from the handoff - full text of the top suspect only, summaries of the rest, rotating suspects on red oracles. Depth-1, non-nesting, sequential this slice.
+  - Measured, not assumed: explorerCalls, handoffChars, implementerPromptChars vs soloPromptChars, suspectRotations, all per task; report sums now include swarm-lane calls (bug caught in validation: the sum initially omitted them).
+  - HONEST FINDING from the mechanics proof: on tiny fixtures the swarm is context OVERHEAD (impl/solo prompt ratios 1.08-1.18) - compression requires corpora big enough to compress. On this suite the live A/B tests the swarm's OTHER value: suspicion-guided focus. True compression needs a large-file tier (tier-3 candidate: fixtures with several-hundred-line files).
+  - Verified (shadow round 10, deterministic replay after full mount staleness; one structural brace error caught by anchor asserts and fixed): tsc exit 0; mock 3-lane run bare 0/7, harness 7/7, swarm 7/7; one explorer per file; handoff artifacts persisted; prompt metrics recorded; suspect rotation on features; tier-1, tier-2-no-swarm, and CLI regressions green.
+  - HOST GATES PENDING: e2e/visual/package, and the LIVE swarm A/B: `npm run eval:tier2 -- --live --swarm --model qwen/qwen-2.5-7b-instruct` (question: does swarm beat harness 5/7, especially on multi-file and missing-test kinds, at ~2x calls?).
+  - AAR: SUSTAIN metrics-before-belief (the compression assertion FAILING was the phase's most valuable output - it converted an assumption into a scoping law: swarm pays on big contexts, taxes small ones). WORK: the class-brace insertion error recurred (second structural-anchor mistake this session) - lesson: when inserting class members, anchor INSIDE the class on the preceding method, never on module-level code after it. TOOLS: deterministic-replay shadow validation held up under heavy multi-edit phases; anchor-count asserts caught both the brace error and the truncated CLI copy.
+- MILESTONE - First live swarm A/B: kind-level tradeoff, not a blanket win - 2026-07-08
+  - Three lanes, same tasks, held-out judge: bare 1/7, solo harness 4/7, swarm 3/7. providerCalls 99 total (swarm lane ~2.5x solo for a lower headline) - the research's multi-agent token tax, measured.
+  - MISSING-TEST: swarm 2/2 vs solo 0/2 (solo was 1-for-4 across all prior live runs). Explorer digest + focused implementer wins where the task is noisy and single-file: author oracle, then fix. The swarm's first real earned keep.
+  - MULTI-FILE BUGS: swarm 1/3 vs solo 3/3. Seam blindness, exactly as predicted in the arcs discussion: the implementer sees only the prime suspect in full, so relationship defects (misnamed import across two files) vanish when suspicion points at the wrong side of the seam. FEATURES: swarm 0/2 - two-file coordinated edits, same seam problem. Solo features 1/2 this run (2/2 prior - variance).
+  - Interpretation discipline: every cell is n=1-2; kind-level PATTERN (swarm wins noisy single-file, loses cross-file) is consistent with mechanism, but means need 2-3 repeat runs (pennies) before building dispatch logic on them.
+  - Next rungs, in order: (1) repeat live swarm runs for kind-level means; (2) INTERLOCKING ARCS - each explorer and the implementer get the exported signatures of the suspect's direct dependencies (deterministic, zero extra calls) - targets the multi-file/feature losses; (3) if means hold, terrain-based lane dispatch (deterministic routing by task kind: swarm for missing-test shapes, solo for cross-file), the orchestrator picking the formation by terrain, not a model picking by vibes.
+- Phase 48 - Interlocking arcs: seam interfaces across explorer/implementer sectors - PASS (sandbox gates) / live re-run pending - no git repository / sha unavailable
+  - Suggested commit title: "Phase 48: interlocking arcs - sectors overlap at the seams so relationship bugs are visible from either side".
+  - `extractInterlocks` builds the require-graph deterministically (relative-require resolution, zero provider calls); each file gets deps, dependents, and an interface signature (declarations + module.exports lines). `renderInterlocks` shows every explorer its file's seams (neighbor exports + dependent import lines) and shows the swarm implementer the prime suspect's seams, recomputed from fresh disk state each step. Interlocks persist in the handoff artifact.
+  - Verified (shadow round 11): unit - on the t2-broken-import fixture BOTH sides of the seam see the mismatch (index.js arc sees `function formatName`; format.js arc sees the dependent's misnamed `formatname` import); CAUSAL e2e - a seam-blind provider that can only emit the correct cross-file fix when the neighbor signature appears in its prompt now solves the relationship bug through the swarm lane; explorers verified to receive seam context.
+- Phase 49 - Terrain dispatch: deterministic lane routing by task kind - PASS (sandbox gates) / live dispatch run pending - no git repository / sha unavailable
+  - Suggested commit title: "Phase 49: terrain dispatch - a lookup table picks the formation, solo for cross-file, swarm for oracle-authoring".
+  - `--dispatch` routes each task to ONE lane via `DEFAULT_TERRAIN_ROUTING` (data-derived from the 2026-07-08 live A/B: multi-file->harness, missing-test->swarm, feature->harness), overridable via options.routing for when repeat-run means revise the map. Per-task `dispatchLane` recorded; report gains `dispatchSolved`; headline/delta computed from the routed lane. The router is a lookup, not a model.
+  - Verified (shadow round 11): mock dispatch 7/7 with per-table routing and only the routed lane executed per task; routing override respected; no-dispatch, 3-lane, and tier-1 regressions green.
+  - HOST GATES PENDING (35-49): e2e/visual/package, plus live: swarm A/B re-run with interlocks `npm run eval:tier2 -- --live --swarm --model qwen/qwen-2.5-7b-instruct` (does seam-sight fix multi-file 1/3?), then dispatch `npm run eval:tier2 -- --live --dispatch --model qwen/qwen-2.5-7b-instruct` (composite target: >5/7 at lower cost than 3 lanes).
+  - AAR (48+49): SUSTAIN causal proof design (fix gated on the exact context the phase adds) and data-derived defaults with explicit revision paths. WORK: clean phases, spec followed 1:1; batching two small coupled phases in one validation round halved overhead. TOOLS: deterministic-replay shadow validation now the fully standard path; anchor asserts caught zero errors this round (the technique is stabilizing the process, not just detecting failures).
+- MILESTONE - TIER-2 SATURATED VIA TERRAIN DISPATCH: 7/7 LIVE - 2026-07-08
+  - Dispatch run: bare 0/7, dispatchSolved 7/7, delta +1.00, providerCalls 43 (vs 99-101 for 3-lane runs - the composite is CHEAPER than measuring, and comparable to single-lane runs). Routing performed exactly as designed: multi-file 3/3 via solo harness, missing-test 2/2 via swarm, features 2/2 via solo harness. Every kind routed to its winning formation, every task solved, zero false successes, all model-driven.
+  - Swarm+interlocks run (same session): swarm multi-file improved 1/3 -> 2/3 (seam-sight helped; not yet at solo parity), missing-test 2/2 AGAIN (now 4/4 across two runs - the swarm's dominance on oracle-authoring shapes is no longer noise), features 0/2. Solo lane 4/7 this run (variance).
+  - Caveats named: dispatch n=1; new tier-2 ratchet floor set at dispatch >= 6/7 (allowing one variance flip) with the kind-level routing table as the protected artifact. Missing-test-via-swarm is the best-replicated cell in the whole suite.
+  - The session's arc, complete: same 7B model - bare 0-13% at every tier; tier-1 harness 15/15; tier-2 solo 5/7; tier-2 dispatched 7/7. The slide now picks the tube per rider, deterministically, and the whole day of live experimentation cost well under a dollar.
+- Phase 50 - Gradient of assistance ported into the MAIN AgentHarnessLoop - PASS (sandbox gates) / package+reinstall pending - no git repository / sha unavailable
+  - Suggested commit title: "Phase 50: the product loop now carries everything the evals proved - path repair, format exemplar, whole-file recovery".
+  - Ported from the proven eval lanes into `AgentHarnessLoop.runStep`/`systemPrompt`: (a) content-addressed path repair pre-validation - empty-path apply_patch resolved via `resolvePatchTargetByContent` over files the agent has READ this run (bounded deterministic candidates, unique-or-refuse, ambiguity logged with candidate count); (b) malformed-patch streak tracking with the format exemplar embedded in firewall-rejection reflections; (c) at streak >= 2 the proposal prompt gains whole-file guidance (STOP apply_patch, write_file COMPLETE content); (d) streak clears on ANY successful file mutation. All counted in runStats: `pathRepairs`, `malformedPatchStreak`, `wholeFileGuidanceInjections` - assistance visible in the product exactly as in the evals.
+  - Verified (shadow round 12): tsc exit 0; PROOF 1 - main-loop run solves with an empty-path patch after read_file, pathRepairs=1, repair logged; PROOF 2 - a fence-blind provider recovers to success via injected whole-file guidance, exemplar present in reflection details, streak cleared after the successful write_file. Proof 2 initially FAILED and caught a real port flaw (streak reset only on apply_patch, so guidance never cleared after whole-file recovery) - fixed to match eval-lane semantics before close. Regressions green (reflection A/B, tier-1 mock 1/15->15/15, tier-2 dispatch mock 7/7). Smoke asserts added for all four port markers.
+  - DEPLOYMENT: the Antigravity-installed extension is the Phase-34 build. To ship everything from Phases 35-50 into the running agent: `npm run package` then reinstall `forge-agent-0.0.1.vsix` (plus the still-pending e2e/visual host gates).
+  - AAR: SUSTAIN behavioral proofs that FAIL first - proof 2's failure was the phase's key catch, the third time this session a proof caught a subtle state-lifecycle flaw before live. WORK: when porting between architectures (stateless mini-lane loop variables vs persistent state fields), enumerate every lifecycle event of the source variable (set, read, CLEAR) - the clear is the one that gets missed. TOOLS: none fired beyond session norms.
+- Phase 51 - Tier-3 large-corpus suite: truncation-honest solo vs swarm - PASS (sandbox gates) / live tier-3 pending - no git repository / sha unavailable
+  - Suggested commit title: "Phase 51: tier-3 - where context stops being free, the swarm earns its keep and the oracle pierces truncation".
+  - Suite: 5 deterministically generated large-corpus tasks (no network): 2 large-file-bug (defect ~24k chars deep in a 34k file), 2 haystack (defect deep in 1 of 12 files, ~100k corpus), 1 large-seam (misnamed cross-file call deep in a big consumer). Generation-time PROOF asserts every defect sits beyond the solo lane's per-file truncation horizon. Runner reuse via `options.tasks` + `tier`; `taskPrompt` gains `SOLO_PROMPT_CHAR_BUDGET` (24k) with VISIBLE truncation markers; tier-3 mock is honest-by-construction (fixes only defects visible in its prompt). CLI `npm run eval:tier3` (--swarm/--dispatch).
+  - STRUCTURAL RESULTS (mock, information-gated): bare 0/5; truncated solo harness 1/5; swarm 5/5.
+  - FINDING 1 - THE ORACLE PIERCES TRUNCATION FOR CRASH-CLASS DEFECTS: the solo lane solved the seam because Node's ReferenceError output QUOTES the offending source line, and test output flows into the next prompt - verification feedback is a context channel that truncation cannot close. Silent wrong-value defects stay hidden (solo 0/4 on those). Confirmed by bare/harness contrast on identical prompts minus the oracle channel.
+  - FINDING 2 - COMPRESSION IS A HAYSTACK PROPERTY: implementer/solo prompt ratios - haystack 0.36 (strong compression, many files one suspect); large-file 1.33-1.41 (a single file bigger than the whole budget cannot compress - the swarm wins on INFORMATION COMPLETENESS at higher prompt cost; chunked explorers are the future rung); large-seam 1.14 (two-file corpora barely compress, and interlock signatures for 180-function files add ~5k - signature capping is a cheap future rung).
+  - FINDING 3 - two of my own artifacts failed honest validation before the suite could pass: a held-out judge with an undeclared identifier (the judge itself was buggy; the swarm had actually solved the task), and mock regexes silently broken by the padding change (swarm 5/5 -> 1/5 with identical lane code). Both caught by the proofs, both fixed; fixture-sizing math was also wrong once (defects visible pre-padding) and caught by the generation-time assertion.
+  - Regressions green: tier-2 dispatch mock 7/7, tier-1 mocked 15/15, reflection A/B, smoke invariants (incl. new tier-3 asserts).
+  - HOST GATES PENDING: e2e/visual/package + reinstall; live tier-3: `npm run eval:tier3 -- --live --swarm --model qwen/qwen-2.5-7b-instruct` (the first real large-corpus measurement; expect swarm >> solo on haystack, and watch whether the real model can use oracle leakthrough on the seam like the mock did).
+  - AAR: SUSTAIN generation-time assertions (they caught the sizing error instantly) and information-gated mocks (they turn context claims into physics). WORK: two self-inflicted validator bugs in one phase - new rule: JUDGES AND MOCKS GET THE SAME REVIEW RIGOR AS PRODUCT CODE, and any fixture-content change requires re-running every proof that pattern-matches fixture content. TOOLS: the eval infrastructure absorbed an entire new tier via options injection with zero runner-logic changes - the Phase 45 architecture paid off; leftover diagnostic fixtures (~680 dirs) should be cleaned by keepFixtures defaults in future diagnostic runs.
+- Phase 52 - Architect/editor lane: one planning call points the implementer - PASS (sandbox gates) / live rate-split run pending - no git repository / sha unavailable
+  - Suggested commit title: "Phase 52: architect lane - plan big, execute small, meter the split".
+  - Fifth lane in the shared runner (`--architect`, `--architect-model <slug>`): ONE schema-constrained planning call (PLAN_SCHEMA: premiseCheck, targetFile, approach, doneWhen) against the SAME truncated view the solo lane gets - planning is judgment over goal + structure, not reading. The standard 7B implementer then runs the full-gradient mini-loop with the plan injected and the planned target file shown in full; empty paths repair to the planned target; the prompt instructs "verify the premise before trusting the plan" (cookbook caveat 3, slice 1). Architect model and cost metered SEPARATELY (`architectCalls`, `architectCost`) - the rate split is measured, never assumed.
+  - STRUCTURAL PROOF (tier-3, information-gated mock): architect 5/5 (vs bare 0/5, truncated solo 1/5, swarm 5/5) with the goal->file mapping correct on every task and exactly one planning call each. ECONOMICS: architect lane 10 total calls vs swarm 35 for the same 5/5 - on this suite, one good plan replaces twelve explorers. Regressions green (tier-2 dispatch 7/7, tier-1 15/15, reflection A/B).
+  - The lane matrix is now complete for the cookbook comparison: bare / solo / swarm / architect / dispatch, all held-out judged, all separately metered.
+  - HOST GATES PENDING: e2e/visual/package + reinstall; LIVE architect runs: same-model ablation `npm run eval:tier3 -- --live --architect --model qwen/qwen-2.5-7b-instruct`, then the true rate split with a stronger planner, e.g. `--architect-model <mid-tier slug>` (check structured_outputs support on its endpoints first).
+  - AAR: SUSTAIN reusing the shared runner - a whole new lane cost ~150 lines and zero regressions; the Phase 45 architecture keeps compounding. WORK: clean phase, spec followed 1:1, proofs passed first run - the validator-rigor lesson from Phase 51 was applied (mock planner reviewed like product code before validation). TOOLS: none fired; deterministic-replay shadow validation handled an 11-anchor replay without error.
+- Version stamp for deployment verification - 2026-07-09
+  - package.json version bumped 0.0.1 -> 0.52.0 (Phase-52 build) and description gains a phase tag. VERIFICATION AFTER INSTALL: (1) VSIX filename is now `forge-agent-0.52.0.vsix`; (2) Antigravity Extensions panel shows Forge Agent v0.52.0 (old build shows 0.0.1); (3) extension folder becomes `.antigravity-ide\extensions\kennyg.forge-agent-0.52.0`. Any of the three proves the update landed. Future phases: bump minor to the closing phase number at each package.
+- Phase 54 slice 1 - UX: native settings, config-driven runs, pause/resume buttons, /goal in the composer - ◐ CODE-COMPLETE, VISUAL VALIDATION DELEGATED TO USER - no git repository / sha unavailable
+  - Suggested commit title: "Phase 54.1: settings surface + run control buttons - the proven machinery gets an interface".
+  - Native settings (contributes.configuration): forge.maxCostUsd, maxWallClockMinutes, maxSteps, reflectionEnabled, architectModel, defaultCodingModel/defaultMixedModel join the existing apiKey/provider keys. UI runs now READ them: the webview 'run-agent-loop' path applies config budget caps, step cap, and reflection toggle, and parses /goal directives typed in the composer (full elicitation in the panel, not just the command API).
+  - Run control: Pause (testId pause-run) and Resume (resume-run) buttons in the composer icon row; bridge cases 'pause-goal'/'resume-goal' write .forge/control.json; resume drives the loop onward from the paused state (one step consumes the cleared flag - the applyControl lifecycle). FIXED A REAL PHASE-43 GAP FOUND IN RECONCILE: the webview bridge run loop did not exit on 'paused', so UI-started runs could never pause; all bridge loops are now paused-aware.
+  - Sandbox verification (shadow round 15): tsc exit 0 on all extension-side changes; package.json valid with new properties; static proofs (bridge cases, paused-aware loops x3, config reads). App.tsx changes (2 anchored edits: Pause import + two IconButtons mirroring existing patterns) are vite-built on HOST only - named ◐.
+  - USER VISUAL VALIDATION CHECKLIST (after `npm run package` + reinstall v0.52.0+): (1) Settings -> search "forge" -> new keys visible with descriptions; (2) set forge.maxCostUsd=0.05, run a goal, confirm budget halt honors it; (3) type "/goal fix X\ndone when: Y" in the composer, hit Run, confirm the goal contract reflects Y in .forge/goal-contract.json; (4) start a run, click Pause -> status shows paused and NO further steps; click Resume -> run continues; (5) pause/resume buttons render next to Play/Step.
+  - AAR: SUSTAIN reconcile-before-build (found the bridge pause gap - the button would have "worked" while the loop ignored it). WORK: UX phases need the visual gate planned INTO the close from the start - this ◐-with-checklist pattern is the honest shape when the builder has no screen. TOOLS: webview tsx is outside tsc's gate - a future rung should add `tsc --noEmit` coverage or vitest for src/webview to give sandbox sessions any static signal on UI code.
+- Phase 55 SPEC - Forge Studio UI: sessions, memory, right rail (Claude-desktop layout) - DOCUMENTED, build next session - see FORGE_UI_SPEC.md
+  - Key reconcile insight: every requested panel already has a Forge data source - taskGraph = progress checklist (cross-out = task status), state.files = context documents, lessons/AAR = memory, runStats = capabilities counters, sessionId already keys every run. The gap is STORAGE (state.json is an overwritten singleton -> .forge/sessions/<id>/ with meta/chat/index) and SURFACING. Six build slices, storage first; UI slices close ◐ pending screenshots per the Phase 54 protocol.
+- Phase 55.1 - Session storage foundation + session bridge - PASS (sandbox behavioral) / UI slices 55.2-55.6 next session per FORGE_UI_SPEC.md - no git repository / sha unavailable
+  - Suggested commit title: "Phase 55.1: durable sessions - every run persists under .forge/sessions/<id> with contextual titles, a pinnable index, and per-session memory".
+  - `persistSession` in loop.ts: every persist also writes .forge/sessions/<sessionId>/{state.json, meta.json} and maintains sessions/index.json (pinned-first, newest-first, capped 200). autoTitle = goal cleaned of /goal syntax, 60 chars; user title preserved once set; titles cosmetic, sessionId is identity; persistence failures can never break a run. Active .forge/state.json copy kept for backcompat (resumeFromDisk, artifact paths).
+  - Bridge cases: list-sessions, load-session (loads meta+state+chat, makes it the active session), pin-session (re-sorts index), save-chat (per-session chat.json, capped 500 msgs - chat was NEVER persisted before).
+  - Behavioral proof (shadow round 16): two live-loop sessions -> both durable with correct metas; /goal prefix cleaned from title; index tracks both newest-first; pinned sorts above newer; resumeFromDisk still resolves the latest session (backcompat); per-session state carries its own AAR (memory per session). tsc exit 0; tier-1 and reflection A/B regressions green; smoke asserts added (7).
+  - Remaining slices (specced in FORGE_UI_SPEC.md, UI = screenshot-gated): 55.2 left session rail, 55.3 right-rail progress checklist + steering, 55.4 context/memory/connectors groups, 55.5 chat restore + title polish, 55.6 polish. The webview can already call the new bridge messages.
+  - AAR: SUSTAIN storage-before-UI ordering (every rail now has a queryable backend) and never-break-the-run guards on persistence. WORK: clean slice, spec followed. TOOLS: mount served the fresh loop.ts edit intact this round (sync is intermittent, not absent - probe before replaying).
+- Phase 54.2 hotfix - chat grounding + selectable text - ◐ CODE-COMPLETE, user validates after rebuild - no git repository / sha unavailable
+  - Suggested commit title: "Phase 54.2: chat grounding with hard UI facts - the model may not invent workflows; chat text selectable".
+  - FIELD BUG (first real-user session, deepseek-v4-pro): the chat model hallucinated an elaborate fake workflow ("Forge: Propose command", manual paste-and-commit steps) because our own chat system prompt mentioned PROPOSE/VALIDATE/COMMIT/NARRATE without stating the real controls. Chat has no tools; the model filled the vacuum with plausible UI fiction - the exact trust failure the firewall exists to prevent, occurring in the one ungated lane.
+  - Fix 1: runChatCompletion system prompt rewritten as HARD UI FACTS: chat is advisory-only with no tools; the only execution path is goal-in-composer + Run button; the real /goal syntax; pause/resume exist; explicitly states there is NO "Forge: Propose" command and NO manual commit step; instructs the model to hand users a concrete /goal line + "click Run", and to admit uncertainty about UI rather than invent steps.
+  - Fix 2: chat log container gains select-text + explicit userSelect:text (webview default blocked text selection).
+  - Validation: extension.ts change is a string constant (host tsc gates it); App.tsx className/style edit mirrors existing patterns (host vite gates). USER CHECKLIST after rebuild+reinstall: (1) ask chat to "make me a desktop organizer" - it must answer with a suggested /goal line and "click Run", NOT fake commands; (2) select/copy chat text.
+  - AAR: SUSTAIN real-user sessions as the ultimate eval - one user question exposed a lane every mock passed. WORK: any string the model sees IS prompt surface - our own grounding text seeded the hallucination vocabulary; audit all model-visible strings for undefined referents. TOOLS: queue a "chat grounding" static smoke assert (system prompt must name the Run button and deny fake commands) - added next session with the 55.x slices.
+- Phase 54.3 - Command menu: "+" button, "/" autocomplete, GOAL MODE pill - ◐ CODE-COMPLETE, user validates after rebuild - no git repository / sha unavailable
+  - Suggested commit title: "Phase 54.3: discoverable commands - + menu, slash autocomplete with Tab-complete, and a GOAL MODE pill so /goal visibly arms".
+  - Composer gains: a "+" toggle (testId command-menu-toggle) opening a command menu; the same menu auto-opens while input starts with "/" until a known command+space is typed; click inserts, Tab completes a partial /goal, Escape closes. SLASH_COMMANDS registry (extensible) with hints including the full /goal sub-syntax. When input starts with "/goal ", a GOAL MODE pill renders above the box: the user SEES the command armed and is told Run executes it (Enter still chats) - directly answers "so I know it's working".
+  - All UI-only App.tsx changes mirroring existing Tailwind/JSX patterns; vite gates syntax on host build. USER CHECKLIST after rebuild: (1) click + -> menu lists /goal with hint; (2) type "/go" -> menu filters, Tab completes to "/goal "; (3) GOAL MODE pill appears; (4) press Run -> goal contract in .forge reflects the directive; Enter -> chat responds per the 54.2 grounding.
+  - AAR: SUSTAIN answering UX asks with visible STATE (the pill is truth from the input, not decoration). WORK: command registry deliberately extensible - future /pause /resume /session entries are one line each. TOOLS: none.
+- Phase 56.1 - Deep research mode: /research -> web-grounded workers -> cited artifact attached to the conversation - ◐ CODE-COMPLETE, user validates live after rebuild - no git repository / sha unavailable
+  - Suggested commit title: "Phase 56.1: /research - plan, web-grounded workers via OpenRouter :online, cited artifact that grounds the chat".
+  - `src/harness/research.ts` runDeepResearch (ChatGPT-deep-research shaped, firewalled): (1) one planning call decomposes the question into 3-5 sub-questions (schema-constrained); (2) one WEB-GROUNDED worker per sub-question via the OpenRouter ':online' suffix (any model slug + live web search + citations; zero scraping infra); workers are instructed to cite URLs for every claim and to report unanswered rather than answer from memory; failed workers surface as UNANSWERED, never papered over; (3) synthesis composes ## Answer / ## Key findings (claims with source URLs) / ## Conflicts & uncertainty / ## Sources, with raw worker findings appended. Artifact persists to .forge/research/<ts>-<slug>.md.
+  - ATTACHMENT: the chat bridge intercepts "/research <question>" (progress message, then the report + save path posted to chat); the artifact path joins the session's attached-research list, and runChatCompletion injects the last 2 artifacts (8k cap each) as system context on EVERY subsequent chat turn - the conversation is grounded by its research from then on. Chat grounding prompt documents /research; SLASH_COMMANDS menu gains the /research entry with hint (Enter executes - research IS a chat-lane action, unlike /goal).
+  - Design law kept: research is read-only by construction (produces a document, never mutations) and claims carry sources - the artifact is evidence-shaped, not narration.
+  - Validation honesty: web-grounded calls require the live OpenRouter key -> no sandbox behavioral proof possible; extension/module changes are tsc-gated on host build; webview edit is one registry line. USER CHECKLIST after rebuild: (1) type "/" -> menu shows /research; (2) "/research current best 7B coding models" -> progress message, then cited report in chat; (3) .forge/research/ contains the .md; (4) ask a follow-up chat question -> answer reflects the artifact (attachment working); (5) a bogus topic yields uncertainty, not confident fiction.
+  - Known limits for next slice (56.2): attachment list is per-extension-host-session (not yet persisted into session meta - wire into Phase 55.1 meta.researchArtifacts); artifacts attach to CHAT context only, not yet to /goal runs; ':online' pricing adds search cost per worker call - consider a forge.researchModel setting.
+  - AAR: SUSTAIN reuse of proven shapes (plan-big/execute-small became the research pipeline verbatim). WORK: first draft misread the ask as repo-research - one clarifying screenshot corrected it; lesson: when a user names a feature by a competitor's product name, match THAT product's shape first. TOOLS: OpenRouter :online suffix is the cheapest web-tool on-ramp - banked for future web-capable phases.
+- MILESTONE - LIVE TIER-3: ARCHITECT 5/5 WHERE SOLO GOT 0/5 - 2026-07-09
+  - Run 1 (swarm): bare 0/5, truncated solo 0/5 (structural blindness CONFIRMED LIVE - including the seam: the real 7B could not exploit oracle leakthrough the way the mock did), swarm 3/5 @106 calls (large-file 2/2, haystack 1/2, seam 0/1).
+  - Run 2 (architect, SAME-MODEL ablation): architect 5/5 @62 calls. The same 7B that is structurally blind solo solved EVERYTHING when it planned first - one truncated-overview planning call naming the target, then focused execution. Architect beats swarm on solve rate AND cost, live, with the weak model in every seat. The plan-big-execute-small thesis holds even when "big" is the same small model given a planning turn.
+  - Terrain map update: tier-3 kinds should route to ARCHITECT (revise DEFAULT_TERRAIN_ROUTING + add architect as a routable dispatch lane - next session).
+  - REPORT BUGS found by these runs (fix next session): headline status/passed ignores swarm/architect lanes (printed no_uplift while architect swept); byKind lacks architectSolved outside dispatch. Duplicate package.json config keys (Phase 54 re-added existing defaultCodingModel/defaultMixedModel) FIXED now.
+  - Cumulative live proof across tiers, one 7B model, total spend still ~a dollar: t1 15/15, t2 dispatch 7/7, t3 architect 5/5. The slide holds at every tier once the right formation is picked - and picking formations is deterministic.
+- Phase 57.1 - Tier-4: tasks that cannot be pattern-matched - PASS (sandbox gates) / live tier-4 pending - no git repository / sha unavailable
+  - Suggested commit title: "Phase 57.1: tier-4 - the leak law, symptom-only goals, a causal chain, a spec-gap feature, and a judge-proven suite".
+  - THE LEAK LAW enforced in code: `assertNoLeak` tokenizes the goal and refuses any suite where a goal token appears within 5 lines of the defect (the CLI runs it before every eval). It immediately caught ITS OWN AUTHOR ("settings" in a goal sat beside the require line at the defect) - goal reworded; the negative case (a deliberately leaking goal) is asserted refused.
+  - 4 tasks, each a different wall: t4-symptom-pricing (symptom-only cross-file cause + a reviewer-bait distractor comment on CORRECT code), t4-symptom-pipeline (8-stage haystack, cause mid-chain, goal describes user-visible symptom only), t4-causal-timeout (TWO coordinated edits, either alone stays red - PLAN_SCHEMA gains optional ordered subtasks), t4-spec-limiter (implement per SPEC.md; the held-out judge tests non-invocation past the limit, an edge the goal never states).
+  - SOLVABILITY proven without any model: every task carries a hidden `provenFix` (+ PROVEN_EXTRA for the causal chain) used ONLY by validation - pristine fixtures FAIL the judge, proven-fixed fixtures PASS judge and workspace tests. Unsolvable-task and self-leaking-suite failure modes are now structurally impossible.
+  - The tier-4 mock is deliberately pattern-blind and solves NOTHING (0 across all 4 lanes) - the live-vs-mock gap IS the measurement: any live solve is reasoning, not plumbing. All regressions green (t1 15/15, t2 dispatch 7/7, t3 architect 5/5).
+  - LIVE (user): `npm run eval:tier4 -- --live --architect --model qwen/qwen-2.5-7b-instruct` then the DeepSeek-planner variant - on symptom-only goals the regex-planner and the reasoner finally produce different numbers. Expect the 7B to stop acing; zeros that persist are the true model ceiling, measured at last.
+  - AAR: SUSTAIN laws-as-assertions (the leak law catching my own task 60 seconds after I wrote it is the whole methodology in one moment). WORK: goals need adversarial wording review like any model-visible string. TOOLS: the pattern-blind mock inverts the usual mock role - from proving success possible to proving success MEANINGFUL; banked as the standard for capability (vs plumbing) tiers.
+- MILESTONE - LIVE TIER-4: THE PLANNERS SEPARATE; THE CAUSAL CHAIN IS THE MEASURED WALL - 2026-07-09
+  - Same executor (qwen-2.5-7b), same symptom-only leak-law suite, two planners:
+    - 7B-as-architect (same-model): architect 1/4 @59 calls - the regex-planner collapses when goals stop naming targets, exactly as tier-3 saturation predicted.
+    - DeepSeek-v4-pro-as-architect + 7B executor: architect 3/4 @34 calls - the reasoning planner recovers the solve rate at nearly HALF the calls. First live rate-split win: better plans are cheaper, not just smarter.
+  - Solo harness: 3/4 in both runs (small fixtures fit in context; full visibility + oracle feedback lets the 7B reason passably alone - solo remains competitive when context is not starved). Bare: 0/4 and 1/4 (the self-contained spec-limiter one-shot, variance).
+  - THE RESIDUE: t4-causal-timeout (two coordinated edits, either alone stays red) went 0 across EVERY lane in BOTH runs - the designed choke point is the measured frontier: coordinated multi-edit reasoning. Next rung is already scaffolded: PLAN_SCHEMA carries ordered subtasks; Phase 57.2 = an implementer that executes plan subtasks sequentially with per-subtask oracle checks.
+  - Standing results table, one weak executor, all live, all held-out judged, total project spend ~a dollar: T1 15/15 (gradient) | T2 7/7 (dispatch) | T3 5/5 (architect-focus) | T4 3/4 (reasoning planner + weak executor), residue = causal chains.
+  - The instrument did its job at every tier: saturation forced a harder question; the harder question found the real wall. Calibration record across the session: predictions bounded every live result except one undershoot (run 5 tier-1).
+- Phase 57.1 hotfix - eval report headline and by-kind architect accounting - PASS (host smoke + compile + mocked evals) - no git repository / sha unavailable
+  - Suggested commit title: "Phase 57.1 hotfix: architect solves count in eval headlines and by-kind reports".
+  - Fixed the report bugs found by live tier-3: the shared tier runner now includes `architectSolved` in `byKind`, and headline `status`/`passed` uses the best active non-dispatch lane (`harness`, `swarm`, or `architect`) instead of always using solo harness. Dispatch still owns the headline when `--dispatch` is active.
+  - Fixed an existing smoke-test ordering bug that referenced `webview` before initialization, which made `npm run test` fail before reaching the new invariants.
+  - Validation: `npm run test` PASS; `npm run compile` PASS; `node scripts/weak-model-eval-tier4.mjs --architect` confirms tier-4 by-kind output includes `architectSolved`; `node scripts/weak-model-eval-tier3.mjs --architect` now reports `status: "uplift_observed"`, `architectSolved: 5`, and per-kind architect counts.
+  - Remaining known issue: tier-4's `PROVEN_EXTRA` is declared for the coordinated two-file causal task but is not wired into any validation helper in the current repo. The live measurement is still meaningful because the held-out judge tests the actual model output, but the documented "proven-fixed passes" claim for that one task needs a follow-up validation helper before being treated as mechanically proven.
+- Phase 57.2 - Coordinated-subtask execution: ordered plan steps for causal chains - PASS (host smoke + compile + focused behavioral proof) / live rerun pending - no git repository / sha unavailable
+  - Suggested commit title: "Phase 57.2: coordinated subtasks - the architect plan executes file-by-file with oracle checks".
+  - Reconciled root cause: `PLAN_SCHEMA` had `subtasks`, but the architect lane ignored them and treated every task as a single-target-file repair. That fit tier-3 focus tasks and failed the tier-4 causal chain, where `src/settings.js` and `src/service.js` both need edits and either single edit leaves tests red.
+  - Built: architect plans now persist `planSubtasks`; architect results record `subtaskChecks`; the implementer prompt shows the full ordered plan plus one `CURRENT SUBTASK`; files named by the current subtask are shown in full; prior subtask oracle output feeds into the next turn; empty-path repair targets the current subtask's single referenced file before falling back to the primary target.
+  - Built: Tier-4 now has `applyProvenFixes`, `proveTier4TaskSolvable`, and `proveTier4SuiteSolvable`; the Tier-4 CLI refuses to run if pristine fixtures do not fail or proven-fixed fixtures do not pass. This wires `PROVEN_EXTRA` for `t4-causal-timeout` into real validation.
+  - Validation: `npm run test` PASS; `npm run compile` PASS; `node scripts/weak-model-eval-tier3.mjs --architect` remains PASS with architect 5/5; `node scripts/weak-model-eval-tier4.mjs --architect` PASS with default pattern-blind mock still 0/4 after the new solvability gate; focused coordinated-provider proof on only `t4-causal-timeout` solved 1/1 with two subtask checks: subtask 1 red (settings edit alone) and subtask 2 green (service edit completes the chain), with `pathRepairs: 2`.
+  - Validation caught a real proof bug first: the initial solvability helper ran `npm run test --silent`, which made proven workspace tests appear false while held-out tests passed. Fixed by running `node test.js` directly in the proof fixture, matching the held-out runner's direct execution model.
+  - AAR: SUSTAIN failed-first validation and focused synthetic providers for capability rungs; they prove runner mechanics without pretending a pattern-blind mock can reason. WORK: if a schema field exists but the runner ignores it, live success can hide the dead field until a harder tier exposes it. TOOLS: direct `node test.js` is the right low-noise proof surface for generated fixture tests; npm flag semantics add avoidable uncertainty.
+- Phase 57.2a - Live subtask normalization hotfix: object subtasks preserved - PASS (host smoke + compile + focused proof + one live rerun) - no git repository / sha unavailable
+  - Suggested commit title: "Phase 57.2a: normalize real planner subtasks - preserve object-shaped file/action plans".
+  - Live trigger: DeepSeek planner returned `subtasks` as objects on `t4-causal-timeout`; the runner converted them to `"[object Object]"`, erasing `src/settings.js` and `src/service.js`, so focused file context and empty-path repair could not work.
+  - Fix: `normalizePlanSubtask` now accepts strings and common object shapes (`path`/`file`/`targetFile`, `action`/`description`/`instructions`), producing readable `file: action` strings and JSON fallback instead of `[object Object]`.
+  - Validation: `npm run test` PASS; `npm run compile` PASS; focused object-subtask provider solves `t4-causal-timeout` with normalized subtasks `src/settings.js: ...` then `src/service.js: ...`, subtask 1 red and subtask 2 green, `pathRepairs: 2`.
+  - Live rerun after fix (DeepSeek planner + Qwen 7B executor): bare 1/4, solo harness 2/4, architect 3/4 @45 calls, providerFailures 1, cost ~$0.011. `t4-causal-timeout` still red, but the failure became diagnostic: planSubtasks were now usable (`src/settings.js`, `src/service.js`), and subtask checks showed partial progress (`1000 -> 250 -> 5000 vs 42`) before the model started trying to edit `test.js`.
+- Phase 57.3 - Eval oracle immutability: protect provided workspace tests - PASS (host smoke + compile + focused proof) / live rerun inconclusive - no git repository / sha unavailable
+  - Suggested commit title: "Phase 57.3: protect visible eval tests - the model may not edit the oracle".
+  - Built: all shared eval lanes reject `apply_patch`/`write_file` to `test.js` when a task already supplies `workspaceTest`, except `missing-test` tasks where authoring the oracle is the point. Rejection reason: `Protected workspace oracle...`, fed back through the normal reflection loop.
+  - Validation: `npm run test` PASS; `npm run compile` PASS; focused provider proof first attempted `write_file test.js`, then fixed `src/limiter.js`; the kept fixture confirmed `test.js` stayed original and the source file changed.
+  - Live rerun attempt after this guard exceeded 10 minutes and was stopped; no live report was written, so this phase does NOT claim live Tier-4 improvement. The last valid live Tier-4 result remains the 57.2a rerun above.
+  - AAR: SUSTAIN held-out judging plus visible-oracle immutability; held-out tests prevented false success, and the new guard prevents wasted test-tampering loops earlier. WORK: a model attempting to edit tests in a provided-test eval is a harness smell, not a model result. TOOLS: long live evals need per-call timeout/report flushing; current CLI can hang past useful observation windows.
+- Packaging/install proof - Phase 57 build installed in Antigravity - PASS at CLI/disk-marker level / live UI proof pending - no git repository / sha unavailable
+  - package.json bumped `0.52.0` -> `0.57.3` and description updated so Antigravity install state is unambiguous. Same-version `0.52.0` VSIX installs exited 0 but did not refresh the installed folder.
+  - Packaged `F:\DEV_ENV\projects\Agent_Harness_Extension\forge-agent-0.57.3.vsix`; `bin\antigravity-ide.cmd --install-extension ... --force` reported success; `bin\antigravity-ide.cmd --list-extensions --show-versions` lists `kennyg.forge-agent@0.57.3`.
+  - Disk verification: installed `C:\Users\Moshi\.antigravity-ide\extensions\kennyg.forge-agent-0.57.3` contains package version marker, Phase 57 build log marker, and compiled `weakEvalTier2.js` markers for `normalizePlanSubtask` / `Protected workspace oracle`.
+  - Remaining goal gap: this proves installability/current bits, not that a live Antigravity panel run has executed an agentic `/goal` under the harness. That is the next acceptance proof for the thread objective.
+- Phase 57.4 - Live eval robustness: provider timeouts + partial report flushing - PASS (host compile/smoke + mocked evals + focused timeout proofs) - no git repository / sha unavailable
+  - Suggested commit title: "Phase 57.4: live eval robustness - per-call timeouts and partial reports".
+  - Built: shared tier eval runner accepts `providerCallTimeoutMs` and wraps provider calls with `TimeoutProvider`; tier-2/3/4 CLIs expose `--call-timeout-ms`; tier-4 live defaults to 90000ms; reports flush after every completed task with `partial`, `completedTaskCount`, `lastUpdatedAt`, and full scheduled `taskCount`, then final overwrite marks `partial: false`.
+  - Validation: `npm run compile` PASS; `npm run test` PASS; `node scripts/weak-model-eval-tier3.mjs --architect` PASS with architect 5/5; `node scripts/weak-model-eval-tier4.mjs --architect` PASS with expected pattern-blind 0/4; stalled-provider proof returned in 2322ms with providerFailures 2 and persisted report; two-task write-interception proof captured 3 report writes and confirmed first partial write = `partial:true`, `completedTaskCount:1`, `taskCount:2`, final completed 2.
+  - Packaging/install proof: packaged `F:\DEV_ENV\projects\Agent_Harness_Extension\forge-agent-0.57.4.vsix`; `bin\antigravity-ide.cmd --install-extension ... --force` reported success; `bin\antigravity-ide.cmd --list-extensions --show-versions` lists `kennyg.forge-agent@0.57.4`; installed `C:\Users\Moshi\.antigravity-ide\extensions\kennyg.forge-agent-0.57.4\out\harness\weakEvalTier2.js` contains `TimeoutProvider`, `completedTaskCount`, and `persistTierReport` markers.
+  - AAR: SUSTAIN measurement infrastructure as first-class product work; an eval that hangs without a partial artifact destroys the evidence chain. WORK: final reports must distinguish scheduled `taskCount` from completed count; otherwise partial reports can make a stalled suite look smaller rather than incomplete. TOOLS: monkeypatching `fs.writeFileSync` around the compiled runner was the lowest-noise way to prove mid-suite persistence without adding test-only exports.
+- Phase 57.5 / 57.5a - Installed Antigravity webview product proof + reviewer-gate hotfix - PASS (installed-webview live proof) - no git repository / sha unavailable
+  - Suggested commit title: "Phase 57.5: installed Antigravity proof - live /goal succeeds under harness gates".
+  - Product proof route: Playwright/Electron launched `C:\Users\Moshi\AppData\Local\Programs\Antigravity IDE\Antigravity IDE.exe` with installed extension dir `C:\Users\Moshi\.antigravity-ide\extensions`, opened Forge Studio through the command palette, found the installed `kennyg.forge-agent` webview frame, entered `/goal ...`, and captured UI/artifacts. Fresh Antigravity onboarding overlays intercept pointer clicks, so the final proof used DOM activation for the Forge run button; the webview frame and resulting UI state are still from the installed Antigravity app.
+  - Bug found first: installed webview + live model fixed `src/math.js` and tests passed, but terminaled `failed` because no diff review was recorded (`diffReviewAttempts: 0`). Root cause: a working provider could skip `get_diff`; the deterministic fallback only forced review after provider failure.
+  - Hotfix built: `reviewerGateProposal` runs before provider proposal. Reviewer/verification tasks with green tests force `get_diff`; with review but missing evidence force `record_evidence`; with green evidence plus review force `declare_success`. The terminal diff-review guard was not weakened.
+  - Validation before reinstall: `npm run compile` PASS; `npm run test` PASS; focused reviewer-gate proof PASS with providerCalls 0, `diffReviewAttempts: 1`, `reviewerApprovals: 1`, terminal `success`.
+  - Packaged/installed `F:\DEV_ENV\projects\Agent_Harness_Extension\forge-agent-0.57.5.vsix`; Antigravity CLI lists `kennyg.forge-agent@0.57.5`; installed `out\harness\loop.js` contains `reviewerGateProposal`, `green tests require diff inspection`, and terminal declare-gate markers.
+  - Final installed-webview proof (git-backed fixture): UI text showed `success · Run success: Declared success after green oracle evidence.`; persisted state `success`; `src/math.js` changed `a - b` -> `a + b`; tests pass; `providerCalls: 3`, `providerFailures: 0`, `fallbackProposals: 0`, `actuallyModelDriven: true`; `preCommitReviews: 3`, `safetyCheckpoints: 3`; `diffReviewAttempts: 1`, `reviewerApprovals: 1`, `reviewerCritiques: 1`; diff review status `approved` and excerpt contains the math change. Screenshot: `F:\DEV_ENV\projects\Agent_Harness_Extension\artifacts\antigravity-live-goal-0575-git-final.png`; state: `F:\DEV_ENV\projects\Agent_Harness_Extension\.tmp\antigravity-live-goal-0575-git\.forge\state.json`.
+  - AAR: SUSTAIN installed-product proof before declaring the thread done; it found a completion-gate bug no eval exposed. WORK: fallback policy is not enforcement if the provider is healthy; hard harness gates must preempt model proposals. TOOLS: git-backed fixtures are required when diff-review quality is part of the claim; non-git fixtures can prove success plumbing but make diff review read as `no_changes`.

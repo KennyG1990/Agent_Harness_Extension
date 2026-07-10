@@ -1,0 +1,74 @@
+# FORGE AGENT — HANDOFF BRIEF (2026-07-08/09, Fable 5 session → Opus 4.8)
+
+Read this file, then `RESEARCH_IMPLEMENTATION_GAP_ANALYSIS.md` (source of truth for gaps/specs) and `BUILD_LOG.md` (evidence chain, phases 0–57 plus hotfixes). CLAUDE.md's reference to the `...IDE__.md` research doc is stale — that content lives inside `OpenRouter First Blueprint...FULL RESEARCH.md`.
+
+## 1. THE THESIS — NOW PROVEN LIVE
+A deterministic harness (PROPOSE → VALIDATE → COMMIT → NARRATE; oracle-gated success; evidence ledgers; honest halts) makes weak/cheap models reliably succeed at coding tasks. The model is never trusted: firewall validates every mutation, tests decide truth, all assistance is counted, false success is structurally impossible.
+
+**Live results, all using `qwen/qwen-2.5-7b-instruct` (~$0.04/M) as executor via OpenRouter unless noted, total spend still roughly dollar-scale:**
+- Tier-1 (15 single-file bugs): bare 0–2/15 → harness **15/15** (saturated; now a regression suite).
+- Tier-2 (7 tasks: 3 multi-file bugs, 2 missing-test, 2 features; held-out judged): bare 0–1/7 → solo harness 4–5/7 → **terrain dispatch 7/7 at 43 calls** (saturated).
+- Tier-3 (5 generated large-corpus tasks, 32k context genuinely insufficient): live bare 0/5, truncated solo 0/5, swarm 3/5 @106 calls, **same-model architect 5/5 @62 calls**. Architect beat swarm on solve rate and calls.
+- Tier-4 (4 symptom-only leak-law tasks): live same-model architect 1/4 @59 calls; **DeepSeek-v4-pro planner + 7B executor 3/4 @34 calls**. Residue: `t4-causal-timeout`, a two-coordinated-edit causal chain, stayed unsolved across lanes.
+
+## 2. HOW MEASUREMENT WORKS (do not degrade these properties)
+- **Lane matrix** in one shared runner (`src/harness/weakEvalTier2.ts`, task suites injected via `options.tasks`): `bare` (one blind shot) / `harness` (solo mini-loop, full gradient) / `swarm` (per-file explorer workers → handoff artifact → focused implementer) / `architect` (ONE planning call names target+premise → implementer) / `dispatch` (deterministic kind→lane routing, `DEFAULT_TERRAIN_ROUTING`).
+- **Held-out judge**: `solved` is decided by a runner-owned test executed after the run, never shown to the model. The model cannot grade its own homework. Model-visible oracle tracked separately (`workspaceOracleGreen`).
+- **Honest accounting**: every assistance counted (`pathRepairs`, `contentAddressedRepairs`, `wholeFileRecoveries`, `authoredTest`, `explorerCalls`, `architectCalls/architectCost`, `suspectRotations`, prompt-size metrics). Fallback solves NEVER count as model solves (`actuallyModelDriven`).
+- **Prompt parity**: prompt improvements go to ALL lanes (bare got the format exemplar and still scored 0 — uplift is the loop, not the prompt).
+- **Live guards**: endpoint liveness probe (dead slugs fail in 1 call) + schema canary (aborts before burning a suite if the decoder empties `arguments`).
+- **Solo truncation honesty** (tier-3): `SOLO_PROMPT_CHAR_BUDGET=24000`, per-file heads + visible `[TRUNCATED]` markers; generation-time assertion places every defect beyond the horizon.
+
+## 3. THE GRADIENT OF ASSISTANCE (the "slide") — eval-proven, PORTED TO PRODUCT LOOP in Phase 50
+Exact match → whitespace-lenient SEARCH matching (unique-window-or-reject; tools.ts `findLenientMatch`, shared with firewall) → firewall-rejection feedback WITH format exemplar → content-addressed path repair (`resolvePatchTargetByContent`: SEARCH block matches exactly ONE candidate file or refuse; main loop candidates = files read this run) → whole-file rewrite recovery after 2 malformed patches (STOP patches, write_file COMPLETE content; streak clears on any successful mutation). Every rung was built AFTER a live failure named it (runs 1–5 chronology in BUILD_LOG).
+
+## 4. BANKED LAWS (from live data + Anthropic's plan-big-execute-small cookbook, reconciled)
+1. Rate split is the multi-agent engine; homogeneous swarms tax (~2.5×) without it. Architect lane exists for this.
+2. Brief granularity has an optimum — no explorer for tiny files (tier-2 overhead 1.08–1.18×); compression is a HAYSTACK property (0.36 many-files vs 1.14–1.41 when one file dwarfs the budget → future: chunked explorers, interlock-signature caps).
+3. THE ORACLE PIERCES TRUNCATION for crash-class defects (error output quotes source lines into the next prompt); silent value bugs stay hidden.
+4. Verification standards only cover what's in them — plans/premises need their own audit (plan carries `premiseCheck`; implementer told to verify).
+5. Never summarize what needs judgment: deterministic extracts (interlocking arcs = require-graph + neighbor signatures + dependent import lines) beat smarter summaries for structural facts.
+6. Judges and mocks get product-grade review rigor (two self-inflicted validator bugs in Phase 51, both caught by proofs).
+7. Weak models need formats SHOWN not described; feed rejection REASONS back (bare vs harness on format errors: 0/1 vs 1/1 causal proof).
+8. Kind-level results track rungs precisely; headline numbers are noisy (±2). Ratchet floors: tier-1 15/15, tier-2 dispatch ≥6/7, tier-3 architect 5/5 once, tier-4 reasoning-planner 3/4 once.
+9. Symptom-only tasks separate planners from executors. Tier-4 proved a stronger planner can make the same weak executor both more correct and cheaper; the remaining wall is coordinated multi-edit execution.
+
+## 5. WHAT ELSE WAS BUILT THIS SESSION (phases 35–57, all workflow-closed or honestly marked ◐ in BUILD_LOG)
+- 35: real `git worktree` isolated runs (dirty-state overlay, preservation proofs) — built, UNUSED by evals so far → use for tier-3 slice 2 (real repos).
+- 36: reflection A/B (+1.00 delta proof, `eval:reflection`).
+- 37: terminal-state AAR + `lessons.json` banked lessons, rehydrated into future run context (harness-authored; model never writes memory).
+- 38–41: schema fix (enumerate tool-arg properties — live constrained decoders force `arguments:{}` on property-less objects), liveness probe, canary, format exemplar+feedback, lenient matching, path repair, whole-file recovery.
+- 42–44: `/goal` interface — parser (`done when:/constraints:/non-goals:/budget:/max steps:`; user criteria ADD to oracle gates, never replace), pause/steer/resume via `.forge/control.json` (steer merges goal mid-run WITHOUT restart), cross-session `resumeFromDisk` (fresh clock+steps, cost never forgotten, terminal states refuse resurrection). Commands: setGoal/pauseGoal/steerGoal/resumeGoal/resumeAgentGoal; chat bridge intercepts `/goal`.
+- 45–49: tier-2 suite, content addressing, swarm, interlocking arcs, terrain dispatch.
+- 50: main-loop port (see §3). 51: tier-3. 52: architect lane.
+- 54.1–54.3: native settings/run controls, chat grounding/selectable text, and discoverable commands (`+` menu, slash autocomplete, GOAL MODE pill).
+- 55.1: durable per-session storage/index groundwork.
+- 56.1: `/research <question>` web-grounded deep research via OpenRouter `:online`, cited markdown artifacts under `.forge/research/`, attached to subsequent chat context.
+- 57.1: tier-4 symptom-only leak-law suite, plus live rate-split evidence. Hotfix after live runs: architect solves now count in report headline and `byKind`.
+- 57.2: coordinated-subtask execution. Architect plans now persist ordered subtasks, execute one current subtask at a time with focused full-file context, record per-subtask oracle checks, and repair empty paths to the current subtask file. Tier-4 solvability proof now applies `PROVEN_EXTRA`.
+- 57.2a/57.3: real planner subtask compatibility + oracle immutability. Object-shaped subtasks no longer collapse to `[object Object]`; provided `test.js` oracles are protected from mutation except in `missing-test` tasks.
+- 57.4: live eval robustness. Provider calls can be capped with `providerCallTimeoutMs` / `--call-timeout-ms`; tier-4 live defaults to 90000ms; eval reports flush after every completed task with `partial`, `completedTaskCount`, `lastUpdatedAt`, then close with `partial:false`.
+- 57.5/57.5a: installed Antigravity product proof. `kennyg.forge-agent@0.57.5` is installed and a real Antigravity webview `/goal` run succeeded on a git-backed fixture with live model calls, zero fallback, green tests, approved diff review, pre-commit reviews, and safety checkpoints. Reviewer gate now deterministically forces `get_diff` / evidence / `declare_success` before the model can skip terminal proof steps.
+
+## 6. IMMEDIATE PATH FORWARD (in order)
+1. **HOST GATES (PowerShell 5.1 — no `&&`, run separately):** current 57.4 host-verified: `npm run compile`, `npm run test`, mocked tier-3 architect, mocked tier-4 architect, stalled-provider timeout proof, partial-write interception proof. Known caveat from earlier: `test:e2e` fixture reaches success but the VS Code wrapper returned code 1 without an assertion stack.
+2. **Installed build/product proof:** `forge-agent-0.57.5.vsix` is installed via `bin\antigravity-ide.cmd --install-extension ... --force`; `--list-extensions --show-versions` lists `kennyg.forge-agent@0.57.5`; installed markers confirm reviewer gate. Product proof artifacts: screenshot `artifacts/antigravity-live-goal-0575-git-final.png`, state `.tmp/antigravity-live-goal-0575-git/.forge/state.json`.
+3. Repeat live Tier-4 runs for means and task-level variance with timeout/report flushing; avoid overclaiming from n=1 planner comparison.
+4. Revise terrain dispatch so architect is a routable lane for tier-3/4 shapes, but only after repeats set floors.
+5. **Phase 53 (still specced, not obsolete):** context engineering — compaction at threshold, tool-result clearing, token-budget scheduler, keyword-vs-semantic retrieval A/B.
+6. Tier-3 slice 2: REAL repos in Phase-35 worktrees. Then: chunked explorers, interlock signature caps, plan-verification delegation, structured failure taxonomy, V4A patch format, skill registry (procedures, not just lessons), parallel workers, network side-effect capture + OS sandboxing BEFORE unattended real-repo runs.
+
+## 7. NON-NEGOTIABLE WORKFLOW (user's hard rule — follow 100%)
+PLAN → RECONCILE (search existing work first) → DOCUMENT plan in gap doc BEFORE building → IMPLEMENT (no scope creep) → VALIDATE (every applicable method; prove the NEGATIVE path; ✅ only when all pass, else ◐ with missing method NAMED) → REVIEW spec point-by-point → DOCUMENT close in BUILD_LOG (honest ✅/◐, cited verification, close title = suggested commit message) → AAR (sustain/work/tools; any error/surprise/re-plan banks a durable lesson). Agents NEVER run git against the user's repo — commits are his. Design law everywhere: model proposes, deterministic code decides.
+
+## 8. ENVIRONMENT GOTCHAS (Cowork sandbox, cost hours — do not rediscover)
+- **Mount staleness**: the Linux sandbox mount serves stale/truncated content for host-edited files (size metadata freezes; new files usually sync once, edits break it). NEVER trust `bash` reads of any file edited via Edit/Write this session. VALIDATION TECHNIQUE (proven ~14 rounds): keep a last-good shadow tree in `/tmp/forge-shadowN`, apply each phase's edits as exact-string replacements via python with ANCHOR-COUNT ASSERTS (they catch drift/structural mistakes), `npx tsc` + behavioral proofs there. Host files (via Edit/Write/Grep/Read tools) are always correct — verify host-side with Grep when in doubt.
+- **npm 403** on platform binaries in sandbox → vite build/vsce/electron-e2e are HOST-ONLY. Sandbox can run: tsc, all eval CLIs (`node scripts/*.mjs` after tsc), behavioral node proofs.
+- When inserting class methods via string replace: anchor INSIDE the class (preceding method), never on module-level code after it (bit twice).
+- OpenRouter model catalog rots — two hardcoded weak slugs were dead; always probe endpoints (the code now does).
+- User's key: rotate after sessions; never let him paste keys in chat without flagging.
+
+## 9. KEY FILES
+`src/harness/`: loop.ts (main product loop — the thing users run), firewall.ts, tools.ts (findLenientMatch, resolvePatchTargetByContent), goalContract.ts, isolation.ts (worktrees), research.ts (`/research`), weakEval.ts (tier-1 + ACTION_SCHEMA + canary/liveness), weakEvalTier2.ts (shared lane matrix runner), weakEvalTier3.ts (large-corpus suite), weakEvalTier4.ts (symptom-only leak-law suite), reflectionAb.ts, types.ts. `scripts/`: smoke-tests.mjs (static invariants — negative invariants matter), e2e-smoke.mjs, weak-model-eval*.mjs, reflection-ab-eval.mjs. Artifacts in `.forge/` (state, evidence, lessons, aar, control, evals/, isolated-runs/, research/). Suggested commit titles for every phase are in BUILD_LOG.
+
+Keep every number honest; the failures are the product. Current measured frontier: coordinated multi-edit reasoning/execution, not single-file editing or context-starved haystacks.

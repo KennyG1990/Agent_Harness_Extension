@@ -1,0 +1,32 @@
+# Dependencies
+node_modules/
+
+# Build output
+out/
+dist/
+coverage/
+*.tsbuildinfo
+vite.config.js
+vite.config.js.map
+
+# Packaged extension artifacts
+*.vsix
+
+# Runtime/proof artifacts produced by Forge runs
+.forge/
+.tmp/
+artifacts/
+
+# VS Code / Antigravity test and local workspace state
+.vscode-test/
+.vscode/
+.agents/
+.codex/
+
+# Local/nested legacy checkout; do not vendor a second repo into this one.
+Forge-agent-harness/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+*.log
