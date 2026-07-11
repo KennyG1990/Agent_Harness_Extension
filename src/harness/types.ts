@@ -70,6 +70,17 @@ export interface SkillItem {
   name: string;
   description: string;
   workflow: string[];
+  category?: string;
+  triggerTokens?: string[];
+  confidence?: number;
+  occurrences?: number;
+  successfulRuns?: number;
+  useCount?: number;
+  sourceSessionIds?: string[];
+  appliedSessionIds?: string[];
+  createdAt?: string;
+  updatedAt?: string;
+  lastUsedAt?: string;
 }
 
 export interface WorkspaceFile {
@@ -237,6 +248,7 @@ export interface AarReport {
   improveWork: string[];
   improveTools: string[];
   lessonsBanked: string[];
+  skillsBanked?: string[];
 }
 
 export interface RetrievalCandidate {
@@ -257,6 +269,50 @@ export interface SemanticRetrievalState {
   cacheHits: number;
   embeddedDocuments: number;
   candidates: Array<{ path: string; similarity: number }>;
+  error?: string;
+}
+
+export interface WorkerEditTransaction {
+  id: string;
+  role: string;
+  proposalName: 'apply_patch' | 'write_file';
+  targetPath: string;
+  mode: 'git-worktree' | 'sparse-copy';
+  sourceHashBefore: string;
+  sourceHashAtMerge: string;
+  stagedHash: string;
+  baseCommit: string | null;
+  committed: boolean;
+  conflict: boolean;
+  cleanupSucceeded: boolean;
+  workerPid: number;
+  startedAt: string;
+  completedAt: string;
+  durationMs: number;
+  error?: string;
+}
+
+export interface WorkerCommandTransaction {
+  id: string;
+  role: string;
+  command: string;
+  mode: 'git-worktree' | 'workspace-copy';
+  baseCommit: string | null;
+  changedFiles: string[];
+  created: string[];
+  modified: string[];
+  deleted: string[];
+  mergedFileCount: number;
+  mergedBytes: number;
+  committed: boolean;
+  conflict: boolean;
+  rollbackAttempted: boolean;
+  rollbackSucceeded: boolean;
+  cleanupSucceeded: boolean;
+  workerPid: number;
+  startedAt: string;
+  completedAt: string;
+  durationMs: number;
   error?: string;
 }
 
@@ -318,6 +374,8 @@ export interface CommandSideEffectEntry {
   sandbox: CommandExecutionMetadata;
   outputExcerpt: string;
   timestamp: string;
+  transactionId?: string;
+  transactionMode?: WorkerCommandTransaction['mode'];
 }
 
 export interface CommandExecutionMetadata {
@@ -385,6 +443,16 @@ export interface RunStats {
   semanticFailures: number;
   semanticCacheHits: number;
   semanticEmbeddedDocuments: number;
+  editTransactions: number;
+  editTransactionConflicts: number;
+  worktreeEditTransactions: number;
+  sparseEditTransactions: number;
+  skillRetrievals: number;
+  skillApplications: number;
+  commandTransactions: number;
+  commandTransactionConflicts: number;
+  commandTransactionMergedFiles: number;
+  commandTransactionRollbacks: number;
   budgetHalts: number;
   noProgressTurns: number;
   lastProgressSignature: string;
@@ -415,6 +483,8 @@ export interface HarnessState {
   escalations: EscalationEntry[];
   blockers: BlockerEntry[];
   semanticRetrieval: SemanticRetrievalState;
+  workerEditTransactions: WorkerEditTransaction[];
+  workerCommandTransactions: WorkerCommandTransaction[];
   contextBundle: ContextBundle;
   roleHandoffs: Record<string, RoleHandoff>;
   workerContexts: Record<string, WorkerContext>;

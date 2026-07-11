@@ -621,6 +621,8 @@ async function openArtifact(artifact: string, runner: BlueprintProofRunner): Pro
     workerContexts: path.join('.forge', 'worker-contexts.json'),
     blockers: path.join('.forge', 'blockers.json'),
     semanticRetrieval: path.join('.forge', 'semantic-retrieval.json'),
+    editTransactions: path.join('.forge', 'worker-edit-transactions.json'),
+    commandTransactions: path.join('.forge', 'worker-command-transactions.json'),
     architectHandoff: path.join('.forge', 'architect-handoff.json'),
     safety: path.join('.forge', 'safety-checkpoints.json'),
     commandEffects: path.join('.forge', 'command-effects.json'),
@@ -634,6 +636,7 @@ async function openArtifact(artifact: string, runner: BlueprintProofRunner): Pro
     reflectionAb: path.join('.forge', 'evals', 'latest-reflection-ab.json'),
     aar: path.join('.forge', 'aar.json'),
     lessons: path.join('.forge', 'lessons.json'),
+    skills: path.join('.forge', 'skill-registry.json'),
     verificationMatrix: path.join('.forge', 'verification-fixture-matrix.json')
   };
 

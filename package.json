@@ -1,8 +1,8 @@
 {
   "name": "forge-agent",
   "displayName": "Forge Agent",
-  "description": "Forge Agent Harness VS Code Extension (Phase 64: opt-in hybrid semantic retrieval)",
-  "version": "0.64.0",
+  "description": "Forge Agent Harness VS Code Extension (Phase 67: verified procedural skill memory)",
+  "version": "0.67.0",
   "publisher": "kennyg",
   "engines": {
     "vscode": "^1.80.0"

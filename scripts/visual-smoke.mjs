@@ -62,7 +62,7 @@ try {
         scratchpadMd: '',
         evidenceLedger: [],
         knowledge: { ruleFile: '', commandsFile: '', architectureFile: '' },
-        skills: [],
+        skills: [{ id: 'skill-visual', name: 'Use red-oracle output as repair context', description: 'Verified recovery.', workflow: ['Read oracle output.', 'Apply bounded fix.', 'Rerun tests.'], category: 'oracle_recovery', triggerTokens: ['oracle', 'reflection'], confidence: 0.82, occurrences: 2, successfulRuns: 2, useCount: 1, sourceSessionIds: ['prior-session'], appliedSessionIds: ['visual-reflection-smoke'] }],
         files: {},
         firewall: { stage: 'NARRATE', timestamp: new Date().toISOString(), details: 'Reflection queued after failed oracle.' },
         logs: [],
@@ -147,6 +147,16 @@ try {
           embeddedDocuments: 2,
           candidates: [{ path: 'src/example.ts', similarity: 0.91 }]
         },
+        workerEditTransactions: [
+          {
+            id: 'edit-visual', role: 'Editor', proposalName: 'apply_patch', targetPath: 'src/example.ts', mode: 'git-worktree', sourceHashBefore: 'before-hash', sourceHashAtMerge: 'before-hash', stagedHash: 'after-hash', baseCommit: 'abc123', committed: true, conflict: false, cleanupSucceeded: true, workerPid: 4242, startedAt: new Date().toISOString(), completedAt: new Date().toISOString(), durationMs: 75
+          }
+        ],
+        workerCommandTransactions: [
+          {
+            id: 'command-visual', role: 'Reviewer', command: 'node scripts/write-fixture.js', mode: 'git-worktree', baseCommit: 'abc123', changedFiles: ['generated/output.txt'], created: ['generated/output.txt'], modified: [], deleted: [], mergedFileCount: 1, mergedBytes: 32, committed: true, conflict: false, rollbackAttempted: false, rollbackSucceeded: false, cleanupSucceeded: true, workerPid: 4243, startedAt: new Date().toISOString(), completedAt: new Date().toISOString(), durationMs: 90
+          }
+        ],
         safetyCheckpoints: [
           {
             id: 'step-3-demo',
@@ -236,6 +246,16 @@ try {
           semanticFailures: 0,
           semanticCacheHits: 18,
           semanticEmbeddedDocuments: 2,
+          editTransactions: 1,
+          editTransactionConflicts: 0,
+          worktreeEditTransactions: 1,
+          sparseEditTransactions: 0,
+          commandTransactions: 1,
+          commandTransactionConflicts: 0,
+          commandTransactionMergedFiles: 1,
+          commandTransactionRollbacks: 0,
+          skillRetrievals: 2,
+          skillApplications: 1,
           budgetHalts: 0,
           noProgressTurns: 0,
           lastProgressSignature: '',

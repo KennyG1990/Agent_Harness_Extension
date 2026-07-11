@@ -1,7 +1,7 @@
 import * as path from 'path';
 import * as fs from 'fs';
 import * as crypto from 'crypto';
-import { AarReport, AarTriggerCounts, ArchitectHandoff, BlockerCategory, BlockerEntry, BlockerSource, CommandSideEffectEntry, ContextBundle, DiffReviewEntry, EscalationEntry, EvidenceLedgerItem, GoalContract, HarnessState, LessonEntry, PreCommitReviewEntry, ReflectionEntry, RetrievalCandidate, ReviewerCritiqueEntry, RoleHandoff, RunBudget, SafetyCheckpoint, StepLog, TaskItem, ToolName, ToolProposal, WorkerContext } from './types';
+import { AarReport, AarTriggerCounts, ArchitectHandoff, BlockerCategory, BlockerEntry, BlockerSource, CommandSideEffectEntry, ContextBundle, DiffReviewEntry, EscalationEntry, EvidenceLedgerItem, GoalContract, HarnessState, LessonEntry, PreCommitReviewEntry, ReflectionEntry, RetrievalCandidate, ReviewerCritiqueEntry, RoleHandoff, RunBudget, SafetyCheckpoint, StepLog, TaskItem, ToolName, ToolProposal, WorkerCommandTransaction, WorkerContext, WorkerEditTransaction } from './types';
 import { createConfiguredProvider, OpenRouterProvider, Provider } from './provider';
 import { resolvePatchTargetByContent, WorkspaceTools } from './tools';
 import { Firewall } from './firewall';
@@ -10,6 +10,9 @@ import { assemblePromptWithinBudget, PromptSection } from './contextBudget';
 import { ProcessWorkerExecutor, WorkerProcessMetadata } from './workerExecutor';
 import { classifyBlocker } from './blockers';
 import { createConfiguredEmbeddingProvider, EmbeddingProvider, rankSemantically, SemanticDocument } from './semanticRetrieval';
+import { TransactionalEditExecutor } from './transactionalEdits';
+import { TransactionalCommandExecutor } from './transactionalCommands';
+import { bankProceduralSkills, renderProceduralSkills, selectProceduralSkills } from './proceduralSkills';
 
 const MAX_REPAIR_ATTEMPTS = 2;
 const MAX_NO_PROGRESS_TURNS = 4;
@@ -93,6 +96,8 @@ export class AgentHarnessLoop {
   private firewall: Firewall;
   private oracles: VerificationOracles;
   private workerExecutor = new ProcessWorkerExecutor();
+  private transactionalEditExecutor = new TransactionalEditExecutor(this.workerExecutor);
+  private transactionalCommandExecutor = new TransactionalCommandExecutor(this.workerExecutor);
   private latestState?: HarnessState;
   private proofStats = { providerCalls: 0, providerFailures: 0, fallbackProposals: 0 };
 
@@ -152,7 +157,7 @@ export class AgentHarnessLoop {
       scratchpadMd: `# SCRATCHPAD.md\n\n- Session: ${sessionId}\n- Workspace: ${this.tools.getWorkspaceRoot()}\n`,
       evidenceLedger: [],
       knowledge: this.loadRepositoryKnowledge(),
-      skills: [],
+      skills: this.loadSkillRegistry(),
       files: {},
       firewall: { stage: 'IDLE', timestamp: new Date().toISOString(), details: 'Harness initialized. Waiting for proposals.' },
       logs: [this.log('success', 'Forge Agent harness initialized with durable artifacts.', 'Orchestrator')],
@@ -165,6 +170,8 @@ export class AgentHarnessLoop {
       semanticRetrieval: {
         generatedAt: new Date().toISOString(), status: this.embeddingProvider ? 'failed' : 'disabled', provider: this.embeddingProvider?.id || 'deterministic-fallback', modelId: this.embeddingProvider?.modelId || '', query: '', cacheHits: 0, embeddedDocuments: 0, candidates: [], error: this.embeddingProvider ? 'Semantic retrieval has not run yet.' : undefined
       },
+      workerEditTransactions: [],
+      workerCommandTransactions: [],
       contextBundle: this.createContextBundleSkeleton(goalContract.goal),
       roleHandoffs: {},
       workerContexts: {},
@@ -216,6 +223,16 @@ export class AgentHarnessLoop {
     state.runStats.semanticFailures = state.runStats.semanticFailures || 0;
     state.runStats.semanticCacheHits = state.runStats.semanticCacheHits || 0;
     state.runStats.semanticEmbeddedDocuments = state.runStats.semanticEmbeddedDocuments || 0;
+    state.runStats.editTransactions = state.runStats.editTransactions || 0;
+    state.runStats.editTransactionConflicts = state.runStats.editTransactionConflicts || 0;
+    state.runStats.worktreeEditTransactions = state.runStats.worktreeEditTransactions || 0;
+    state.runStats.sparseEditTransactions = state.runStats.sparseEditTransactions || 0;
+    state.runStats.commandTransactions = state.runStats.commandTransactions || 0;
+    state.runStats.commandTransactionConflicts = state.runStats.commandTransactionConflicts || 0;
+    state.runStats.commandTransactionMergedFiles = state.runStats.commandTransactionMergedFiles || 0;
+    state.runStats.commandTransactionRollbacks = state.runStats.commandTransactionRollbacks || 0;
+    state.runStats.skillRetrievals = state.runStats.skillRetrievals || 0;
+    state.runStats.skillApplications = state.runStats.skillApplications || 0;
     state.runStats.budgetHalts = state.runStats.budgetHalts || 0;
     state.runBudget = state.runBudget || this.createRunBudget(state.goalContract);
     const preStepBudget = this.enforceBudget(state);
@@ -235,6 +252,8 @@ export class AgentHarnessLoop {
     state.semanticRetrieval = state.semanticRetrieval || {
       generatedAt: new Date().toISOString(), status: 'disabled', provider: 'deterministic-fallback', modelId: '', query: '', cacheHits: 0, embeddedDocuments: 0, candidates: []
     };
+    state.workerEditTransactions = state.workerEditTransactions || [];
+    state.workerCommandTransactions = state.workerCommandTransactions || [];
     state.roleHandoffs = state.roleHandoffs || {};
     state.workerContexts = state.workerContexts || {};
     state.safetyCheckpoints = state.safetyCheckpoints || [];
@@ -505,7 +524,17 @@ export class AgentHarnessLoop {
     }
 
     const commandSnapshotBefore = proposal.name === 'run_command' ? snapshotWorkspaceFiles(this.tools.getWorkspaceRoot()) : undefined;
-    const result = await this.workerExecutor.dispatch(this.tools.getWorkspaceRoot(), activeTask.owner || 'Orchestrator', proposal);
+    const result = proposal.name === 'apply_patch' || proposal.name === 'write_file'
+      ? await this.transactionalEditExecutor.dispatch(this.tools.getWorkspaceRoot(), activeTask.owner || 'Orchestrator', proposal)
+      : proposal.name === 'run_command'
+        ? await this.transactionalCommandExecutor.dispatch(this.tools.getWorkspaceRoot(), activeTask.owner || 'Orchestrator', proposal)
+        : await this.workerExecutor.dispatch(this.tools.getWorkspaceRoot(), activeTask.owner || 'Orchestrator', proposal);
+    if ('transaction' in result) {
+      this.recordEditTransaction(state, result.transaction as WorkerEditTransaction);
+    }
+    if ('commandTransaction' in result) {
+      this.recordCommandTransaction(state, result.commandTransaction as WorkerCommandTransaction);
+    }
     this.recordWorkerExecution(state, activeTask, result.worker, result.success);
     if (result.commandMetadata) {
       result.commandMetadata.blockedEnvKeys = Array.from(new Set([
@@ -523,7 +552,7 @@ export class AgentHarnessLoop {
     }
     this.captureToolResult(state, proposal, result);
     if (proposal.name === 'run_command' && commandSnapshotBefore) {
-      this.recordCommandSideEffects(state, proposal, commandSnapshotBefore, result.output, result.commandMetadata);
+      this.recordCommandSideEffects(state, proposal, commandSnapshotBefore, result.output, result.commandMetadata, 'commandTransaction' in result ? result.commandTransaction as WorkerCommandTransaction : undefined);
     }
     if (result.success && proposal.name === 'get_diff') {
       await this.recordDiffReview(state, result.output, activeTask.owner || 'Reviewer', modelBindings);
@@ -715,6 +744,17 @@ export class AgentHarnessLoop {
     const handoffContext = handoff.recentContext.map(item => `- ${item}`).join('\n') || '- none';
     const toolGuidance = this.toolGuidanceForTask(activeTask);
     const architectExecutionSections = this.architectExecutionSections(state, activeTask);
+    const skillSelection = selectProceduralSkills(
+      state.skills || [],
+      `${state.goalContract.goal} ${activeTask.title}`,
+      (state.blockers || []).filter(blocker => blocker.status === 'open').map(blocker => blocker.category),
+      state.sessionId,
+      3
+    );
+    state.skills = skillSelection.skills;
+    if (state.skills.length) state.runStats.skillRetrievals += 1;
+    state.runStats.skillApplications = state.skills.filter(skill => (skill.appliedSessionIds || []).includes(state.sessionId)).length;
+    const proceduralSkillText = renderProceduralSkills(skillSelection.selected);
     const sections: PromptSection[] = [
       {
         id: 'identity-contract',
@@ -740,6 +780,7 @@ export class AgentHarnessLoop {
       { id: 'task-guidance', required: true, priority: 100, content: `Task guidance: ${toolGuidance}` },
       { id: 'known-files', priority: 90, content: `Known files:\n${fileMemory}` },
       { id: 'retrieval-candidates', priority: 85, content: `Retrieval candidates:\n${retrievalCandidates}` },
+      ...(proceduralSkillText ? [{ id: 'procedural-skills', priority: 88, content: `Verified procedural skills from prior successful recoveries:\n${proceduralSkillText}` }] : []),
       { id: 'open-task-state', required: true, priority: 100, content: `Open task state:\n${openTasks}` },
       { id: 'open-blockers', required: true, priority: 100, content: `Deterministically classified open blockers:\n${openBlockers}` },
       { id: 'reflection-failures', priority: 75, toolResult: true, content: `Recent reflection failures to address:\n${recentReflections}` },
@@ -851,6 +892,16 @@ export class AgentHarnessLoop {
       semanticFailures: 0,
       semanticCacheHits: 0,
       semanticEmbeddedDocuments: 0,
+      editTransactions: 0,
+      editTransactionConflicts: 0,
+      worktreeEditTransactions: 0,
+      sparseEditTransactions: 0,
+      commandTransactions: 0,
+      commandTransactionConflicts: 0,
+      commandTransactionMergedFiles: 0,
+      commandTransactionRollbacks: 0,
+      skillRetrievals: 0,
+      skillApplications: 0,
       budgetHalts: 0,
       noProgressTurns: 0,
       lastProgressSignature: '',
@@ -1049,7 +1100,8 @@ export class AgentHarnessLoop {
     proposal: ToolProposal,
     before: Map<string, string>,
     output: string,
-    commandMetadata: CommandSideEffectEntry['sandbox'] | undefined
+    commandMetadata: CommandSideEffectEntry['sandbox'] | undefined,
+    transaction?: WorkerCommandTransaction
   ): void {
     state.commandEffects = state.commandEffects || [];
     state.runStats = state.runStats || this.createRunStats();
@@ -1085,7 +1137,9 @@ export class AgentHarnessLoop {
         }
       },
       outputExcerpt: output.slice(0, 2000),
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      transactionId: transaction?.id,
+      transactionMode: transaction?.mode
     };
     state.commandEffects.push(entry);
     state.runStats.commandEffectCaptures += 1;
@@ -1629,6 +1683,28 @@ export class AgentHarnessLoop {
     state.logs.push(this.log(success ? 'validation' : 'warning', `Worker process ${metadata.pid} executed ${activeTask.owner} tool in ${metadata.durationMs}ms; env allowed ${metadata.allowedEnvKeys.length}, blocked ${metadata.blockedEnvKeys.length}.`, 'Worker'));
   }
 
+  private recordEditTransaction(state: HarnessState, transaction: WorkerEditTransaction): void {
+    state.workerEditTransactions = state.workerEditTransactions || [];
+    state.runStats = state.runStats || this.createRunStats();
+    state.workerEditTransactions.push(transaction);
+    state.runStats.editTransactions += 1;
+    if (transaction.conflict) state.runStats.editTransactionConflicts += 1;
+    if (transaction.mode === 'git-worktree') state.runStats.worktreeEditTransactions += 1;
+    else state.runStats.sparseEditTransactions += 1;
+    state.logs.push(this.log(transaction.committed ? 'validation' : 'warning', `Edit transaction ${transaction.id} ${transaction.committed ? 'committed' : 'refused'} via ${transaction.mode}; target=${transaction.targetPath}; conflict=${transaction.conflict}; cleanup=${transaction.cleanupSucceeded}.`, 'Worker'));
+  }
+
+  private recordCommandTransaction(state: HarnessState, transaction: WorkerCommandTransaction): void {
+    state.workerCommandTransactions = state.workerCommandTransactions || [];
+    state.runStats = state.runStats || this.createRunStats();
+    state.workerCommandTransactions.push(transaction);
+    state.runStats.commandTransactions += 1;
+    if (transaction.conflict) state.runStats.commandTransactionConflicts += 1;
+    state.runStats.commandTransactionMergedFiles += transaction.mergedFileCount;
+    if (transaction.rollbackAttempted) state.runStats.commandTransactionRollbacks += 1;
+    state.logs.push(this.log(transaction.committed ? 'validation' : 'warning', `Command transaction ${transaction.id} ${transaction.committed ? 'committed' : 'refused'} via ${transaction.mode}; files=${transaction.mergedFileCount}; conflict=${transaction.conflict}; rollback=${transaction.rollbackAttempted}/${transaction.rollbackSucceeded}; cleanup=${transaction.cleanupSucceeded}.`, 'Worker'));
+  }
+
   private recordBlocker(state: HarnessState, source: BlockerSource, details: string, activeTask?: TaskItem): BlockerEntry {
     state.blockers = state.blockers || [];
     state.runStats = state.runStats || this.createRunStats();
@@ -1774,6 +1850,8 @@ export class AgentHarnessLoop {
     fs.writeFileSync(path.join(forgeDir, 'context-bundle.json'), JSON.stringify(state.contextBundle, null, 2), 'utf8');
     fs.writeFileSync(path.join(forgeDir, 'retrieval-index.json'), JSON.stringify(state.contextBundle.retrievalCandidates || [], null, 2), 'utf8');
     fs.writeFileSync(path.join(forgeDir, 'semantic-retrieval.json'), JSON.stringify(state.semanticRetrieval, null, 2), 'utf8');
+    fs.writeFileSync(path.join(forgeDir, 'worker-edit-transactions.json'), JSON.stringify(state.workerEditTransactions || [], null, 2), 'utf8');
+    fs.writeFileSync(path.join(forgeDir, 'worker-command-transactions.json'), JSON.stringify(state.workerCommandTransactions || [], null, 2), 'utf8');
     fs.writeFileSync(path.join(forgeDir, 'role-handoffs.json'), JSON.stringify(state.roleHandoffs || {}, null, 2), 'utf8');
     fs.writeFileSync(path.join(forgeDir, 'worker-contexts.json'), JSON.stringify(state.workerContexts || {}, null, 2), 'utf8');
     fs.writeFileSync(path.join(forgeDir, 'architect-handoff.json'), JSON.stringify(state.architectHandoff || null, null, 2), 'utf8');
@@ -1846,6 +1924,15 @@ export class AgentHarnessLoop {
     };
   }
 
+  private loadSkillRegistry() {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(path.join(this.tools.getWorkspaceRoot(), '.forge', 'skill-registry.json'), 'utf8'));
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+
   private recordAar(state: HarnessState, forgeDir: string): void {
     const stats = state.runStats || this.createRunStats();
     const triggers: AarTriggerCounts = {
@@ -1899,6 +1986,20 @@ export class AgentHarnessLoop {
       improveTools.push(`Reflection was suppressed ${triggers.reflectionSuppressed} time(s) (disabled lane); failures halted instead of recovering.`);
     }
     const lessonsBanked = clean ? [] : this.bankLessons(state, triggers, forgeDir);
+    const skillBank = bankProceduralSkills(state.skills || [], {
+      terminalStatus: state.status,
+      goal: state.goalContract.goal,
+      sessionId: state.sessionId,
+      languageExtensions: Array.from(new Set(Object.keys(state.files || {}).map(file => path.extname(file)).filter(Boolean))),
+      reflectionAttempts: triggers.reflectionAttempts,
+      oracleReflectionAttempts: stats.oracleReflections || 0,
+      validationFailures: triggers.validationFailures,
+      repairAttempts: triggers.repairAttempts,
+      preCommitBlocks: triggers.preCommitBlocks,
+      escalationCount: triggers.escalations,
+      resolvedBlockerCategories: (state.blockers || []).filter(blocker => blocker.status === 'resolved').map(blocker => blocker.category)
+    });
+    state.skills = skillBank.skills;
     state.aar = {
       generatedAt: new Date().toISOString(),
       sessionId: state.sessionId,
@@ -1911,7 +2012,8 @@ export class AgentHarnessLoop {
       sustain,
       improveWork,
       improveTools,
-      lessonsBanked
+      lessonsBanked,
+      skillsBanked: skillBank.bankedIds
     };
     state.logs.push(this.log(clean ? 'success' : 'warning', clean ? 'AAR recorded: clean run, zero triggers.' : `AAR recorded: ${lessonsBanked.length} lesson(s) banked from fired triggers.`, 'Harness'));
   }

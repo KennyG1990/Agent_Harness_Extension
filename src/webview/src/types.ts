@@ -169,6 +169,16 @@ export interface RunStats {
   semanticFailures?: number;
   semanticCacheHits?: number;
   semanticEmbeddedDocuments?: number;
+  editTransactions?: number;
+  editTransactionConflicts?: number;
+  worktreeEditTransactions?: number;
+  sparseEditTransactions?: number;
+  commandTransactions?: number;
+  commandTransactionConflicts?: number;
+  commandTransactionMergedFiles?: number;
+  commandTransactionRollbacks?: number;
+  skillRetrievals?: number;
+  skillApplications?: number;
   budgetHalts: number;
   noProgressTurns: number;
   lastProgressSignature: string;

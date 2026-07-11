@@ -4,7 +4,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
-export async function run(): Promise<void> {
+async function runSuite(): Promise<void> {
   const extension = vscode.extensions.getExtension('kennyg.forge-agent');
   assert.ok(extension, 'Forge Agent extension should be discoverable.');
   await extension.activate();
@@ -21,13 +21,59 @@ export async function run(): Promise<void> {
   const { ProcessWorkerExecutor } = await import('../../harness/workerExecutor');
   const { classifyBlocker } = await import('../../harness/blockers');
   const { rankSemantically } = await import('../../harness/semanticRetrieval');
+  const { TransactionalEditExecutor } = await import('../../harness/transactionalEdits');
+  const { TransactionalCommandExecutor } = await import('../../harness/transactionalCommands');
   const { classifyCommandNetworkIntent } = await import('../../harness/commandNetwork');
   const { runIsolatedAgentGoal } = await import('../../harness/isolation');
   const { assemblePromptWithinBudget } = await import('../../harness/contextBudget');
+  const { bankProceduralSkills, selectProceduralSkills } = await import('../../harness/proceduralSkills');
   assert.equal(classifyBlocker('firewall', '[role_capability_blocked] Editor cannot use declare_success.').category, 'role_capability', 'role denials need a distinct blocker category.');
   assert.equal(classifyBlocker('firewall', '[network_intent_blocked] outbound upload denied.').category, 'network_policy', 'network policy needs a distinct blocker category.');
   assert.equal(classifyBlocker('firewall', 'Edit applicability failed: search block not found.').category, 'patch_applicability', 'patch drift needs an applicability category.');
   assert.equal(classifyBlocker('budget', 'cost cap reached').retryable, false, 'budget blockers must not spin within the same run.');
+  const failedSkillBank = bankProceduralSkills([], {
+    terminalStatus: 'failed', goal: 'repair malformed patch', sessionId: 'failed-session', languageExtensions: ['.ts'], reflectionAttempts: 2, validationFailures: 2, repairAttempts: 1, preCommitBlocks: 0, escalationCount: 0, resolvedBlockerCategories: ['patch_format']
+  });
+  assert.equal(failedSkillBank.bankedIds.length, 0, 'failed runs must never teach procedural skills.');
+  const cleanSkillBank = bankProceduralSkills([], {
+    terminalStatus: 'success', goal: 'clean first pass', sessionId: 'clean-session', languageExtensions: ['.ts'], reflectionAttempts: 0, validationFailures: 0, repairAttempts: 0, preCommitBlocks: 0, escalationCount: 0, resolvedBlockerCategories: []
+  });
+  assert.equal(cleanSkillBank.bankedIds.length, 0, 'clean runs should not invent recovery procedures without causal evidence.');
+  const recoveredSkillBank = bankProceduralSkills([], {
+    terminalStatus: 'success', goal: 'repair malformed TypeScript patch', sessionId: 'recovered-session', languageExtensions: ['.ts'], reflectionAttempts: 1, validationFailures: 1, repairAttempts: 1, preCommitBlocks: 0, escalationCount: 0, resolvedBlockerCategories: ['patch_format']
+  });
+  assert.ok(recoveredSkillBank.bankedIds.length >= 1, 'verified successful recovery must bank at least one deterministic procedure.');
+  assert.ok(recoveredSkillBank.skills.every(skill => skill.successfulRuns === 1 && skill.sourceSessionIds?.includes('recovered-session')), 'banked skills must retain verified-run provenance.');
+  const repeatedSkillBank = bankProceduralSkills(recoveredSkillBank.skills, {
+    terminalStatus: 'success', goal: 'repair malformed TypeScript patch again', sessionId: 'recovered-session-2', languageExtensions: ['.ts'], reflectionAttempts: 1, validationFailures: 1, repairAttempts: 1, preCommitBlocks: 0, escalationCount: 0, resolvedBlockerCategories: ['patch_format']
+  });
+  const proposalSkill = repeatedSkillBank.skills.find(skill => skill.category === 'proposal_repair');
+  assert.equal(proposalSkill?.successfulRuns, 2, 'repeated verified recovery should strengthen the same skill instead of duplicating it.');
+  const relevantSkillSelection = selectProceduralSkills(repeatedSkillBank.skills, 'repair malformed TypeScript patch', ['patch_format'], 'next-session');
+  assert.ok(relevantSkillSelection.selected.some(skill => skill.category === 'proposal_repair'), 'matching goal/blocker signals should retrieve the recovery procedure.');
+  const repeatedSelection = selectProceduralSkills(relevantSkillSelection.skills, 'repair malformed TypeScript patch', ['patch_format'], 'next-session');
+  assert.equal(repeatedSelection.selected.find(skill => skill.category === 'proposal_repair')?.useCount, 1, 'repeated prompt assembly in one session must not inflate skill use count.');
+  assert.equal(selectProceduralSkills(repeatedSkillBank.skills, 'explain CSS colors', [], 'irrelevant-session').selected.length, 0, 'irrelevant procedures must not contaminate unrelated prompts.');
+
+  const skillPromptWorkspace = createTempWorkspace('forge-skill-prompt-');
+  fs.mkdirSync(path.join(skillPromptWorkspace, '.forge'), { recursive: true });
+  fs.writeFileSync(path.join(skillPromptWorkspace, '.forge', 'skill-registry.json'), JSON.stringify(repeatedSkillBank.skills, null, 2), 'utf8');
+  let proceduralSkillPrompt = '';
+  const skillPromptProvider = {
+    capabilities: () => ({ structuredOutput: true, toolCalls: true, vision: false, contextLength: 128000 }),
+    listModels: async () => [],
+    generateChat: async (request: any) => {
+      proceduralSkillPrompt = request.messages.find((message: any) => message.role === 'system')?.content || '';
+      return { text: JSON.stringify({ explanation: 'Inspect before repairing.', proposal: { name: 'repo_search', arguments: { query: 'patch' } } }) };
+    }
+  };
+  const skillPromptLoop = new AgentHarnessLoop(skillPromptProvider as any, skillPromptWorkspace);
+  let skillPromptState = await skillPromptLoop.initializeHarness('Repair malformed TypeScript patch.');
+  skillPromptState = await skillPromptLoop.runStep(skillPromptState, {});
+  assert.match(proceduralSkillPrompt, /Verified procedural skills from prior successful recoveries/);
+  assert.match(proceduralSkillPrompt, /Copy the SEARCH block verbatim/);
+  assert.ok(skillPromptState.runStats.skillApplications >= 1, 'product loop should count uniquely applied skills in the session.');
+  assert.ok(skillPromptState.skills.some(skill => skill.lastUsedAt), 'skill use provenance should persist back into harness state.');
   const semanticCacheWorkspace = createTempWorkspace('forge-semantic-cache-');
   let semanticEmbedCalls = 0;
   const causalEmbeddingProvider = {
@@ -108,6 +154,131 @@ export async function run(): Promise<void> {
   });
   assert.equal(workerFailure.success, false, 'worker tool failure must return honestly instead of being promoted to success.');
   assert.match(workerFailure.output, /Unknown tool/, 'worker failure should retain the concrete tool error.');
+
+  const sparseTransactionWorkspace = createTempWorkspace('forge-sparse-transaction-');
+  fs.mkdirSync(path.join(sparseTransactionWorkspace, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(sparseTransactionWorkspace, 'src', 'edit.txt'), 'before', 'utf8');
+  const sparseTransaction = await new TransactionalEditExecutor().dispatch(sparseTransactionWorkspace, 'Editor', {
+    name: 'write_file',
+    arguments: { path: 'src/edit.txt', content: 'after' }
+  });
+  assert.equal(sparseTransaction.success, true, 'non-git edit transaction should commit through sparse staging.');
+  assert.equal(sparseTransaction.transaction.mode, 'sparse-copy');
+  assert.equal(sparseTransaction.transaction.committed, true);
+  assert.equal(sparseTransaction.transaction.conflict, false);
+  assert.equal(sparseTransaction.transaction.cleanupSucceeded, true);
+  assert.equal(fs.readFileSync(path.join(sparseTransactionWorkspace, 'src', 'edit.txt'), 'utf8'), 'after');
+
+  const conflictWorkspace = createTempWorkspace('forge-edit-conflict-');
+  fs.mkdirSync(path.join(conflictWorkspace, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(conflictWorkspace, 'src', 'edit.txt'), 'before', 'utf8');
+  const conflictWorker = {
+    dispatch: async (stagingRoot: string, role: string) => {
+      fs.mkdirSync(path.join(stagingRoot, 'src'), { recursive: true });
+      fs.writeFileSync(path.join(stagingRoot, 'src', 'edit.txt'), 'worker-result', 'utf8');
+      fs.writeFileSync(path.join(conflictWorkspace, 'src', 'edit.txt'), 'concurrent-user-change', 'utf8');
+      return {
+        success: true,
+        output: 'staged write',
+        worker: { role, pid: process.pid + 1, durationMs: 1, sanitizedEnv: true, inheritedEnvKeyCount: 0, allowedEnvKeys: [], blockedEnvKeys: [] }
+      };
+    }
+  };
+  const conflictedTransaction = await new TransactionalEditExecutor(conflictWorker as any).dispatch(conflictWorkspace, 'Editor', {
+    name: 'write_file',
+    arguments: { path: 'src/edit.txt', content: 'worker-result' }
+  });
+  assert.equal(conflictedTransaction.success, false, 'concurrent source change must refuse transaction merge.');
+  assert.equal(conflictedTransaction.transaction.conflict, true);
+  assert.equal(conflictedTransaction.transaction.committed, false);
+  assert.equal(fs.readFileSync(path.join(conflictWorkspace, 'src', 'edit.txt'), 'utf8'), 'concurrent-user-change', 'transaction conflict must preserve concurrent source bytes.');
+
+  const commandTransactionWorkspace = createTempWorkspace('forge-command-transaction-');
+  fs.mkdirSync(path.join(commandTransactionWorkspace, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(commandTransactionWorkspace, 'src', 'modify.txt'), 'before', 'utf8');
+  fs.writeFileSync(path.join(commandTransactionWorkspace, 'src', 'delete.txt'), 'remove me', 'utf8');
+  const commandTransaction = await new TransactionalCommandExecutor().dispatch(commandTransactionWorkspace, 'Reviewer', {
+    name: 'run_command',
+    arguments: { command: 'node -e "const fs=require(\'fs\'); fs.writeFileSync(\'src/modify.txt\',\'after\'); fs.writeFileSync(\'src/create.txt\',\'created\'); fs.rmSync(\'src/delete.txt\')"' }
+  });
+  assert.equal(commandTransaction.success, true, 'non-git command transaction should commit all staged paths together.');
+  assert.equal(commandTransaction.commandTransaction.mode, 'workspace-copy');
+  assert.equal(commandTransaction.commandTransaction.committed, true);
+  assert.equal(commandTransaction.commandTransaction.mergedFileCount, 3);
+  assert.deepEqual(commandTransaction.commandTransaction.created, ['src/create.txt']);
+  assert.deepEqual(commandTransaction.commandTransaction.modified, ['src/modify.txt']);
+  assert.deepEqual(commandTransaction.commandTransaction.deleted, ['src/delete.txt']);
+  assert.equal(commandTransaction.commandTransaction.cleanupSucceeded, true);
+  assert.equal(fs.readFileSync(path.join(commandTransactionWorkspace, 'src', 'modify.txt'), 'utf8'), 'after');
+  assert.equal(fs.readFileSync(path.join(commandTransactionWorkspace, 'src', 'create.txt'), 'utf8'), 'created');
+  assert.equal(fs.existsSync(path.join(commandTransactionWorkspace, 'src', 'delete.txt')), false);
+
+  const failedCommandWorkspace = createTempWorkspace('forge-command-failed-');
+  const failedCommandTransaction = await new TransactionalCommandExecutor().dispatch(failedCommandWorkspace, 'Reviewer', {
+    name: 'run_command',
+    arguments: { command: 'node -e "require(\'fs\').writeFileSync(\'should-not-merge.txt\',\'staged\'); process.exit(1)"' }
+  });
+  assert.equal(failedCommandTransaction.success, false, 'failed command must not merge staged side effects.');
+  assert.equal(failedCommandTransaction.commandTransaction.committed, false);
+  assert.equal(fs.existsSync(path.join(failedCommandWorkspace, 'should-not-merge.txt')), false);
+
+  const directSourceReference = await new TransactionalCommandExecutor().dispatch(failedCommandWorkspace, 'Reviewer', {
+    name: 'run_command',
+    arguments: { command: `node -e "require('fs').writeFileSync('${failedCommandWorkspace.replace(/\\/g, '/')}/direct.txt','unsafe')"` }
+  });
+  assert.equal(directSourceReference.success, false, 'explicit active-workspace path must be rejected before worker launch.');
+  assert.match(directSourceReference.output, /explicit reference to the active workspace root/);
+  assert.equal(directSourceReference.commandTransaction.workerPid, 0);
+  assert.equal(fs.existsSync(path.join(failedCommandWorkspace, 'direct.txt')), false);
+
+  const commandConflictWorkspace = createTempWorkspace('forge-command-conflict-');
+  fs.writeFileSync(path.join(commandConflictWorkspace, 'target.txt'), 'before', 'utf8');
+  const commandConflictWorker = {
+    dispatch: async (stagingRoot: string, role: string) => {
+      fs.writeFileSync(path.join(stagingRoot, 'target.txt'), 'command-result', 'utf8');
+      fs.writeFileSync(path.join(commandConflictWorkspace, 'target.txt'), 'concurrent-user-change', 'utf8');
+      return {
+        success: true,
+        output: 'staged command',
+        worker: { role, pid: process.pid + 2, durationMs: 1, sanitizedEnv: true, inheritedEnvKeyCount: 0, allowedEnvKeys: [], blockedEnvKeys: [] }
+      };
+    }
+  };
+  const commandConflict = await new TransactionalCommandExecutor(commandConflictWorker as any).dispatch(commandConflictWorkspace, 'Reviewer', {
+    name: 'run_command', arguments: { command: 'mock command' }
+  });
+  assert.equal(commandConflict.success, false, 'concurrent source change must refuse the entire command transaction.');
+  assert.equal(commandConflict.commandTransaction.conflict, true);
+  assert.equal(commandConflict.commandTransaction.mergedFileCount, 0);
+  assert.equal(fs.readFileSync(path.join(commandConflictWorkspace, 'target.txt'), 'utf8'), 'concurrent-user-change');
+
+  const commandRollbackWorkspace = createTempWorkspace('forge-command-rollback-');
+  fs.writeFileSync(path.join(commandRollbackWorkspace, 'a.txt'), 'a-before', 'utf8');
+  fs.writeFileSync(path.join(commandRollbackWorkspace, 'b.txt'), 'b-before', 'utf8');
+  const commandRollbackWorker = {
+    dispatch: async (stagingRoot: string, role: string) => {
+      fs.writeFileSync(path.join(stagingRoot, 'a.txt'), 'a-after', 'utf8');
+      fs.writeFileSync(path.join(stagingRoot, 'b.txt'), 'b-after', 'utf8');
+      return {
+        success: true,
+        output: 'staged two-file command',
+        worker: { role, pid: process.pid + 3, durationMs: 1, sanitizedEnv: true, inheritedEnvKeyCount: 0, allowedEnvKeys: [], blockedEnvKeys: [] }
+      };
+    }
+  };
+  const commandRollback = await new TransactionalCommandExecutor(
+    commandRollbackWorker as any,
+    (stagedPath: string, targetPath: string, index: number) => {
+      if (index === 1) throw new Error('injected second-file merge failure');
+      fs.copyFileSync(stagedPath, targetPath);
+    }
+  ).dispatch(commandRollbackWorkspace, 'Reviewer', { name: 'run_command', arguments: { command: 'mock two-file command' } });
+  assert.equal(commandRollback.success, false, 'partial merge failure must fail the command transaction.');
+  assert.equal(commandRollback.commandTransaction.rollbackAttempted, true);
+  assert.equal(commandRollback.commandTransaction.rollbackSucceeded, true);
+  assert.equal(commandRollback.commandTransaction.committed, false);
+  assert.equal(fs.readFileSync(path.join(commandRollbackWorkspace, 'a.txt'), 'utf8'), 'a-before', 'rollback must restore the first file after the second merge fails.');
+  assert.equal(fs.readFileSync(path.join(commandRollbackWorkspace, 'b.txt'), 'utf8'), 'b-before');
   const safeNetworkRead = classifyCommandNetworkIntent('curl https://example.test/status');
   assert.equal(safeNetworkRead.risk, 'read', 'GET-like curl should classify as read-only network intent.');
   assert.equal(safeNetworkRead.decision, 'allowed', 'read-only network intent should remain available for repository research and downloads.');
@@ -118,6 +289,9 @@ export async function run(): Promise<void> {
   const commandPolicyFirewall = new Firewall(new WorkspaceTools(workspace));
   assert.equal(commandPolicyFirewall.validateCommand('git push origin main').valid, false, 'git push must be rejected as outbound network mutation.');
   assert.equal(commandPolicyFirewall.validateCommand('npm publish').valid, false, 'package publication must be rejected as outbound network mutation.');
+  assert.equal(commandPolicyFirewall.validateCommand('git commit -am "agent commit"').valid, false, 'shared git history mutation must be rejected.');
+  assert.equal(commandPolicyFirewall.validateCommand('git config user.name Forge').valid, false, 'shared git configuration mutation must be rejected.');
+  assert.equal(commandPolicyFirewall.validateCommand('git status --short').valid, true, 'read-only git inspection should remain allowed.');
   assert.equal(commandPolicyFirewall.validateCommand('curl https://example.test/status').valid, true, 'read-only network command intent should pass deterministic policy.');
   const blockedNetworkWorkspace = createTempWorkspace('forge-network-block-');
   const blockedNetworkProvider = {
@@ -553,9 +727,15 @@ export async function run(): Promise<void> {
   assert.ok(commandState.commandEffects.some((entry: any) => entry.sandbox?.blockedEnvKeys?.includes('FORGE_SANDBOX_SECRET')), 'command sandbox should block non-allowlisted secret env keys.');
   assert.ok(commandState.commandEffects.every((entry: any) => !(entry.sandbox?.allowedEnvKeys || []).includes('FORGE_SANDBOX_SECRET')), 'command sandbox must not allow the secret env key.');
   assert.equal(commandState.runStats.commandEffectCaptures, 1, 'command side-effect capture should be counted.');
+  assert.equal(commandState.runStats.commandTransactions, 1, 'command transaction should be counted.');
+  assert.equal(commandState.runStats.commandTransactionMergedFiles, 1, 'merged command files should be counted.');
+  assert.equal(commandState.workerCommandTransactions[0]?.committed, true, 'main loop must persist committed command transaction evidence.');
+  assert.equal(commandState.commandEffects[0]?.transactionId, commandState.workerCommandTransactions[0]?.id, 'side-effect evidence must link to its command transaction.');
   const commandEffectsArtifact = JSON.parse(fs.readFileSync(path.join(commandWorkspace, '.forge', 'command-effects.json'), 'utf8'));
   assert.ok(commandEffectsArtifact.some((entry: any) => entry.created.includes('generated/effect.txt')), 'command side-effect artifact should persist created file.');
   assert.ok(commandEffectsArtifact.some((entry: any) => entry.sandbox?.blockedEnvKeys?.includes('FORGE_SANDBOX_SECRET')), 'command side-effect artifact should persist sandbox blocked key names.');
+  const commandTransactionsArtifact = JSON.parse(fs.readFileSync(path.join(commandWorkspace, '.forge', 'worker-command-transactions.json'), 'utf8'));
+  assert.equal(commandTransactionsArtifact[0]?.mergedFileCount, 1, 'command transaction artifact should persist merged-file evidence.');
   const versionResult = await new WorkspaceTools(commandWorkspace).runCommand('curl.exe --version');
   assert.equal(versionResult.success, true, 'curl version probe should execute without making a network request.');
   assert.equal(versionResult.commandMetadata?.network.detected, true, 'command metadata should capture network-capable command intent.');
@@ -677,6 +857,40 @@ export async function run(): Promise<void> {
   assert.equal(isolatedReport.baseCommit, null, 'copy-mode isolation should not report a base commit.');
 
   const runGitTest = (cwd: string, args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).toString().trim();
+  const transactionGitWorkspace = createTempWorkspace('forge-transaction-worktree-');
+  fs.mkdirSync(path.join(transactionGitWorkspace, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(transactionGitWorkspace, 'src', 'edit.txt'), 'committed baseline\n', 'utf8');
+  runGitTest(transactionGitWorkspace, ['init']);
+  runGitTest(transactionGitWorkspace, ['add', '-A']);
+  runGitTest(transactionGitWorkspace, ['-c', 'user.email=forge@test.local', '-c', 'user.name=Forge Test', 'commit', '-m', 'transaction baseline']);
+  fs.writeFileSync(path.join(transactionGitWorkspace, 'src', 'edit.txt'), 'dirty source bytes\n', 'utf8');
+  const worktreesBeforeTransaction = runGitTest(transactionGitWorkspace, ['worktree', 'list', '--porcelain']);
+  const worktreeTransaction = await new TransactionalEditExecutor().dispatch(transactionGitWorkspace, 'Editor', {
+    name: 'apply_patch',
+    arguments: { path: 'src/edit.txt', patchContent: '<<<<<<< SEARCH\ndirty source bytes\n=======\ntransaction result\n>>>>>>> REPLACE' }
+  });
+  assert.equal(worktreeTransaction.success, true, 'git-backed edit transaction should commit.');
+  assert.equal(worktreeTransaction.transaction.mode, 'git-worktree');
+  assert.equal(worktreeTransaction.transaction.committed, true);
+  assert.equal(worktreeTransaction.transaction.cleanupSucceeded, true);
+  assert.ok(worktreeTransaction.transaction.baseCommit, 'worktree transaction should record base commit.');
+  assert.equal(fs.readFileSync(path.join(transactionGitWorkspace, 'src', 'edit.txt'), 'utf8'), 'transaction result\n', 'dirty source overlay should be the patch base and merge target.');
+  assert.equal(runGitTest(transactionGitWorkspace, ['worktree', 'list', '--porcelain']), worktreesBeforeTransaction, 'transaction worktree must be removed from git registry.');
+
+  fs.writeFileSync(path.join(transactionGitWorkspace, 'src', 'command-dirty.txt'), 'dirty overlay', 'utf8');
+  const worktreesBeforeCommand = runGitTest(transactionGitWorkspace, ['worktree', 'list', '--porcelain']);
+  const worktreeCommand = await new TransactionalCommandExecutor().dispatch(transactionGitWorkspace, 'Reviewer', {
+    name: 'run_command',
+    arguments: { command: 'node -e "const fs=require(\'fs\'); fs.writeFileSync(\'src/command-dirty.txt\', fs.readFileSync(\'src/command-dirty.txt\',\'utf8\')+\'-processed\'); fs.writeFileSync(\'src/command-created.txt\',\'created in command worktree\')"' }
+  });
+  assert.equal(worktreeCommand.success, true, 'git-backed command transaction should commit staged multi-file effects.');
+  assert.equal(worktreeCommand.commandTransaction.mode, 'git-worktree');
+  assert.equal(worktreeCommand.commandTransaction.committed, true);
+  assert.equal(worktreeCommand.commandTransaction.mergedFileCount, 2);
+  assert.ok(worktreeCommand.commandTransaction.baseCommit);
+  assert.equal(fs.readFileSync(path.join(transactionGitWorkspace, 'src', 'command-dirty.txt'), 'utf8'), 'dirty overlay-processed', 'command must execute from current dirty source state.');
+  assert.equal(fs.readFileSync(path.join(transactionGitWorkspace, 'src', 'command-created.txt'), 'utf8'), 'created in command worktree');
+  assert.equal(runGitTest(transactionGitWorkspace, ['worktree', 'list', '--porcelain']), worktreesBeforeCommand, 'command worktree must be removed from git registry.');
   const makeWorktreeProvider = () => {
     let calls = 0;
     return {
@@ -784,11 +998,16 @@ export async function run(): Promise<void> {
   assert.equal(aarOn.clean, false, 'AAR for a reflected run must not be clean.');
   assert.ok(aarOn.triggers.reflectionAttempts >= 1, 'AAR triggers must count reflections.');
   assert.ok(aarOn.lessonsBanked.length >= 1, 'non-clean AAR must bank at least one lesson.');
+  assert.ok(aarOn.skillsBanked.length >= 1, 'verified reflected success must bank at least one procedural skill.');
   assert.ok(fs.existsSync(path.join(aarOnFixture, '.forge', 'lessons.json')), 'banked lessons must persist to lessons.json.');
+  const aarOnSkills = JSON.parse(fs.readFileSync(path.join(aarOnFixture, '.forge', 'skill-registry.json'), 'utf8'));
+  assert.ok(aarOnSkills.some((skill: any) => skill.successfulRuns >= 1 && skill.sourceSessionIds?.length), 'successful recovery skill must persist verified provenance.');
   const aarOff = JSON.parse(fs.readFileSync(path.join(aarOffFixture, '.forge', 'aar.json'), 'utf8'));
   assert.equal(aarOff.terminalStatus, 'failed', 'off-lane AAR should record the failed terminal state.');
   assert.ok(aarOff.triggers.reflectionSuppressed >= 1, 'off-lane AAR should count suppressed reflections.');
   assert.ok(aarOff.improveTools.some((note: string) => /suppressed/i.test(note)), 'off-lane AAR should flag reflection suppression in improve-tools.');
+  const aarOffSkills = JSON.parse(fs.readFileSync(path.join(aarOffFixture, '.forge', 'skill-registry.json'), 'utf8'));
+  assert.equal(aarOffSkills.length, 0, 'failed reflection-off lane must not teach the skill registry.');
   const aarState = JSON.parse(fs.readFileSync(path.join(aarOnFixture, '.forge', 'state.json'), 'utf8'));
   assert.ok(aarState.aar && aarState.aar.generatedAt, 'terminal state.json must embed the AAR.');
   const cleanState = JSON.parse(fs.readFileSync(path.join(workspace, '.forge', 'state.json'), 'utf8'));
@@ -844,7 +1063,7 @@ export async function run(): Promise<void> {
   assert.equal(isolatedCommandReport.sourceMutated, false, 'isolated command report should prove source workspace stayed unchanged.');
   assert.equal(isolatedCommandReport.reportPath, path.join(workspace, '.forge', 'isolated-runs', 'latest-isolated-run.json'), 'isolated command should persist report in workspace.');
 
-  for (const rel of ['.forge/state.json', '.forge/context-bundle.json', '.forge/retrieval-index.json', '.forge/semantic-retrieval.json', '.forge/role-handoffs.json', '.forge/worker-contexts.json', '.forge/blockers.json', '.forge/safety-checkpoints.json', '.forge/command-effects.json', '.forge/budget.json', '.forge/isolated-runs/latest-isolated-run.json', '.forge/isolated-runs/latest-isolated-run.diff', '.forge/goal-contract.json', '.forge/task-graph.json', '.forge/evidence-ledger.json', '.forge/diff-reviews.json', '.forge/reviewer-critiques.json', '.forge/precommit-reviews.json', '.forge/escalations.json', '.forge/latest-proof-report.json', '.forge/evals/latest-weak-model-eval.json', '.forge/verification-fixture-matrix.json', 'PLAN.md', 'todos.json', 'SCRATCHPAD.md', 'evidence_ledger.json']) {
+  for (const rel of ['.forge/state.json', '.forge/context-bundle.json', '.forge/retrieval-index.json', '.forge/semantic-retrieval.json', '.forge/role-handoffs.json', '.forge/worker-contexts.json', '.forge/worker-edit-transactions.json', '.forge/worker-command-transactions.json', '.forge/skill-registry.json', '.forge/blockers.json', '.forge/safety-checkpoints.json', '.forge/command-effects.json', '.forge/budget.json', '.forge/isolated-runs/latest-isolated-run.json', '.forge/isolated-runs/latest-isolated-run.diff', '.forge/goal-contract.json', '.forge/task-graph.json', '.forge/evidence-ledger.json', '.forge/diff-reviews.json', '.forge/reviewer-critiques.json', '.forge/precommit-reviews.json', '.forge/escalations.json', '.forge/latest-proof-report.json', '.forge/evals/latest-weak-model-eval.json', '.forge/verification-fixture-matrix.json', 'PLAN.md', 'todos.json', 'SCRATCHPAD.md', 'evidence_ledger.json']) {
     assert.ok(fs.existsSync(path.join(workspace, rel)), `${rel} should exist`);
   }
 
@@ -875,6 +1094,14 @@ export async function run(): Promise<void> {
   assert.equal(openedBlockers, path.join(workspace, '.forge', 'blockers.json'), 'blocker ledger should open through native editor command.');
   const openedSemanticRetrieval = await vscode.commands.executeCommand('forge-agent.openArtifact', 'semanticRetrieval');
   assert.equal(openedSemanticRetrieval, path.join(workspace, '.forge', 'semantic-retrieval.json'), 'semantic retrieval report should open through native editor command.');
+  const openedEditTransactions = await vscode.commands.executeCommand('forge-agent.openArtifact', 'editTransactions');
+  assert.equal(openedEditTransactions, path.join(workspace, '.forge', 'worker-edit-transactions.json'), 'edit transaction ledger should open through native editor command.');
+
+  const openedCommandTransactions = await vscode.commands.executeCommand('forge-agent.openArtifact', 'commandTransactions');
+  assert.equal(openedCommandTransactions, path.join(workspace, '.forge', 'worker-command-transactions.json'), 'command transaction ledger should open through native editor command.');
+
+  const openedSkills = await vscode.commands.executeCommand('forge-agent.openArtifact', 'skills');
+  assert.equal(openedSkills, path.join(workspace, '.forge', 'skill-registry.json'), 'procedural skill registry should open through native editor command.');
 
   const openedSafety = await vscode.commands.executeCommand('forge-agent.openArtifact', 'safety');
   assert.equal(openedSafety, path.join(workspace, '.forge', 'safety-checkpoints.json'), 'safety checkpoints should open through native editor command.');
@@ -918,6 +1145,19 @@ export async function run(): Promise<void> {
   assert.ok(typeof autonomousState.runStats.retrievalRefreshes === 'number', 'autonomous run should expose retrieval stats.');
   assert.ok(typeof autonomousState.runStats.safetyCheckpoints === 'number', 'autonomous run should expose safety checkpoint stats.');
   assert.ok(typeof autonomousState.runStats.commandEffectCaptures === 'number', 'autonomous run should expose command side-effect stats.');
+}
+
+export async function run(): Promise<void> {
+  try {
+    await runSuite();
+  } catch (error) {
+    const detail = error instanceof Error ? error.stack || error.message : String(error);
+    console.error(`Forge Agent E2E failure: ${detail}`);
+    const failurePath = path.resolve(__dirname, '..', '..', '..', '.tmp', 'e2e-failure.log');
+    fs.mkdirSync(path.dirname(failurePath), { recursive: true });
+    fs.writeFileSync(failurePath, detail, 'utf8');
+    throw error;
+  }
 }
 
 function workspaceRootForTemp(): string {
