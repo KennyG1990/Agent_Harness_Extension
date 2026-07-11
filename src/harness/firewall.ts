@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { ToolName, ToolProposal } from './types';
 import { findLenientMatch, parseSearchReplaceHunks, WorkspaceTools } from './tools';
+import { classifyCommandNetworkIntent } from './commandNetwork';
 
 export interface ValidationResult {
   valid: boolean;
@@ -119,7 +120,14 @@ export class Firewall {
       'del /s'
     ];
     const hit = blocked.find(keyword => normalized.includes(keyword));
-    return hit ? { valid: false, reason: `Command policy rejected blocked token '${hit}'.` } : { valid: true };
+    if (hit) {
+      return { valid: false, reason: `Command policy rejected blocked token '${hit}'.` };
+    }
+    const network = classifyCommandNetworkIntent(command);
+    if (network.decision === 'blocked') {
+      return { valid: false, reason: `[network_intent_blocked] ${network.reason}` };
+    }
+    return { valid: true };
   }
 
   public validatePatchApplicability(relativePath: string, patchContent: string): ValidationResult {

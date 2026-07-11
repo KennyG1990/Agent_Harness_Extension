@@ -115,33 +115,40 @@ async function runLane(task: AbTask, reflectionEnabled: boolean, options: Reflec
  * the prompt, so solving is causally dependent on the reflection mechanism.
  */
 export function createScriptedRecoveryProvider(task: AbTask): Provider {
-  let calls = 0;
+  let editorCalls = 0;
   let correctPatchProposed = false;
-  let testsRequested = false;
   return {
     capabilities: () => ({ structuredOutput: true, toolCalls: true, vision: false, contextLength: 128000 }),
     listModels: async () => [],
     generateChat: async (chatOptions: any) => {
-      calls += 1;
       const prompt = (chatOptions.messages || []).map((message: any) => message.content).join('\n');
       const sawReflection = REFLECTION_CONTEXT_MARKER.test(prompt);
       let proposal: any;
-      if (calls === 1) {
-        proposal = { name: 'update_plan', arguments: { planMd: `# PLAN.md\n\nFix ${task.filePath} until tests pass.` } };
-      } else if (!correctPatchProposed && !sawReflection) {
-        proposal = { name: 'apply_patch', arguments: { path: task.filePath, patchContent: patchFor(task.broken, task.wrong) } };
-      } else if (!correctPatchProposed && sawReflection) {
-        correctPatchProposed = true;
-        proposal = { name: 'apply_patch', arguments: { path: task.filePath, patchContent: patchFor(task.wrong, task.fixed) } };
-      } else if (!testsRequested) {
-        testsRequested = true;
-        proposal = { name: 'run_tests', arguments: {} };
+      if (prompt.includes('Active task: Inspect workspace')) {
+        proposal = { name: 'read_file', arguments: { path: task.filePath } };
+      } else if (prompt.includes('Active task: Create or update')) {
+        proposal = {
+          name: 'update_plan',
+          arguments: {
+            planMd: `# PLAN.md\n\n## Premise Checks\n- ${task.filePath} contains the behavior under test.\n\n## Focus Files\n- ${task.filePath}\n\n## Ordered Steps\n1. Correct ${task.filePath}.\n2. Run tests.`
+          }
+        };
+      } else if (prompt.includes('Active task: Apply scoped')) {
+        editorCalls += 1;
+        if (editorCalls === 1 && !sawReflection) {
+          proposal = { name: 'apply_patch', arguments: { path: task.filePath, patchContent: patchFor(task.broken, task.wrong) } };
+        } else if (!correctPatchProposed && sawReflection) {
+          correctPatchProposed = true;
+          proposal = { name: 'apply_patch', arguments: { path: task.filePath, patchContent: patchFor(task.wrong, task.fixed) } };
+        } else {
+          proposal = { name: 'read_file', arguments: { path: task.filePath } };
+        }
       } else {
         proposal = { name: 'get_diff', arguments: {} };
       }
       return {
         text: JSON.stringify({
-          explanation: `Reflection A/B scripted proposal ${calls} (reflection context seen: ${sawReflection}).`,
+          explanation: `Reflection A/B role-aware scripted proposal (editor calls: ${editorCalls}, reflection context seen: ${sawReflection}).`,
           proposal
         })
       };

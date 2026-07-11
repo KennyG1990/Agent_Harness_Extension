@@ -254,11 +254,11 @@ export default function App() {
 
   const runIsolatedAgentGoal = () => {
     setIsBusy(true);
-    setStatusMessage('Running Forge Agent in an isolated workspace copy...');
+    setStatusMessage('Running Forge Agent in an isolated worktree (copy fallback for non-git workspaces)...');
     vscode?.postMessage({
       command: 'run-isolated-agent-goal',
       options: {
-        goal: 'Run Forge Agent in an isolated workspace copy and report whether the source workspace stayed unchanged.',
+        goal: 'Run Forge Agent in an isolated worktree or fallback copy and report whether the source workspace stayed unchanged.',
         modelBindings: bindings,
         maxSteps: 6,
         keepIsolated: true
@@ -549,7 +549,7 @@ export default function App() {
               <div data-testid="run-status-line" className="mt-2 flex items-center justify-between gap-2 text-[10px] text-slate-500">
                 <span className="truncate">{state?.status || 'idle'} · {activeTask?.title || statusMessage}</span>
                 <span className="shrink-0 font-mono">
-                  tests {state?.oracleStatuses.tests || '-'} · cost ${budgetSpent.toFixed(4)}/${budgetCap.toFixed(2)} · halt {state?.runStats?.budgetHalts ?? 0} · model {state?.runStats?.modelDrivenProposals ?? 0} · fallback {state?.runStats?.fallbackActions ?? 0} · repair {state?.runStats?.repairAttempts ?? 0} · reflect {state?.runStats?.reflectionAttempts ?? 0} · review {state?.runStats?.reviewerApprovals ?? 0} · crit {state?.runStats?.reviewerCritiques ?? 0} · pre {state?.runStats?.preCommitReviews ?? 0} · cmd {state?.runStats?.commandEffectCaptures ?? 0} · esc {state?.runStats?.escalationCount ?? 0} · ctx {state?.runStats?.contextRefreshes ?? 0} · hand {state?.runStats?.roleHandoffRefreshes ?? 0} · ret {state?.runStats?.retrievalRefreshes ?? 0} · safe {state?.runStats?.safetyCheckpoints ?? 0}
+                  tests {state?.oracleStatuses.tests || '-'} · cost ${budgetSpent.toFixed(4)}/${budgetCap.toFixed(2)} · halt {state?.runStats?.budgetHalts ?? 0} · model {state?.runStats?.modelDrivenProposals ?? 0} · fallback {state?.runStats?.fallbackActions ?? 0} · repair {state?.runStats?.repairAttempts ?? 0} · reflect {state?.runStats?.reflectionAttempts ?? 0} · review {state?.runStats?.reviewerApprovals ?? 0} · crit {state?.runStats?.reviewerCritiques ?? 0} · pre {state?.runStats?.preCommitReviews ?? 0} · cmd {state?.runStats?.commandEffectCaptures ?? 0} · net {state?.runStats?.networkIntentCaptures ?? 0}/{state?.runStats?.networkWriteBlocks ?? 0} · perm {state?.runStats?.roleCapabilityBlocks ?? 0} · proc {state?.runStats?.workerProcessExecutions ?? 0}/{state?.runStats?.workerProcessFailures ?? 0} · blk {state?.runStats?.openBlockers ?? 0}/{state?.runStats?.blockerEvents ?? 0} · sem {state?.runStats?.semanticRefreshes ?? 0}/{state?.runStats?.semanticFailures ?? 0} · esc {state?.runStats?.escalationCount ?? 0} · ctx {state?.runStats?.contextRefreshes ?? 0} · hand {state?.runStats?.roleHandoffRefreshes ?? 0} · ret {state?.runStats?.retrievalRefreshes ?? 0} · safe {state?.runStats?.safetyCheckpoints ?? 0}
                 </span>
               </div>
             </div>
@@ -597,7 +597,7 @@ export default function App() {
 
             <Panel title="Isolated Run">
               <p className="text-[11px] text-slate-400 mb-2">
-                Runs the normal harness against a temp workspace copy and proves whether the source workspace changed.
+                Runs the harness in a git worktree (copy fallback for non-git workspaces) and proves whether the source changed.
               </p>
               <div className="grid grid-cols-2 gap-2">
                 <button data-testid="run-isolated-agent-goal" onClick={runIsolatedAgentGoal} disabled={isBusy} className="forge-primary">

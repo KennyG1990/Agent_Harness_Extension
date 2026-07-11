@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { exec } from 'child_process';
 import { CommandExecutionMetadata, ToolName, ToolProposal } from './types';
+import { classifyCommandNetworkIntent } from './commandNetwork';
 
 export interface ToolResult {
   success: boolean;
@@ -112,6 +113,7 @@ export class WorkspaceTools {
       const timeoutMs = 120000;
       const started = Date.now();
       const sandbox = buildCommandSandbox(cwd, timeoutMs);
+      const network = classifyCommandNetworkIntent(command);
       exec(command, { cwd, timeout: timeoutMs, maxBuffer: 1024 * 1024 * 8, env: sandbox.env }, (error: any, stdout, stderr) => {
         const output = `${stdout}${stderr}`;
         const metadata: CommandExecutionMetadata = {
@@ -123,7 +125,8 @@ export class WorkspaceTools {
           sanitizedEnv: true,
           inheritedEnvKeyCount: Object.keys(process.env).length,
           allowedEnvKeys: sandbox.allowedEnvKeys,
-          blockedEnvKeys: sandbox.blockedEnvKeys
+          blockedEnvKeys: sandbox.blockedEnvKeys,
+          network
         };
         resolve({ success: !error, output: error ? `Command failed: ${error.message}\n${output}` : output, commandMetadata: metadata });
       });

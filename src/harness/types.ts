@@ -151,6 +151,27 @@ export interface EscalationEntry {
   timestamp: string;
 }
 
+export type BlockerSource = 'provider' | 'schema' | 'firewall' | 'precommit' | 'tool' | 'oracle' | 'budget' | 'progress' | 'step_cap';
+export type BlockerCategory = 'provider' | 'schema' | 'role_capability' | 'workspace_scope' | 'command_policy' | 'network_policy' | 'patch_format' | 'patch_applicability' | 'firewall' | 'precommit_review' | 'worker_process' | 'tool_failure' | 'oracle' | 'budget' | 'no_progress' | 'step_cap';
+
+export interface BlockerEntry {
+  id: string;
+  source: BlockerSource;
+  category: BlockerCategory;
+  status: 'open' | 'resolved' | 'terminal';
+  retryable: boolean;
+  taskId: string;
+  taskTitle: string;
+  role: string;
+  summary: string;
+  suggestedAction: string;
+  occurrences: number;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  resolvedAt?: string;
+  resolution?: string;
+}
+
 export interface ContextBundle {
   generatedAt: string;
   goal: string;
@@ -161,6 +182,7 @@ export interface ContextBundle {
   recentReflections: string[];
   recentEscalations: string[];
   recentReviews: string[];
+  recentBlockers: string[];
   recentLessons?: string[];
   scratchpadSummary: string;
   retrievalPolicy: string[];
@@ -187,6 +209,8 @@ export interface AarTriggerCounts {
   repairAttempts: number;
   safetyReverts: number;
   noProgressTurns: number;
+  blockerEvents: number;
+  terminalBlockers: number;
 }
 
 export interface LessonEntry {
@@ -220,16 +244,59 @@ export interface RetrievalCandidate {
   score: number;
   reason: string;
   language: string;
+  semanticScore?: number;
+  source?: 'deterministic' | 'hybrid';
+}
+
+export interface SemanticRetrievalState {
+  generatedAt: string;
+  status: 'ready' | 'disabled' | 'failed';
+  provider: string;
+  modelId: string;
+  query: string;
+  cacheHits: number;
+  embeddedDocuments: number;
+  candidates: Array<{ path: string; similarity: number }>;
+  error?: string;
 }
 
 export interface RoleHandoff {
   role: string;
   generatedAt: string;
-  allowedTools: string[];
+  allowedTools: ToolName[];
   responsibilities: string[];
   openTasks: string[];
   recentContext: string[];
   handoffSummary: string;
+}
+
+export interface WorkerContext {
+  role: string;
+  sessionId: string;
+  allowedTools: ToolName[];
+  createdAt: string;
+  updatedAt: string;
+  providerCalls: number;
+  acceptedProposals: number;
+  rejectedProposals: number;
+  processExecutions: number;
+  processFailures: number;
+  lastWorkerPid: number | null;
+  lastWorkerDurationMs: number;
+  lastWorkerBlockedEnvKeys: string[];
+  recentTools: ToolName[];
+  lastTaskId: string;
+  lastTaskTitle: string;
+}
+
+export interface ArchitectHandoff {
+  generatedAt: string;
+  sourceTaskId: string;
+  sourceTaskTitle: string;
+  planMd: string;
+  focusFiles: string[];
+  premiseChecks: string[];
+  orderedSteps: string[];
 }
 
 export interface SafetyCheckpoint {
@@ -263,6 +330,7 @@ export interface CommandExecutionMetadata {
   inheritedEnvKeyCount: number;
   allowedEnvKeys: string[];
   blockedEnvKeys: string[];
+  network: import('./commandNetwork').CommandNetworkIntent;
 }
 
 export interface RunBudget {
@@ -305,6 +373,18 @@ export interface RunStats {
   commandCreatedFiles: number;
   commandModifiedFiles: number;
   commandDeletedFiles: number;
+  networkIntentCaptures: number;
+  networkWriteBlocks: number;
+  roleCapabilityBlocks: number;
+  workerProcessExecutions: number;
+  workerProcessFailures: number;
+  blockerEvents: number;
+  openBlockers: number;
+  resolvedBlockers: number;
+  semanticRefreshes: number;
+  semanticFailures: number;
+  semanticCacheHits: number;
+  semanticEmbeddedDocuments: number;
   budgetHalts: number;
   noProgressTurns: number;
   lastProgressSignature: string;
@@ -333,8 +413,12 @@ export interface HarnessState {
   reviewerCritiques: ReviewerCritiqueEntry[];
   preCommitReviews: PreCommitReviewEntry[];
   escalations: EscalationEntry[];
+  blockers: BlockerEntry[];
+  semanticRetrieval: SemanticRetrievalState;
   contextBundle: ContextBundle;
   roleHandoffs: Record<string, RoleHandoff>;
+  workerContexts: Record<string, WorkerContext>;
+  architectHandoff?: ArchitectHandoff;
   safetyCheckpoints: SafetyCheckpoint[];
   commandEffects: CommandSideEffectEntry[];
   runBudget: RunBudget;

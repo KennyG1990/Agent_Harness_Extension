@@ -15,11 +15,189 @@ export async function run(): Promise<void> {
   const workspace = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   assert.ok(workspace, 'fixture workspace should be open.');
 
-  const { AgentHarnessLoop } = await import('../../harness/loop');
+  const { AgentHarnessLoop, extractPlanFocusFiles } = await import('../../harness/loop');
   const { Firewall } = await import('../../harness/firewall');
   const { WorkspaceTools } = await import('../../harness/tools');
+  const { ProcessWorkerExecutor } = await import('../../harness/workerExecutor');
+  const { classifyBlocker } = await import('../../harness/blockers');
+  const { rankSemantically } = await import('../../harness/semanticRetrieval');
+  const { classifyCommandNetworkIntent } = await import('../../harness/commandNetwork');
   const { runIsolatedAgentGoal } = await import('../../harness/isolation');
   const { assemblePromptWithinBudget } = await import('../../harness/contextBudget');
+  assert.equal(classifyBlocker('firewall', '[role_capability_blocked] Editor cannot use declare_success.').category, 'role_capability', 'role denials need a distinct blocker category.');
+  assert.equal(classifyBlocker('firewall', '[network_intent_blocked] outbound upload denied.').category, 'network_policy', 'network policy needs a distinct blocker category.');
+  assert.equal(classifyBlocker('firewall', 'Edit applicability failed: search block not found.').category, 'patch_applicability', 'patch drift needs an applicability category.');
+  assert.equal(classifyBlocker('budget', 'cost cap reached').retryable, false, 'budget blockers must not spin within the same run.');
+  const semanticCacheWorkspace = createTempWorkspace('forge-semantic-cache-');
+  let semanticEmbedCalls = 0;
+  const causalEmbeddingProvider = {
+    id: 'mock-semantic',
+    modelId: 'mock/causal-embedding',
+    embed: async (inputs: string[]) => {
+      semanticEmbedCalls += 1;
+      return inputs.map(input => /repair login flow|credential token verification|verifycredential/i.test(input) ? [1, 0] : [0, 1]);
+    }
+  };
+  const semanticDocuments = [
+    { path: 'src/auth.ts', text: 'credential token verification and session identity checks' },
+    { path: 'src/math.ts', text: 'numeric addition and subtraction helpers' }
+  ];
+  const firstSemanticRank = await rankSemantically(semanticCacheWorkspace, 'repair login flow', semanticDocuments, causalEmbeddingProvider, 2);
+  assert.equal(firstSemanticRank.candidates[0].path, 'src/auth.ts', 'semantic retrieval must surface conceptually related content without lexical overlap.');
+  assert.equal(firstSemanticRank.status, 'ready');
+  const callsAfterFirstSemanticRank = semanticEmbedCalls;
+  const secondSemanticRank = await rankSemantically(semanticCacheWorkspace, 'repair login flow', semanticDocuments, causalEmbeddingProvider, 2);
+  assert.equal(semanticEmbedCalls, callsAfterFirstSemanticRank, 'identical semantic retrieval must reuse cached query and document vectors.');
+  assert.equal(secondSemanticRank.cacheHits, 3, 'cache report should count query plus both document vectors.');
+
+  const semanticLoopWorkspace = createTempWorkspace('forge-semantic-loop-');
+  fs.mkdirSync(path.join(semanticLoopWorkspace, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(semanticLoopWorkspace, 'src', 'auth.ts'), 'export function verifyCredential(token) { return Boolean(token); }\n', 'utf8');
+  fs.writeFileSync(path.join(semanticLoopWorkspace, 'src', 'math.ts'), 'export const add = (a, b) => a + b;\n', 'utf8');
+  fs.writeFileSync(path.join(semanticLoopWorkspace, 'package.json'), JSON.stringify({ scripts: { test: 'node -e "process.exit(0)"' } }, null, 2), 'utf8');
+  let semanticPrompt = '';
+  const semanticProposalProvider = {
+    capabilities: () => ({ structuredOutput: true, toolCalls: true, vision: false, contextLength: 128000 }),
+    listModels: async () => [],
+    generateChat: async (request: any) => {
+      semanticPrompt = request.messages.find((message: any) => message.role === 'system')?.content || '';
+      return { text: JSON.stringify({ explanation: 'Read the semantically selected authentication file.', proposal: { name: 'read_file', arguments: { path: 'src/auth.ts' } } }) };
+    }
+  };
+  const semanticLoop = new AgentHarnessLoop(semanticProposalProvider as any, semanticLoopWorkspace, causalEmbeddingProvider as any);
+  let semanticState = await semanticLoop.initializeHarness('Repair login flow.');
+  semanticState = await semanticLoop.runStep(semanticState, {});
+  assert.equal(semanticState.semanticRetrieval.status, 'ready', 'product loop should persist ready semantic provenance.');
+  assert.equal(semanticState.contextBundle.retrievalCandidates[0].path, 'src/auth.ts', `hybrid product ranking should place the semantic match first: ${JSON.stringify(semanticState.contextBundle.retrievalCandidates.slice(0, 5))}`);
+  assert.equal(semanticState.contextBundle.retrievalCandidates[0].source, 'hybrid', 'semantic contribution must be explicit on the candidate.');
+  assert.match(semanticPrompt, /semantic cosine/, 'model prompt should expose why semantic retrieval ranked the file.');
+
+  const failingEmbeddingProvider = { id: 'mock-failure', modelId: 'mock/failure', embed: async () => { throw new Error('mock embedding outage'); } };
+  const semanticFallbackLoop = new AgentHarnessLoop(semanticProposalProvider as any, semanticLoopWorkspace, failingEmbeddingProvider as any);
+  let semanticFallbackState = await semanticFallbackLoop.initializeHarness('Find authentication implementation.');
+  semanticFallbackState = await semanticFallbackLoop.runStep(semanticFallbackState, {});
+  assert.equal(semanticFallbackState.semanticRetrieval.status, 'failed', 'embedding outage must remain explicit.');
+  assert.ok(semanticFallbackState.contextBundle.retrievalCandidates.length > 0, 'deterministic retrieval must remain available after embedding failure.');
+  assert.equal(semanticFallbackState.runStats.semanticFailures, 1, 'semantic failure should be counted without failing the agent run.');
+  const processWorkerWorkspace = createTempWorkspace('forge-process-worker-');
+  fs.mkdirSync(path.join(processWorkerWorkspace, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(processWorkerWorkspace, 'src', 'worker.txt'), 'before', 'utf8');
+  process.env.FORGE_WORKER_SECRET = 'must-not-cross-worker-boundary';
+  const processWorker = new ProcessWorkerExecutor();
+  const workerWrite = await processWorker.dispatch(processWorkerWorkspace, 'Editor', {
+    name: 'write_file',
+    arguments: { path: 'src/worker.txt', content: 'after' }
+  });
+  assert.equal(workerWrite.success, true, 'role-tagged process worker should execute a validated file write.');
+  assert.notEqual(workerWrite.worker.pid, process.pid, 'workspace tool execution must occur outside the extension-host process.');
+  assert.equal(workerWrite.worker.role, 'Editor', 'worker evidence should preserve the active role.');
+  assert.equal(workerWrite.worker.sanitizedEnv, true, 'worker process should report sanitized environment inheritance.');
+  assert.ok(workerWrite.worker.blockedEnvKeys.includes('FORGE_WORKER_SECRET'), 'worker process must strip deliberate secret environment keys.');
+  assert.ok(!workerWrite.worker.allowedEnvKeys.includes('FORGE_WORKER_SECRET'), 'worker process must never list stripped secrets as allowed.');
+  assert.equal(fs.readFileSync(path.join(processWorkerWorkspace, 'src', 'worker.txt'), 'utf8'), 'after', 'worker mutation should be visible in the isolated fixture workspace.');
+  const workerSecretProbe = await processWorker.dispatch(processWorkerWorkspace, 'Reviewer', {
+    name: 'run_command',
+    arguments: { command: 'node -e "console.log(Boolean(process.env.FORGE_WORKER_SECRET))"' }
+  });
+  delete process.env.FORGE_WORKER_SECRET;
+  assert.equal(workerSecretProbe.success, true, 'worker secret probe command should execute.');
+  assert.match(workerSecretProbe.output, /false/, 'worker child and its command descendants must not receive the stripped secret.');
+  const workerFailure = await processWorker.dispatch(processWorkerWorkspace, 'Explorer', {
+    name: 'not_a_tool' as any,
+    arguments: {}
+  });
+  assert.equal(workerFailure.success, false, 'worker tool failure must return honestly instead of being promoted to success.');
+  assert.match(workerFailure.output, /Unknown tool/, 'worker failure should retain the concrete tool error.');
+  const safeNetworkRead = classifyCommandNetworkIntent('curl https://example.test/status');
+  assert.equal(safeNetworkRead.risk, 'read', 'GET-like curl should classify as read-only network intent.');
+  assert.equal(safeNetworkRead.decision, 'allowed', 'read-only network intent should remain available for repository research and downloads.');
+  assert.deepEqual(safeNetworkRead.endpoints, ['https://example.test/status'], 'network classifier should preserve explicit endpoints for evidence.');
+  const blockedNetworkWrite = classifyCommandNetworkIntent('curl -X POST --data "payload" https://example.test/upload');
+  assert.equal(blockedNetworkWrite.risk, 'write', 'upload-like curl should classify as outbound write intent.');
+  assert.equal(blockedNetworkWrite.decision, 'blocked', 'outbound write intent must be blocked before execution.');
+  const commandPolicyFirewall = new Firewall(new WorkspaceTools(workspace));
+  assert.equal(commandPolicyFirewall.validateCommand('git push origin main').valid, false, 'git push must be rejected as outbound network mutation.');
+  assert.equal(commandPolicyFirewall.validateCommand('npm publish').valid, false, 'package publication must be rejected as outbound network mutation.');
+  assert.equal(commandPolicyFirewall.validateCommand('curl https://example.test/status').valid, true, 'read-only network command intent should pass deterministic policy.');
+  const blockedNetworkWorkspace = createTempWorkspace('forge-network-block-');
+  const blockedNetworkProvider = {
+    capabilities: () => ({ structuredOutput: true, toolCalls: true, vision: false, contextLength: 128000 }),
+    listModels: async () => [],
+    generateChat: async () => ({
+      text: JSON.stringify({
+        explanation: 'Attempt an outbound repository mutation.',
+        proposal: { name: 'run_command', arguments: { command: 'git push origin main' } }
+      })
+    })
+  };
+  const blockedNetworkLoop = new AgentHarnessLoop(blockedNetworkProvider as any, blockedNetworkWorkspace);
+  let blockedNetworkState = await blockedNetworkLoop.initializeHarness('Prove outbound network mutation is rejected before execution.');
+  blockedNetworkState.taskGraph.tasks[0].status = 'completed';
+  blockedNetworkState.taskGraph.tasks[1].status = 'completed';
+  blockedNetworkState.taskGraph.tasks[2].status = 'completed';
+  blockedNetworkState = await blockedNetworkLoop.runStep(blockedNetworkState, {});
+  assert.equal(blockedNetworkState.runStats.networkWriteBlocks, 1, 'blocked network mutation should increment an explicit run counter.');
+  assert.equal(blockedNetworkState.commandEffects.length, 0, 'blocked network mutation must never reach command execution or its post-execution ledger.');
+  assert.match(String(blockedNetworkState.firewall.validationReason), /network_intent_blocked/, 'firewall evidence should identify network-intent policy as the rejection source.');
+  assert.ok(blockedNetworkState.blockers.some((blocker: any) => blocker.category === 'network_policy' && blocker.status === 'open'), 'network rejection should persist a retryable open blocker.');
+
+  const roleSessionIds: string[] = [];
+  const editorEscapeProvider = {
+    capabilities: () => ({ structuredOutput: true, toolCalls: true, vision: false, contextLength: 128000 }),
+    listModels: async () => [],
+    generateChat: async (request: any) => {
+      roleSessionIds.push(request.sessionId);
+      return {
+        text: JSON.stringify({
+          explanation: 'Editor attempts to bypass reviewer evidence gates.',
+          proposal: { name: 'declare_success', arguments: {} }
+        })
+      };
+    }
+  };
+  const roleWorkspace = createTempWorkspace('forge-role-capability-');
+  fs.mkdirSync(path.join(roleWorkspace, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(roleWorkspace, 'src', 'guard.txt'), 'unchanged', 'utf8');
+  const editorEscapeLoop = new AgentHarnessLoop(editorEscapeProvider as any, roleWorkspace);
+  let editorEscapeState = await editorEscapeLoop.initializeHarness('Prove Editor cannot claim success.');
+  editorEscapeState.taskGraph.tasks[0].status = 'completed';
+  editorEscapeState.taskGraph.tasks[1].status = 'completed';
+  editorEscapeState = await editorEscapeLoop.runStep(editorEscapeState, {});
+  assert.equal(editorEscapeState.runStats.roleCapabilityBlocks, 1, 'Editor cross-role proposal should increment capability block evidence.');
+  assert.match(String(editorEscapeState.firewall.validationReason), /Editor cannot use declare_success/, 'Editor must not access reviewer-only success declaration.');
+  assert.ok(editorEscapeState.blockers.some((blocker: any) => blocker.category === 'role_capability' && blocker.retryable), 'role violation should persist with deterministic retry policy.');
+  assert.equal(editorEscapeState.workerContexts.Editor.rejectedProposals, 1, 'Editor worker context should retain its rejected proposal count.');
+  assert.match(roleSessionIds[0], /:worker:editor$/, 'Editor provider call must use a role-scoped session identity.');
+
+  const reviewerEscapeProvider = {
+    capabilities: () => ({ structuredOutput: true, toolCalls: true, vision: false, contextLength: 128000 }),
+    listModels: async () => [],
+    generateChat: async (request: any) => {
+      roleSessionIds.push(request.sessionId);
+      return {
+        text: JSON.stringify({
+          explanation: 'Reviewer attempts to mutate a workspace file.',
+          proposal: {
+            name: 'apply_patch',
+            arguments: { path: 'src/guard.txt', patchContent: '<<<<<<< SEARCH\nunchanged\n=======\nmutated\n>>>>>>> REPLACE' }
+          }
+        })
+      };
+    }
+  };
+  const reviewerEscapeLoop = new AgentHarnessLoop(reviewerEscapeProvider as any, roleWorkspace);
+  let reviewerEscapeState = await reviewerEscapeLoop.initializeHarness('Prove Reviewer cannot edit files.');
+  reviewerEscapeState.taskGraph.tasks[0].status = 'completed';
+  reviewerEscapeState.taskGraph.tasks[1].status = 'completed';
+  reviewerEscapeState.taskGraph.tasks[2].status = 'completed';
+  reviewerEscapeState = await reviewerEscapeLoop.runStep(reviewerEscapeState, {});
+  assert.equal(fs.readFileSync(path.join(roleWorkspace, 'src', 'guard.txt'), 'utf8'), 'unchanged', 'Reviewer capability rejection must happen before file mutation.');
+  assert.equal(reviewerEscapeState.runStats.roleCapabilityBlocks, 1, 'Reviewer cross-role proposal should increment capability block evidence.');
+  assert.match(String(reviewerEscapeState.firewall.validationReason), /Reviewer cannot use apply_patch/, 'Reviewer must not access Editor mutation tools.');
+  assert.match(roleSessionIds[1], /:worker:reviewer$/, 'Reviewer provider call must use a distinct role-scoped session identity.');
+  assert.notEqual(roleSessionIds[0], roleSessionIds[1], 'Editor and Reviewer must not share provider session identity.');
+  const workerContextsArtifact = JSON.parse(fs.readFileSync(path.join(roleWorkspace, '.forge', 'worker-contexts.json'), 'utf8'));
+  assert.equal(workerContextsArtifact.Reviewer.rejectedProposals, 1, 'worker-contexts artifact should persist role rejection evidence.');
   const budgetedPrompt = assemblePromptWithinBudget([
     { id: 'goal', required: true, priority: 100, content: `GOAL-MARKER ${'g'.repeat(1400)}` },
     { id: 'open-tasks', required: true, priority: 100, content: `OPEN-TASK-MARKER ${'t'.repeat(1400)}` },
@@ -29,6 +207,64 @@ export async function run(): Promise<void> {
   assert.ok(budgetedPrompt.text.includes('GOAL-MARKER') && budgetedPrompt.text.includes('OPEN-TASK-MARKER'), 'required goal and open-task state must survive compaction.');
   assert.ok(!budgetedPrompt.text.includes('STALE-TOOL-MARKER'), 'stale optional tool output must clear before required state.');
   assert.ok(budgetedPrompt.clearedSections.includes('stale-tool-output'), 'cleared tool output must be explicitly accounted.');
+
+  const rateSplitWorkspace = createTempWorkspace('forge-rate-split-');
+  fs.mkdirSync(path.join(rateSplitWorkspace, 'src'), { recursive: true });
+  fs.mkdirSync(path.join(rateSplitWorkspace, 'lib'), { recursive: true });
+  fs.writeFileSync(path.join(rateSplitWorkspace, 'src', 'math.js'), 'exports.add = (a, b) => a - b;\n', 'utf8');
+  fs.writeFileSync(path.join(rateSplitWorkspace, 'lib', 'math.js'), 'exports.identity = value => value;\n', 'utf8');
+  fs.writeFileSync(path.join(rateSplitWorkspace, 'test.js'), "const assert = require('assert'); const { add } = require('./src/math'); assert.equal(add(2, 3), 5);\n", 'utf8');
+  fs.writeFileSync(path.join(rateSplitWorkspace, 'package.json'), JSON.stringify({ scripts: { test: 'node test.js' } }, null, 2), 'utf8');
+  assert.deepEqual(extractPlanFocusFiles('Fix math.js without guessing.', rateSplitWorkspace), [], 'ambiguous basenames must not become focus files.');
+  assert.deepEqual(extractPlanFocusFiles('Ignore src/math.js.bak.', rateSplitWorkspace), [], 'lookalike path suffixes must not become focus files.');
+  const architectPlan = '# Plan\n\n## Premise Checks\n- src/math.js subtracts.\n\n## Focus Files\n- src/math.js\n\n## Ordered Steps\n1. Fix src/math.js.\n2. Run tests.';
+  const routedCalls: Array<{ modelId: string; prompt: string }> = [];
+  let architectCalls = 0;
+  let editorCalls = 0;
+  const rateSplitProvider = {
+    capabilities: () => ({ structuredOutput: true, toolCalls: true, vision: false, contextLength: 32768 }),
+    listModels: async () => [],
+    generateChat: async (options: any) => {
+      const prompt = options.messages.find((message: any) => message.role === 'system')?.content || '';
+      routedCalls.push({ modelId: options.modelId, prompt });
+      let proposal: any;
+      if (prompt.includes('Active task: Inspect workspace')) {
+        proposal = { name: 'read_file', arguments: { path: 'src/math.js' } };
+      } else if (prompt.includes('Active task: Create or update')) {
+        architectCalls += 1;
+        proposal = architectCalls === 1
+          ? { name: 'read_file', arguments: { path: 'src/math.js' } }
+          : { name: 'update_plan', arguments: { planMd: architectPlan } };
+      } else if (prompt.includes('Active task: Apply scoped')) {
+        editorCalls += 1;
+        proposal = editorCalls === 1
+          ? { name: 'read_file', arguments: { path: 'src/math.js' } }
+          : { name: 'apply_patch', arguments: { path: 'src/math.js', patchContent: '<<<<<<< SEARCH\nexports.add = (a, b) => a - b;\n=======\nexports.add = (a, b) => a + b;\n>>>>>>> REPLACE' } };
+      } else {
+        throw new Error('Unexpected provider task in product rate-split proof.');
+      }
+      return { text: JSON.stringify({ explanation: 'Product rate-split proof.', proposal }), usage: { promptTokens: 1, completionTokens: 1, totalCost: 0 } };
+    }
+  };
+  const rateSplitLoop = new AgentHarnessLoop(rateSplitProvider as any, rateSplitWorkspace);
+  const rateSplitBindings = { plan: 'deepseek/deepseek-v4-pro', code: 'qwen/qwen-2.5-7b-instruct' };
+  let rateSplitState = await rateSplitLoop.initializeHarness('Fix addition.', rateSplitBindings, {}, { goalOverrides: { maxSteps: 12 } });
+  rateSplitState = await rateSplitLoop.runStep(rateSplitState, rateSplitBindings);
+  rateSplitState = await rateSplitLoop.runStep(rateSplitState, rateSplitBindings);
+  assert.equal(rateSplitState.taskGraph.tasks.find(task => task.id === '2')?.status, 'running', 'Architect read must not complete planning.');
+  rateSplitState = await rateSplitLoop.runStep(rateSplitState, rateSplitBindings);
+  assert.equal(rateSplitState.taskGraph.tasks.find(task => task.id === '2')?.status, 'completed', 'Architect update_plan must complete planning.');
+  rateSplitState = await rateSplitLoop.runStep(rateSplitState, rateSplitBindings);
+  assert.equal(rateSplitState.taskGraph.tasks.find(task => task.id === '3')?.status, 'running', 'Editor read must not complete editing.');
+  rateSplitState = await rateSplitLoop.runStep(rateSplitState, rateSplitBindings);
+  while (!['success', 'failed', 'gave_up'].includes(rateSplitState.status) && rateSplitState.currentStepIndex < rateSplitState.maxSteps) {
+    rateSplitState = await rateSplitLoop.runStep(rateSplitState, rateSplitBindings);
+  }
+  assert.equal(rateSplitState.status, 'success', 'product rate-split fixture must reach terminal success.');
+  assert.deepEqual(routedCalls.filter(call => call.prompt.includes('Active task: Create or update')).map(call => call.modelId), ['deepseek/deepseek-v4-pro', 'deepseek/deepseek-v4-pro'], 'plan alias must route Architect calls to DeepSeek.');
+  assert.deepEqual(routedCalls.filter(call => call.prompt.includes('Active task: Apply scoped')).map(call => call.modelId), ['qwen/qwen-2.5-7b-instruct', 'qwen/qwen-2.5-7b-instruct'], 'code alias must route Editor calls to Qwen.');
+  assert.ok(routedCalls.filter(call => call.prompt.includes('Active task: Apply scoped')).every(call => call.prompt.includes(architectPlan) && call.prompt.includes('Architect focus file src/math.js')), 'Editor must receive the committed plan and focus file.');
+  assert.equal(rateSplitState.runStats.fallbackProposals, 0, 'product rate-split proof must not use fallback proposals.');
   const loop = new AgentHarnessLoop();
   let state = await loop.initializeHarness('Validate fixture workspace.');
   assert.ok(state.sessionId, 'state should include a session id.');
@@ -61,6 +297,9 @@ export async function run(): Promise<void> {
   assert.ok(state.contextBundle?.retrievalCandidates?.length > 0, 'context bundle should include ranked retrieval candidates.');
   assert.ok(state.runStats.contextRefreshes > 0, 'context bundle refreshes should be counted.');
   assert.ok(state.runStats.roleHandoffRefreshes > 0, 'role handoff refreshes should be counted.');
+  assert.ok(state.runStats.workerProcessExecutions > 0, 'normal harness run should execute workspace tools outside the extension host.');
+  assert.equal(state.runStats.workerProcessFailures, 0, 'normal successful harness run should not manufacture worker-process failures from IPC shutdown races.');
+  assert.ok(Object.values(state.workerContexts).some((worker: any) => worker.lastWorkerPid && worker.lastWorkerPid !== process.pid), 'worker context should persist an external process id.');
   assert.ok(state.runStats.retrievalRefreshes > 0, 'retrieval refreshes should be counted.');
   assert.ok(typeof state.runStats.contextCompactions === 'number', 'context compactions should be counted.');
   assert.ok(typeof state.runStats.toolResultSectionsCleared === 'number', 'cleared tool-result sections should be counted.');
@@ -305,6 +544,7 @@ export async function run(): Promise<void> {
   let commandState = await commandLoop.initializeHarness('Validate command side-effect capture.');
   commandState.taskGraph.tasks[0].status = 'completed';
   commandState.taskGraph.tasks[1].status = 'completed';
+  commandState.taskGraph.tasks[2].status = 'completed';
   commandState = await commandLoop.runStep(commandState, {});
   delete process.env.FORGE_SANDBOX_SECRET;
   assert.ok(fs.existsSync(path.join(commandWorkspace, 'generated', 'effect.txt')), 'command should create fixture file.');
@@ -316,6 +556,10 @@ export async function run(): Promise<void> {
   const commandEffectsArtifact = JSON.parse(fs.readFileSync(path.join(commandWorkspace, '.forge', 'command-effects.json'), 'utf8'));
   assert.ok(commandEffectsArtifact.some((entry: any) => entry.created.includes('generated/effect.txt')), 'command side-effect artifact should persist created file.');
   assert.ok(commandEffectsArtifact.some((entry: any) => entry.sandbox?.blockedEnvKeys?.includes('FORGE_SANDBOX_SECRET')), 'command side-effect artifact should persist sandbox blocked key names.');
+  const versionResult = await new WorkspaceTools(commandWorkspace).runCommand('curl.exe --version');
+  assert.equal(versionResult.success, true, 'curl version probe should execute without making a network request.');
+  assert.equal(versionResult.commandMetadata?.network.detected, true, 'command metadata should capture network-capable command intent.');
+  assert.equal(versionResult.commandMetadata?.network.risk, 'read', 'non-mutating curl probe should classify as read intent.');
 
   let wallClockProviderCalls = 0;
   const wallClockProvider = {
@@ -379,6 +623,7 @@ export async function run(): Promise<void> {
   assert.equal(costState.status, 'gave_up', 'exceeded cost budget should halt as gave_up.');
   assert.equal(costState.runBudget.haltReason, 'cost_exceeded', 'cost halt reason should persist.');
   assert.equal(costState.runStats.budgetHalts, 1, 'cost budget halt should be counted.');
+  assert.ok(costState.blockers.some((blocker: any) => blocker.category === 'budget' && blocker.status === 'terminal' && blocker.retryable === false), 'cost halt should terminalize a non-retryable budget blocker.');
   assert.equal(fs.readFileSync(path.join(costWorkspace, 'src', 'budget.txt'), 'utf8'), 'before', 'cost budget halt should happen before patch mutation.');
   const persistedBudget = JSON.parse(fs.readFileSync(path.join(costWorkspace, '.forge', 'budget.json'), 'utf8'));
   assert.equal(persistedBudget.haltReason, 'cost_exceeded', 'budget artifact should persist cost halt reason.');
@@ -599,7 +844,7 @@ export async function run(): Promise<void> {
   assert.equal(isolatedCommandReport.sourceMutated, false, 'isolated command report should prove source workspace stayed unchanged.');
   assert.equal(isolatedCommandReport.reportPath, path.join(workspace, '.forge', 'isolated-runs', 'latest-isolated-run.json'), 'isolated command should persist report in workspace.');
 
-  for (const rel of ['.forge/state.json', '.forge/context-bundle.json', '.forge/retrieval-index.json', '.forge/role-handoffs.json', '.forge/safety-checkpoints.json', '.forge/command-effects.json', '.forge/budget.json', '.forge/isolated-runs/latest-isolated-run.json', '.forge/isolated-runs/latest-isolated-run.diff', '.forge/goal-contract.json', '.forge/task-graph.json', '.forge/evidence-ledger.json', '.forge/diff-reviews.json', '.forge/reviewer-critiques.json', '.forge/precommit-reviews.json', '.forge/escalations.json', '.forge/latest-proof-report.json', '.forge/evals/latest-weak-model-eval.json', '.forge/verification-fixture-matrix.json', 'PLAN.md', 'todos.json', 'SCRATCHPAD.md', 'evidence_ledger.json']) {
+  for (const rel of ['.forge/state.json', '.forge/context-bundle.json', '.forge/retrieval-index.json', '.forge/semantic-retrieval.json', '.forge/role-handoffs.json', '.forge/worker-contexts.json', '.forge/blockers.json', '.forge/safety-checkpoints.json', '.forge/command-effects.json', '.forge/budget.json', '.forge/isolated-runs/latest-isolated-run.json', '.forge/isolated-runs/latest-isolated-run.diff', '.forge/goal-contract.json', '.forge/task-graph.json', '.forge/evidence-ledger.json', '.forge/diff-reviews.json', '.forge/reviewer-critiques.json', '.forge/precommit-reviews.json', '.forge/escalations.json', '.forge/latest-proof-report.json', '.forge/evals/latest-weak-model-eval.json', '.forge/verification-fixture-matrix.json', 'PLAN.md', 'todos.json', 'SCRATCHPAD.md', 'evidence_ledger.json']) {
     assert.ok(fs.existsSync(path.join(workspace, rel)), `${rel} should exist`);
   }
 
@@ -616,11 +861,20 @@ export async function run(): Promise<void> {
   const openedContext = await vscode.commands.executeCommand('forge-agent.openArtifact', 'context');
   assert.equal(openedContext, path.join(workspace, '.forge', 'context-bundle.json'), 'context bundle should open through native editor command.');
 
+  const openedArchitectHandoff = await vscode.commands.executeCommand('forge-agent.openArtifact', 'architectHandoff');
+  assert.equal(openedArchitectHandoff, path.join(workspace, '.forge', 'architect-handoff.json'), 'architect handoff should open through native editor command.');
+
   const openedRetrieval = await vscode.commands.executeCommand('forge-agent.openArtifact', 'retrieval');
   assert.equal(openedRetrieval, path.join(workspace, '.forge', 'retrieval-index.json'), 'retrieval index should open through native editor command.');
 
   const openedHandoffs = await vscode.commands.executeCommand('forge-agent.openArtifact', 'handoffs');
   assert.equal(openedHandoffs, path.join(workspace, '.forge', 'role-handoffs.json'), 'role handoffs should open through native editor command.');
+  const openedWorkerContexts = await vscode.commands.executeCommand('forge-agent.openArtifact', 'workerContexts');
+  assert.equal(openedWorkerContexts, path.join(workspace, '.forge', 'worker-contexts.json'), 'worker contexts should open through native editor command.');
+  const openedBlockers = await vscode.commands.executeCommand('forge-agent.openArtifact', 'blockers');
+  assert.equal(openedBlockers, path.join(workspace, '.forge', 'blockers.json'), 'blocker ledger should open through native editor command.');
+  const openedSemanticRetrieval = await vscode.commands.executeCommand('forge-agent.openArtifact', 'semanticRetrieval');
+  assert.equal(openedSemanticRetrieval, path.join(workspace, '.forge', 'semantic-retrieval.json'), 'semantic retrieval report should open through native editor command.');
 
   const openedSafety = await vscode.commands.executeCommand('forge-agent.openArtifact', 'safety');
   assert.equal(openedSafety, path.join(workspace, '.forge', 'safety-checkpoints.json'), 'safety checkpoints should open through native editor command.');

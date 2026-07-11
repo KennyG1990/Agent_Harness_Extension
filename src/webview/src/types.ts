@@ -123,6 +123,7 @@ export interface ContextBundle {
   recentReflections: string[];
   recentEscalations: string[];
   recentReviews: string[];
+  recentBlockers?: string[];
   scratchpadSummary: string;
   retrievalPolicy: string[];
   tokenEstimate: number;
@@ -156,10 +157,32 @@ export interface RunStats {
   contextRefreshes: number;
   contextCompactions?: number;
   toolResultSectionsCleared?: number;
+  networkIntentCaptures?: number;
+  networkWriteBlocks?: number;
+  roleCapabilityBlocks?: number;
+  workerProcessExecutions?: number;
+  workerProcessFailures?: number;
+  blockerEvents?: number;
+  openBlockers?: number;
+  resolvedBlockers?: number;
+  semanticRefreshes?: number;
+  semanticFailures?: number;
+  semanticCacheHits?: number;
+  semanticEmbeddedDocuments?: number;
   budgetHalts: number;
   noProgressTurns: number;
   lastProgressSignature: string;
   actuallyModelDriven: boolean;
+}
+
+export interface ArchitectHandoff {
+  generatedAt: string;
+  sourceTaskId: string;
+  sourceTaskTitle: string;
+  planMd: string;
+  focusFiles: string[];
+  premiseChecks: string[];
+  orderedSteps: string[];
 }
 
 // Full execution context that represents the overall harness state
@@ -179,6 +202,7 @@ export interface HarnessState {
   diffReviews?: DiffReviewEntry[];
   escalations?: EscalationEntry[];
   contextBundle?: ContextBundle;
+  architectHandoff?: ArchitectHandoff;
   runBudget?: RunBudget;
   runStats?: RunStats;
   currentStepIndex: number;

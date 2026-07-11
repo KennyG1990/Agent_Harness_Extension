@@ -65,6 +65,10 @@ export class OpenRouterProvider implements Provider {
     return configValue('defaultMixedModel', 'openrouter/auto');
   }
 
+  public static architectModel(): string {
+    return String(configValue('architectModel', '') || '').trim() || OpenRouterProvider.mixedModel();
+  }
+
   private getApiKey(): string {
     const apiKey = configValue('openRouterApiKey', '');
     return (apiKey || process.env.OPENROUTER_API_KEY || '').trim();

@@ -83,6 +83,7 @@ try {
           recentReflections: ['red_oracle:Retry after red oracle reflection:Tests failed.'],
           recentEscalations: ['Reviewer->openrouter/auto:Repeated reflection failures reached escalation threshold.'],
           recentReviews: ['approved:Reviewer inspected current diff.'],
+          recentBlockers: ['oracle: Tests failed. -> Use the failing oracle output to revise the implementation before rerunning tests.'],
           scratchpadSummary: 'Tests failed. Reflection and escalation state rehydrated.',
           retrievalPolicy: ['Prefer files already read into state.files before broad search.'],
           tokenEstimate: 128,
@@ -98,6 +99,53 @@ try {
             recentContext: ['approved:Reviewer inspected current diff.'],
             handoffSummary: 'Reviewer owns verification and evidence gating.'
           }
+        },
+        workerContexts: {
+          Reviewer: {
+            role: 'Reviewer',
+            sessionId: 'forge-visual:worker:reviewer',
+            allowedTools: ['run_tests', 'run_command', 'get_diff', 'record_evidence', 'declare_success'],
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            providerCalls: 1,
+            acceptedProposals: 1,
+            rejectedProposals: 1,
+            processExecutions: 2,
+            processFailures: 0,
+            lastWorkerPid: 4242,
+            lastWorkerDurationMs: 38,
+            lastWorkerBlockedEnvKeys: ['OPENROUTER_API_KEY', 'FORGE_WORKER_SECRET'],
+            recentTools: ['apply_patch', 'run_tests'],
+            lastTaskId: '4',
+            lastTaskTitle: 'Retry after red oracle reflection'
+          }
+        },
+        blockers: [
+          {
+            id: 'blocker-visual',
+            source: 'oracle',
+            category: 'oracle',
+            status: 'open',
+            retryable: true,
+            taskId: '4',
+            taskTitle: 'Retry after red oracle reflection',
+            role: 'Reviewer',
+            summary: 'Tests failed.',
+            suggestedAction: 'Use the failing oracle output to revise the implementation before rerunning tests.',
+            occurrences: 1,
+            firstSeenAt: new Date().toISOString(),
+            lastSeenAt: new Date().toISOString()
+          }
+        ],
+        semanticRetrieval: {
+          generatedAt: new Date().toISOString(),
+          status: 'ready',
+          provider: 'openrouter',
+          modelId: 'openai/text-embedding-3-small',
+          query: 'Validate reflection UI counters.',
+          cacheHits: 18,
+          embeddedDocuments: 2,
+          candidates: [{ path: 'src/example.ts', similarity: 0.91 }]
         },
         safetyCheckpoints: [
           {
@@ -126,7 +174,15 @@ try {
               sanitizedEnv: true,
               inheritedEnvKeyCount: 64,
               allowedEnvKeys: ['PATH', 'SYSTEMROOT', 'TEMP', 'TMP'],
-              blockedEnvKeys: ['OPENROUTER_API_KEY', 'FORGE_SANDBOX_SECRET']
+              blockedEnvKeys: ['OPENROUTER_API_KEY', 'FORGE_SANDBOX_SECRET'],
+              network: {
+                detected: true,
+                risk: 'read',
+                decision: 'allowed',
+                operations: ['curl-request'],
+                endpoints: ['https://example.test/status'],
+                reason: 'Allowed read-only network intent with audit capture: curl-request.'
+              }
             },
             outputExcerpt: 'created generated/output.txt',
             timestamp: new Date().toISOString()
@@ -168,6 +224,18 @@ try {
           commandCreatedFiles: 1,
           commandModifiedFiles: 0,
           commandDeletedFiles: 0,
+          networkIntentCaptures: 1,
+          networkWriteBlocks: 2,
+          roleCapabilityBlocks: 1,
+          workerProcessExecutions: 4,
+          workerProcessFailures: 0,
+          blockerEvents: 3,
+          openBlockers: 1,
+          resolvedBlockers: 2,
+          semanticRefreshes: 1,
+          semanticFailures: 0,
+          semanticCacheHits: 18,
+          semanticEmbeddedDocuments: 2,
           budgetHalts: 0,
           noProgressTurns: 0,
           lastProgressSignature: '',

@@ -1,8 +1,8 @@
 {
   "name": "forge-agent",
   "displayName": "Forge Agent",
-  "description": "Forge Agent Harness VS Code Extension (Phase 53.1: deterministic context budgeting)",
-  "version": "0.58.1",
+  "description": "Forge Agent Harness VS Code Extension (Phase 64: opt-in hybrid semantic retrieval)",
+  "version": "0.64.0",
   "publisher": "kennyg",
   "engines": {
     "vscode": "^1.80.0"
@@ -177,7 +177,7 @@
         "forge.architectModel": {
           "type": "string",
           "default": "",
-          "description": "Optional stronger planning model for architect-mode evals (plan big, execute small)."
+          "description": "Optional stronger planning model for product and eval architect lanes (plan big, execute small)."
         },
         "forge.openAiCompatibleBaseUrl": {
           "type": "string",
@@ -193,6 +193,16 @@
           "type": "string",
           "default": "openrouter/auto",
           "description": "Default mixed/non-coding model route."
+        },
+        "forge.semanticRetrievalEnabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Opt in to sending bounded repository text to the configured embedding provider for hybrid semantic retrieval. Disabled by default for source privacy."
+        },
+        "forge.embeddingModel": {
+          "type": "string",
+          "default": "openai/text-embedding-3-small",
+          "description": "OpenRouter embedding model used when semantic retrieval is explicitly enabled."
         }
       }
     }
@@ -205,6 +215,7 @@
     "test": "node scripts/smoke-tests.mjs",
     "test:e2e": "node scripts/e2e-smoke.mjs",
     "test:visual": "node scripts/visual-smoke.mjs",
+    "test:workers": "npm run compile && node scripts/worker-process-stress.mjs 100",
     "eval": "npm run compile && node scripts/weak-model-eval.mjs",
     "eval:reflection": "npm run compile && node scripts/reflection-ab-eval.mjs",
     "eval:tier2": "npm run compile && node scripts/weak-model-eval-tier2.mjs",

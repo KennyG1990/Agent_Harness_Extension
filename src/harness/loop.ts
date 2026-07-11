@@ -1,12 +1,15 @@
 import * as path from 'path';
 import * as fs from 'fs';
 import * as crypto from 'crypto';
-import { AarReport, AarTriggerCounts, CommandSideEffectEntry, ContextBundle, DiffReviewEntry, EscalationEntry, EvidenceLedgerItem, GoalContract, HarnessState, LessonEntry, PreCommitReviewEntry, ReflectionEntry, RetrievalCandidate, ReviewerCritiqueEntry, RoleHandoff, RunBudget, SafetyCheckpoint, StepLog, TaskItem, ToolProposal } from './types';
+import { AarReport, AarTriggerCounts, ArchitectHandoff, BlockerCategory, BlockerEntry, BlockerSource, CommandSideEffectEntry, ContextBundle, DiffReviewEntry, EscalationEntry, EvidenceLedgerItem, GoalContract, HarnessState, LessonEntry, PreCommitReviewEntry, ReflectionEntry, RetrievalCandidate, ReviewerCritiqueEntry, RoleHandoff, RunBudget, SafetyCheckpoint, StepLog, TaskItem, ToolName, ToolProposal, WorkerContext } from './types';
 import { createConfiguredProvider, OpenRouterProvider, Provider } from './provider';
 import { resolvePatchTargetByContent, WorkspaceTools } from './tools';
 import { Firewall } from './firewall';
 import { VerificationOracles, OracleResult } from './oracles';
 import { assemblePromptWithinBudget, PromptSection } from './contextBudget';
+import { ProcessWorkerExecutor, WorkerProcessMetadata } from './workerExecutor';
+import { classifyBlocker } from './blockers';
+import { createConfiguredEmbeddingProvider, EmbeddingProvider, rankSemantically, SemanticDocument } from './semanticRetrieval';
 
 const MAX_REPAIR_ATTEMPTS = 2;
 const MAX_NO_PROGRESS_TURNS = 4;
@@ -89,10 +92,11 @@ export class AgentHarnessLoop {
   private tools: WorkspaceTools;
   private firewall: Firewall;
   private oracles: VerificationOracles;
+  private workerExecutor = new ProcessWorkerExecutor();
   private latestState?: HarnessState;
   private proofStats = { providerCalls: 0, providerFailures: 0, fallbackProposals: 0 };
 
-  constructor(provider: Provider = createConfiguredProvider(), private readonly workspaceRootOverride?: string) {
+  constructor(provider: Provider = createConfiguredProvider(), private readonly workspaceRootOverride?: string, private readonly embeddingProvider: EmbeddingProvider | undefined = createConfiguredEmbeddingProvider()) {
     this.provider = provider;
     this.tools = new WorkspaceTools(workspaceRootOverride);
     this.firewall = new Firewall(this.tools);
@@ -157,8 +161,13 @@ export class AgentHarnessLoop {
       reviewerCritiques: [],
       preCommitReviews: [],
       escalations: [],
+      blockers: [],
+      semanticRetrieval: {
+        generatedAt: new Date().toISOString(), status: this.embeddingProvider ? 'failed' : 'disabled', provider: this.embeddingProvider?.id || 'deterministic-fallback', modelId: this.embeddingProvider?.modelId || '', query: '', cacheHits: 0, embeddedDocuments: 0, candidates: [], error: this.embeddingProvider ? 'Semantic retrieval has not run yet.' : undefined
+      },
       contextBundle: this.createContextBundleSkeleton(goalContract.goal),
       roleHandoffs: {},
+      workerContexts: {},
       safetyCheckpoints: [],
       commandEffects: [],
       runBudget: this.createRunBudget(goalContract, mergedBudgetOverrides),
@@ -195,6 +204,18 @@ export class AgentHarnessLoop {
     state.runStats.commandCreatedFiles = state.runStats.commandCreatedFiles || 0;
     state.runStats.commandModifiedFiles = state.runStats.commandModifiedFiles || 0;
     state.runStats.commandDeletedFiles = state.runStats.commandDeletedFiles || 0;
+    state.runStats.networkIntentCaptures = state.runStats.networkIntentCaptures || 0;
+    state.runStats.networkWriteBlocks = state.runStats.networkWriteBlocks || 0;
+    state.runStats.roleCapabilityBlocks = state.runStats.roleCapabilityBlocks || 0;
+    state.runStats.workerProcessExecutions = state.runStats.workerProcessExecutions || 0;
+    state.runStats.workerProcessFailures = state.runStats.workerProcessFailures || 0;
+    state.runStats.blockerEvents = state.runStats.blockerEvents || 0;
+    state.runStats.openBlockers = state.runStats.openBlockers || 0;
+    state.runStats.resolvedBlockers = state.runStats.resolvedBlockers || 0;
+    state.runStats.semanticRefreshes = state.runStats.semanticRefreshes || 0;
+    state.runStats.semanticFailures = state.runStats.semanticFailures || 0;
+    state.runStats.semanticCacheHits = state.runStats.semanticCacheHits || 0;
+    state.runStats.semanticEmbeddedDocuments = state.runStats.semanticEmbeddedDocuments || 0;
     state.runStats.budgetHalts = state.runStats.budgetHalts || 0;
     state.runBudget = state.runBudget || this.createRunBudget(state.goalContract);
     const preStepBudget = this.enforceBudget(state);
@@ -210,7 +231,12 @@ export class AgentHarnessLoop {
     state.reviewerCritiques = state.reviewerCritiques || [];
     state.preCommitReviews = state.preCommitReviews || [];
     state.escalations = state.escalations || [];
+    state.blockers = state.blockers || [];
+    state.semanticRetrieval = state.semanticRetrieval || {
+      generatedAt: new Date().toISOString(), status: 'disabled', provider: 'deterministic-fallback', modelId: '', query: '', cacheHits: 0, embeddedDocuments: 0, candidates: []
+    };
     state.roleHandoffs = state.roleHandoffs || {};
+    state.workerContexts = state.workerContexts || {};
     state.safetyCheckpoints = state.safetyCheckpoints || [];
     state.commandEffects = state.commandEffects || [];
     const progressBefore = this.progressSignature(state);
@@ -218,11 +244,15 @@ export class AgentHarnessLoop {
     state.currentStepIndex += 1;
 
     if (state.currentStepIndex > state.maxSteps) {
+      this.recordBlocker(state, 'step_cap', 'Step cap reached before oracle success.');
       return this.halt(state, 'gave_up', 'Step cap reached before oracle success.');
     }
 
     const activeTask = state.taskGraph.tasks.find(t => t.status === 'pending' || t.status === 'running');
     state.activeSubAgent = activeTask?.owner || 'Orchestrator';
+    if (activeTask) {
+      await this.refreshSemanticRetrieval(state, activeTask);
+    }
     this.refreshContextBundle(state, activeTask);
     if (activeTask) {
       this.refreshRoleHandoff(state, activeTask);
@@ -271,9 +301,18 @@ export class AgentHarnessLoop {
     state.logs.push(this.log('proposal', `${activeTask.owner} proposed ${proposal.name}: ${proposalEnvelope.explanation}`, activeTask.owner));
 
     state.firewall.stage = 'VALIDATE';
-    const validation = await this.firewall.validateProposal(proposal);
+    const roleValidation = this.validateRoleCapability(state, activeTask, proposal);
+    const validation = roleValidation.valid ? await this.firewall.validateProposal(proposal) : roleValidation;
     if (!validation.valid) {
       state.runStats.validationFailures += 1;
+      this.recordBlocker(state, 'firewall', String(validation.reason || 'Proposal validation failed.'), activeTask);
+      this.recordWorkerProposal(state, activeTask, proposal, false);
+      if (/\[role_capability_blocked\]/.test(String(validation.reason || ''))) {
+        state.runStats.roleCapabilityBlocks = (state.runStats.roleCapabilityBlocks || 0) + 1;
+      }
+      if (/\[network_intent_blocked\]/.test(String(validation.reason || ''))) {
+        state.runStats.networkWriteBlocks = (state.runStats.networkWriteBlocks || 0) + 1;
+      }
       state.firewall.isValidated = false;
       state.firewall.validationReason = validation.reason;
       state.logs.push(this.log('error', `Firewall rejected ${proposal.name}: ${validation.reason}`, 'Firewall'));
@@ -297,6 +336,8 @@ export class AgentHarnessLoop {
       this.latestState = state;
       return state;
     }
+    this.resolveBlockers(state, activeTask, ['role_capability', 'workspace_scope', 'command_policy', 'network_policy', 'patch_format', 'patch_applicability', 'firewall'], 'A corrected proposal passed deterministic validation.');
+    this.recordWorkerProposal(state, activeTask, proposal, true);
     state.firewall.isValidated = true;
     state.firewall.validationReason = 'Proposal accepted by deterministic validator.';
     if (proposalEnvelope.fallback) {
@@ -314,6 +355,7 @@ export class AgentHarnessLoop {
       state.scratchpadMd = `${state.scratchpadMd}\n## Pre-Commit Review - ${preCommitReview.timestamp}\nSource: ${preCommitReview.source}\nModel: ${preCommitReview.modelId}\nStatus: ${preCommitReview.status}\nProposal: ${preCommitReview.proposalName}\n\n${preCommitReview.summary}\n`;
       if (preCommitReview.status === 'blocked') {
         state.runStats.preCommitBlocks += 1;
+        this.recordBlocker(state, 'precommit', preCommitReview.summary, activeTask);
         state.firewall.isValidated = false;
         state.firewall.validationReason = `Pre-commit review blocked ${proposal.name}: ${preCommitReview.summary}`;
         if (this.scheduleReflection(state, activeTask, 'firewall', state.firewall.validationReason)) {
@@ -329,6 +371,7 @@ export class AgentHarnessLoop {
         this.latestState = state;
         return state;
       }
+      this.resolveBlockers(state, activeTask, ['precommit_review'], 'A subsequent pre-commit review approved the proposal.');
     }
 
     state.firewall.stage = 'COMMIT';
@@ -352,6 +395,7 @@ export class AgentHarnessLoop {
     state.logs.push(this.log('narration', `Oracle state: lint=${state.oracleStatuses.linter}, typecheck=${state.oracleStatuses.compiler}, tests=${state.oracleStatuses.tests}`, activeTask.owner));
 
     if (!commitResult.success) {
+      this.recordBlocker(state, 'tool', `${proposal.name} failed: ${commitResult.output.slice(0, 1000)}`, activeTask);
       if (this.scheduleReflection(state, activeTask, 'tool_failure', `${proposal.name} failed: ${commitResult.output.slice(0, 1000)}`)) {
         state.status = 'idle';
         this.persistStateToDisk(state);
@@ -369,6 +413,7 @@ export class AgentHarnessLoop {
       ['run_tests', 'apply_patch', 'write_file', 'run_command'].includes(proposal.name)
     ) {
       const oracleDetails = state.logs.filter(log => log.subAgent === 'Oracle').slice(-1)[0]?.message || 'Oracle failed without captured details.';
+      this.recordBlocker(state, 'oracle', oracleDetails, activeTask);
       if (this.scheduleReflection(state, activeTask, 'red_oracle', oracleDetails)) {
         state.status = 'idle';
         this.persistStateToDisk(state);
@@ -397,15 +442,15 @@ export class AgentHarnessLoop {
           }
         }
       }
-    } else if (proposal.name === 'run_tests' && state.lastOraclePass) {
+    } else if (proposal.name === 'run_tests' && state.lastOraclePass && activeTask.owner === 'Reviewer') {
       activeTask.status = 'completed';
       const evidenceTask = state.taskGraph.tasks.find(t => t.id === '5');
       if (evidenceTask && evidenceTask.status === 'pending') {
         evidenceTask.status = 'running';
       }
-    } else if (proposal.name === 'record_evidence') {
+    } else if (proposal.name === 'record_evidence' && activeTask.owner === 'Reviewer') {
       activeTask.status = 'completed';
-    } else if (this.proposalMadeProgress(proposal) && !state.haltReason) {
+    } else if (commitResult.success && this.proposalCompletesTask(activeTask, proposal, state) && !state.haltReason) {
       activeTask.status = 'completed';
     }
 
@@ -421,6 +466,7 @@ export class AgentHarnessLoop {
     if (state.status !== 'success' && state.status !== 'failed') {
       this.updateProgressTracking(state, progressBefore);
       if (state.runStats.noProgressTurns >= MAX_NO_PROGRESS_TURNS) {
+        this.recordBlocker(state, 'progress', `No progress detected for ${state.runStats.noProgressTurns} consecutive harness steps.`, activeTask);
         return this.halt(state, 'gave_up', `No progress detected for ${state.runStats.noProgressTurns} consecutive harness steps.`);
       }
     } else {
@@ -436,6 +482,9 @@ export class AgentHarnessLoop {
   private async commitProposal(state: HarnessState, activeTask: TaskItem, proposal: ToolProposal, modelBindings: Record<string, string> = {}): Promise<{ success: boolean; output: string }> {
     if (proposal.name === 'update_plan') {
       state.planMd = String(proposal.arguments.planMd || proposal.arguments.patchContent || state.planMd);
+      if (activeTask.owner === 'Architect') {
+        state.architectHandoff = this.createArchitectHandoff(state, activeTask);
+      }
       state.logs.push(this.log('commit', 'PLAN.md updated.', 'Harness'));
       return { success: true, output: 'PLAN.md updated.' };
     }
@@ -456,8 +505,22 @@ export class AgentHarnessLoop {
     }
 
     const commandSnapshotBefore = proposal.name === 'run_command' ? snapshotWorkspaceFiles(this.tools.getWorkspaceRoot()) : undefined;
-    const result = await this.tools.dispatch(proposal);
+    const result = await this.workerExecutor.dispatch(this.tools.getWorkspaceRoot(), activeTask.owner || 'Orchestrator', proposal);
+    this.recordWorkerExecution(state, activeTask, result.worker, result.success);
+    if (result.commandMetadata) {
+      result.commandMetadata.blockedEnvKeys = Array.from(new Set([
+        ...result.commandMetadata.blockedEnvKeys,
+        ...result.worker.blockedEnvKeys
+      ])).sort((a, b) => a.localeCompare(b));
+      result.commandMetadata.inheritedEnvKeyCount = Math.max(
+        result.commandMetadata.inheritedEnvKeyCount,
+        result.worker.inheritedEnvKeyCount
+      );
+    }
     state.logs.push(this.log(result.success ? 'commit' : 'error', `${proposal.name}: ${result.output.slice(0, 500)}`, 'Harness'));
+    if (result.success) {
+      this.resolveBlockers(state, activeTask, ['worker_process', 'tool_failure'], 'A corrected tool action completed successfully.');
+    }
     this.captureToolResult(state, proposal, result);
     if (proposal.name === 'run_command' && commandSnapshotBefore) {
       this.recordCommandSideEffects(state, proposal, commandSnapshotBefore, result.output, result.commandMetadata);
@@ -481,6 +544,8 @@ export class AgentHarnessLoop {
     state.logs.push(this.log(tests.pass ? 'oracle' : 'error', `run_tests pass=${tests.pass}: ${tests.output.slice(0, 700)}`, 'Oracle'));
 
     if (tests.pass) {
+      const activeTask = state.taskGraph.tasks.find(task => task.status === 'running');
+      this.resolveBlockers(state, activeTask, ['oracle'], 'The verification oracle passed.');
       state.evidenceLedger.push(this.makeEvidence('Verification oracle', 'run_tests oracle passed.', state, tests));
     }
   }
@@ -502,9 +567,11 @@ export class AgentHarnessLoop {
       this.proofStats.providerCalls += 1;
       state.runStats.providerCalls += 1;
       try {
+        const worker = this.ensureWorkerContext(state, activeTask.owner, activeTask);
+        worker.providerCalls += 1;
         const response = await this.provider.generateChat({
           modelId,
-          sessionId: state.sessionId,
+          sessionId: worker.sessionId,
           fallbackModels: [OpenRouterProvider.mixedModel(), 'meta-llama/llama-3.3-70b-instruct'],
           responseFormatSchema: TOOL_SCHEMA,
           messages: [
@@ -518,9 +585,12 @@ export class AgentHarnessLoop {
         if (!schema.valid) {
           state.runStats.schemaFailures += 1;
           repairHint = `Previous response was rejected by schema validation: ${schema.reason}`;
+          this.recordBlocker(state, 'schema', repairHint, activeTask);
           state.logs.push(this.log('warning', repairHint, 'Harness'));
           continue;
         }
+
+        this.resolveBlockers(state, activeTask, ['provider', 'schema'], 'A subsequent provider response parsed and matched the required schema.');
 
         state.runStats.modelDrivenProposals += 1;
         state.runStats.actuallyModelDriven = true;
@@ -529,6 +599,7 @@ export class AgentHarnessLoop {
         state.runStats.providerFailures += 1;
         this.proofStats.providerFailures += 1;
         repairHint = `Previous response could not be parsed or generated: ${e.message}`;
+        this.recordBlocker(state, 'provider', repairHint, activeTask);
         state.logs.push(this.log('warning', repairHint, 'Harness'));
       }
     }
@@ -579,8 +650,13 @@ export class AgentHarnessLoop {
         }
       };
     }
-    if (activeTask?.owner === 'Editor' && !state.lastOraclePass) {
-      return { explanation: 'Provider unavailable; no safe edit can be inferred, so run verification before mutating.', proposal: { name: 'run_tests', arguments: {} } };
+    if (activeTask?.owner === 'Editor') {
+      return {
+        explanation: state.lastOraclePass
+          ? 'Provider unavailable; rerun the green oracle to prove this Editor phase requires no mutation.'
+          : 'Provider unavailable; no safe edit can be inferred, so run verification before mutating.',
+        proposal: { name: 'run_tests', arguments: {} }
+      };
     }
     if (!state.lastOraclePass) {
       return { explanation: 'Run the verification oracle before any success declaration.', proposal: { name: 'run_tests', arguments: {} } };
@@ -629,6 +705,7 @@ export class AgentHarnessLoop {
       state.runStats.wholeFileGuidanceInjections = (state.runStats.wholeFileGuidanceInjections || 0) + 1;
     }
     const recentEscalations = context.recentEscalations.map(item => `- ${item}`).join('\n') || '- none';
+    const openBlockers = context.recentBlockers.map(item => `- ${item}`).join('\n') || '- none';
     const fileMemory = context.recentFiles.map(file => `- ${file}`).join('\n') || '- none yet';
     const retrievalCandidates = context.retrievalCandidates.map(candidate => `- ${candidate.path} score=${candidate.score} ${candidate.reason}`).join('\n') || '- none yet';
     const openTasks = context.openTasks.map(task => `- ${task}`).join('\n') || '- none';
@@ -637,6 +714,7 @@ export class AgentHarnessLoop {
     const handoffTasks = handoff.openTasks.map(item => `- ${item}`).join('\n') || '- none';
     const handoffContext = handoff.recentContext.map(item => `- ${item}`).join('\n') || '- none';
     const toolGuidance = this.toolGuidanceForTask(activeTask);
+    const architectExecutionSections = this.architectExecutionSections(state, activeTask);
     const sections: PromptSection[] = [
       {
         id: 'identity-contract',
@@ -646,6 +724,7 @@ export class AgentHarnessLoop {
       },
       { id: 'goal-contract', required: true, priority: 100, content: `Goal: ${state.goalContract.goal}` },
       { id: 'active-task', required: true, priority: 100, content: `Active task: ${activeTask.title}` },
+      ...architectExecutionSections,
       {
         id: 'role-handoff',
         required: true,
@@ -662,6 +741,7 @@ export class AgentHarnessLoop {
       { id: 'known-files', priority: 90, content: `Known files:\n${fileMemory}` },
       { id: 'retrieval-candidates', priority: 85, content: `Retrieval candidates:\n${retrievalCandidates}` },
       { id: 'open-task-state', required: true, priority: 100, content: `Open task state:\n${openTasks}` },
+      { id: 'open-blockers', required: true, priority: 100, content: `Deterministically classified open blockers:\n${openBlockers}` },
       { id: 'reflection-failures', priority: 75, toolResult: true, content: `Recent reflection failures to address:\n${recentReflections}` },
       ...(wholeFileGuidance ? [{ id: 'recovery-guidance', required: true, priority: 100, content: wholeFileGuidance.trim() }] : []),
       { id: 'scratchpad-summary', priority: 60, toolResult: true, content: `Scratchpad summary:\n${context.scratchpadSummary}` },
@@ -693,10 +773,10 @@ export class AgentHarnessLoop {
       return 'Search and read files before editing. Prefer repo_search, symbol_search, read_file, or read_range.';
     }
     if (activeTask.owner === 'Architect') {
-      return 'Create a concise implementation plan using update_plan after inspection.';
+      return 'Inspect as needed, then finish with update_plan. The plan must contain ## Premise Checks, ## Focus Files with exact workspace-relative paths, and ## Ordered Steps. A read/search does not complete this task.';
     }
     if (activeTask.owner === 'Editor') {
-      return 'Apply the smallest correct code change with apply_patch. Do not declare success.';
+      return 'Execute the committed architect plan. Inspect further if needed, then apply the smallest correct code change with apply_patch or write_file. A read/search does not complete this task. Do not declare success.';
     }
     if (activeTask.title.includes('verification')) {
       return 'Run run_tests or a safe command needed for verification.';
@@ -706,6 +786,24 @@ export class AgentHarnessLoop {
 
   private proposalMadeProgress(proposal: ToolProposal): boolean {
     return ['repo_search', 'symbol_search', 'read_file', 'read_range', 'get_diff', 'update_plan', 'update_tasks', 'apply_patch', 'write_file', 'run_command'].includes(proposal.name);
+  }
+
+  private proposalCompletesTask(activeTask: TaskItem, proposal: ToolProposal, state: HarnessState): boolean {
+    if (activeTask.owner === 'Explorer') {
+      return ['repo_search', 'symbol_search', 'read_file', 'read_range'].includes(proposal.name);
+    }
+    if (activeTask.owner === 'Architect') {
+      return proposal.name === 'update_plan';
+    }
+    if (activeTask.owner === 'Editor') {
+      return proposal.name === 'apply_patch'
+        || proposal.name === 'write_file'
+        || (proposal.name === 'run_tests' && state.lastOraclePass === true);
+    }
+    if (activeTask.owner === 'Reviewer' && proposal.name === 'get_diff') {
+      return state.lastOraclePass === true;
+    }
+    return this.proposalMadeProgress(proposal);
   }
 
   private createRunStats() {
@@ -741,6 +839,18 @@ export class AgentHarnessLoop {
       commandCreatedFiles: 0,
       commandModifiedFiles: 0,
       commandDeletedFiles: 0,
+      networkIntentCaptures: 0,
+      networkWriteBlocks: 0,
+      roleCapabilityBlocks: 0,
+      workerProcessExecutions: 0,
+      workerProcessFailures: 0,
+      blockerEvents: 0,
+      openBlockers: 0,
+      resolvedBlockers: 0,
+      semanticRefreshes: 0,
+      semanticFailures: 0,
+      semanticCacheHits: 0,
+      semanticEmbeddedDocuments: 0,
       budgetHalts: 0,
       noProgressTurns: 0,
       lastProgressSignature: '',
@@ -766,12 +876,14 @@ export class AgentHarnessLoop {
     if (Number.isFinite(state.runBudget.maxWallClockMs) && elapsedMs >= state.runBudget.maxWallClockMs) {
       state.runBudget.haltReason = 'wall_clock_exceeded';
       state.runStats.budgetHalts += 1;
+      this.recordBlocker(state, 'budget', `Wall-clock cap ${state.runBudget.maxWallClockMs}ms exceeded before green oracle evidence.`);
       return this.halt(state, 'gave_up', `Run budget exceeded: wall-clock cap ${state.runBudget.maxWallClockMs}ms elapsed before green oracle evidence.`);
     }
     const spent = state.goalContract.spent || 0;
     if (Number.isFinite(state.runBudget.maxCostUsd) && spent >= state.runBudget.maxCostUsd) {
       state.runBudget.haltReason = 'cost_exceeded';
       state.runStats.budgetHalts += 1;
+      this.recordBlocker(state, 'budget', `Cost cap $${state.runBudget.maxCostUsd.toFixed(6)} reached before green oracle evidence.`);
       return this.halt(state, 'gave_up', `Run budget exceeded: cost $${spent.toFixed(6)} reached cap $${state.runBudget.maxCostUsd.toFixed(6)} before green oracle evidence.`);
     }
     return undefined;
@@ -785,6 +897,7 @@ export class AgentHarnessLoop {
       reviewerCritiques: (state.reviewerCritiques || []).length,
       preCommitReviews: (state.preCommitReviews || []).length,
       escalations: (state.escalations || []).length,
+      blockers: (state.blockers || []).map(blocker => `${blocker.category}:${blocker.status}:${blocker.occurrences}`).join('|'),
       contextBundle: state.contextBundle?.generatedAt || '',
       retrievalCandidates: (state.contextBundle?.retrievalCandidates || []).map(candidate => `${candidate.path}:${candidate.score}`).join('|'),
       roleHandoffs: Object.keys(state.roleHandoffs || {}).sort().map(role => `${role}:${state.roleHandoffs[role].generatedAt}`).join('|'),
@@ -848,6 +961,15 @@ export class AgentHarnessLoop {
     if (this.shouldEscalate(state) && escalationModel) {
       this.ensureEscalationEntry(state, activeTask, escalationModel, 'Repeated reflection failures reached escalation threshold.');
       return escalationModel;
+    }
+    if (activeTask.owner === 'Architect') {
+      return modelBindings.Architect || modelBindings.plan || OpenRouterProvider.architectModel();
+    }
+    if (activeTask.owner === 'Editor') {
+      return modelBindings.Editor || modelBindings.code || OpenRouterProvider.codingModel();
+    }
+    if (activeTask.owner === 'Reviewer') {
+      return modelBindings.Reviewer || modelBindings.review || OpenRouterProvider.mixedModel();
     }
     return modelBindings[activeTask.owner] || modelBindings.code || OpenRouterProvider.codingModel();
   }
@@ -952,7 +1074,15 @@ export class AgentHarnessLoop {
         sanitizedEnv: false,
         inheritedEnvKeyCount: 0,
         allowedEnvKeys: [],
-        blockedEnvKeys: []
+        blockedEnvKeys: [],
+        network: {
+          detected: false,
+          risk: 'none',
+          decision: 'allowed',
+          operations: [],
+          endpoints: [],
+          reason: 'No command execution metadata was returned.'
+        }
       },
       outputExcerpt: output.slice(0, 2000),
       timestamp: new Date().toISOString()
@@ -962,8 +1092,11 @@ export class AgentHarnessLoop {
     state.runStats.commandCreatedFiles += created.length;
     state.runStats.commandModifiedFiles += modified.length;
     state.runStats.commandDeletedFiles += deleted.length;
-    state.logs.push(this.log('validation', `Command side effects captured: +${created.length} ~${modified.length} -${deleted.length}; sandbox env allowed ${entry.sandbox.allowedEnvKeys.length}, blocked ${entry.sandbox.blockedEnvKeys.length}.`, 'Firewall'));
-    state.scratchpadMd = `${state.scratchpadMd}\n## Command Side Effects - ${entry.timestamp}\nCommand: ${entry.command}\nCreated: ${created.join(', ') || 'none'}\nModified: ${modified.join(', ') || 'none'}\nDeleted: ${deleted.join(', ') || 'none'}\nSandbox: sanitized=${entry.sandbox.sanitizedEnv}; allowedEnv=${entry.sandbox.allowedEnvKeys.length}; blockedEnv=${entry.sandbox.blockedEnvKeys.length}; exit=${entry.sandbox.exitCode}\n`;
+    if (entry.sandbox.network.detected) {
+      state.runStats.networkIntentCaptures = (state.runStats.networkIntentCaptures || 0) + 1;
+    }
+    state.logs.push(this.log('validation', `Command side effects captured: +${created.length} ~${modified.length} -${deleted.length}; sandbox env allowed ${entry.sandbox.allowedEnvKeys.length}, blocked ${entry.sandbox.blockedEnvKeys.length}; network=${entry.sandbox.network.risk}/${entry.sandbox.network.decision}.`, 'Firewall'));
+    state.scratchpadMd = `${state.scratchpadMd}\n## Command Side Effects - ${entry.timestamp}\nCommand: ${entry.command}\nCreated: ${created.join(', ') || 'none'}\nModified: ${modified.join(', ') || 'none'}\nDeleted: ${deleted.join(', ') || 'none'}\nSandbox: sanitized=${entry.sandbox.sanitizedEnv}; allowedEnv=${entry.sandbox.allowedEnvKeys.length}; blockedEnv=${entry.sandbox.blockedEnvKeys.length}; exit=${entry.sandbox.exitCode}\nNetwork: detected=${entry.sandbox.network.detected}; risk=${entry.sandbox.network.risk}; decision=${entry.sandbox.network.decision}; operations=${entry.sandbox.network.operations.join(', ') || 'none'}; endpoints=${entry.sandbox.network.endpoints.join(', ') || 'none'}\n`;
   }
 
   private async createPreCommitReview(
@@ -978,9 +1111,11 @@ export class AgentHarnessLoop {
       : ['.'];
     if (modelId) {
       try {
+        const reviewerWorker = this.ensureWorkerContext(state, 'Reviewer');
+        reviewerWorker.providerCalls += 1;
         const response = await this.provider.generateChat({
           modelId,
-          sessionId: state.sessionId,
+          sessionId: reviewerWorker.sessionId,
           fallbackModels: [OpenRouterProvider.mixedModel()],
           responseFormatSchema: PRE_COMMIT_REVIEW_SCHEMA,
           messages: [
@@ -1076,9 +1211,11 @@ export class AgentHarnessLoop {
     const modelId = modelBindings.review || modelBindings.Reviewer || '';
     if (modelId) {
       try {
+        const reviewerWorker = this.ensureWorkerContext(state, 'Reviewer');
+        reviewerWorker.providerCalls += 1;
         const response = await this.provider.generateChat({
           modelId,
-          sessionId: state.sessionId,
+          sessionId: reviewerWorker.sessionId,
           fallbackModels: [OpenRouterProvider.mixedModel()],
           responseFormatSchema: REVIEWER_CRITIQUE_SCHEMA,
           messages: [
@@ -1131,6 +1268,54 @@ export class AgentHarnessLoop {
     };
   }
 
+  private architectExecutionSections(state: HarnessState, activeTask: TaskItem): PromptSection[] {
+    if (activeTask.owner !== 'Editor') {
+      return [];
+    }
+    const handoff = state.architectHandoff || {
+      generatedAt: new Date().toISOString(),
+      sourceTaskId: 'legacy-plan',
+      sourceTaskTitle: 'Recovered persisted plan',
+      planMd: state.planMd,
+      focusFiles: extractPlanFocusFiles(state.planMd, this.tools.getWorkspaceRoot(), 6),
+      premiseChecks: extractMarkdownListSection(state.planMd, 'Premise Checks', 8),
+      orderedSteps: extractMarkdownListSection(state.planMd, 'Ordered Steps', 12)
+    };
+    const sections: PromptSection[] = [{
+      id: 'architect-plan',
+      required: true,
+      priority: 100,
+      content: `Committed architect execution plan:\n${handoff.planMd}`
+    }];
+    for (const filePath of handoff.focusFiles) {
+      let content = '';
+      try {
+        content = fs.readFileSync(path.join(this.tools.getWorkspaceRoot(), filePath), 'utf8');
+      } catch (error: any) {
+        content = `[Focus file unavailable: ${error.message}]`;
+      }
+      sections.push({
+        id: `focus-file:${filePath}`,
+        required: true,
+        priority: 100,
+        content: `Architect focus file ${filePath} - full current content:\n${content}`
+      });
+    }
+    return sections;
+  }
+
+  private createArchitectHandoff(state: HarnessState, activeTask: TaskItem): ArchitectHandoff {
+    return {
+      generatedAt: new Date().toISOString(),
+      sourceTaskId: activeTask.id,
+      sourceTaskTitle: activeTask.title,
+      planMd: state.planMd,
+      focusFiles: extractPlanFocusFiles(state.planMd, this.tools.getWorkspaceRoot(), 6),
+      premiseChecks: extractMarkdownListSection(state.planMd, 'Premise Checks', 8),
+      orderedSteps: extractMarkdownListSection(state.planMd, 'Ordered Steps', 12)
+    };
+  }
+
   private createContextBundleSkeleton(goal: string): ContextBundle {
     return {
       generatedAt: new Date().toISOString(),
@@ -1141,6 +1326,7 @@ export class AgentHarnessLoop {
       recentReflections: [],
       recentEscalations: [],
       recentReviews: [],
+      recentBlockers: [],
       scratchpadSummary: 'No scratchpad entries yet.',
       retrievalPolicy: [
         'Prefer files already read into state.files before broad search.',
@@ -1183,14 +1369,16 @@ export class AgentHarnessLoop {
       recentLessons: this.readRecentLessons(3),
       recentEscalations: (state.escalations || []).slice(-5).map(escalation => `${escalation.fromRole}->${escalation.toModel}:${escalation.reason}`),
       recentReviews: (state.diffReviews || []).slice(-5).map(review => `${review.status}:${review.summary}`),
+      recentBlockers: (state.blockers || []).filter(blocker => blocker.status === 'open').slice(-6).map(blocker => `${blocker.category}: ${blocker.summary} -> ${blocker.suggestedAction}`),
       scratchpadSummary,
       retrievalPolicy: [
         'Prefer files already read into state.files before broad search.',
         'Prefer retrievalCandidates before unrelated file reads.',
+        state.semanticRetrieval?.status === 'ready' ? `Blend deterministic evidence with ${state.semanticRetrieval.modelId} cosine similarity; semantic provenance must remain visible.` : 'Semantic retrieval unavailable or disabled; use deterministic ranking only.',
         'Use repo_search/symbol_search before reading unrelated files.',
         'Rehydrate goal, open tasks, recent files, reflections, escalations, and reviewer notes after compaction.'
       ],
-      tokenEstimate: estimateTokens([state.goalContract.goal, ...openTasks, ...recentFiles, ...retrievalCandidates.map(candidate => candidate.path), scratchpadSummary].join('\n')),
+      tokenEstimate: estimateTokens([state.goalContract.goal, ...openTasks, ...recentFiles, ...retrievalCandidates.map(candidate => candidate.path), ...(state.blockers || []).filter(blocker => blocker.status === 'open').map(blocker => `${blocker.category}:${blocker.summary}`), scratchpadSummary].join('\n')),
       compacted: previous?.compacted || false,
       promptCharBudget: previous?.promptCharBudget || DEFAULT_PROMPT_CHAR_BUDGET,
       promptChars: previous?.promptChars || 0,
@@ -1207,6 +1395,55 @@ export class AgentHarnessLoop {
     return bundle;
   }
 
+  private async refreshSemanticRetrieval(state: HarnessState, activeTask: TaskItem): Promise<void> {
+    state.runStats = state.runStats || this.createRunStats();
+    if (!this.embeddingProvider) {
+      state.semanticRetrieval = {
+        generatedAt: new Date().toISOString(), status: 'disabled', provider: 'deterministic-fallback', modelId: '', query: '', cacheHits: 0, embeddedDocuments: 0, candidates: []
+      };
+      return;
+    }
+    const root = this.tools.getWorkspaceRoot();
+    const query = [
+      state.goalContract.goal,
+      activeTask.title,
+      activeTask.owner,
+      ...(state.blockers || []).filter(blocker => blocker.status === 'open').map(blocker => `${blocker.category} ${blocker.summary}`)
+    ].join('\n').slice(0, 8000);
+    const documents: SemanticDocument[] = [];
+    for (const filePath of listRetrievalFiles(root, 80)) {
+      try {
+        const rel = path.relative(root, filePath).replace(/\\/g, '/');
+        const content = fs.readFileSync(filePath, 'utf8').slice(0, 6000);
+        documents.push({ path: rel, text: `Path: ${rel}\n${content}` });
+      } catch {
+        // Binary/unreadable files remain covered by deterministic path ranking.
+      }
+    }
+    try {
+      const report = await rankSemantically(root, query, documents, this.embeddingProvider, 30);
+      state.semanticRetrieval = report;
+      state.runStats.semanticRefreshes += 1;
+      state.runStats.semanticCacheHits += report.cacheHits;
+      state.runStats.semanticEmbeddedDocuments += report.embeddedDocuments;
+      state.logs.push(this.log('validation', `Semantic retrieval ready: ${report.candidates.length} candidates via ${report.modelId}; cache hits ${report.cacheHits}, embedded documents ${report.embeddedDocuments}.`, 'Retrieval'));
+    } catch (error: any) {
+      state.semanticRetrieval = {
+        generatedAt: new Date().toISOString(),
+        status: 'failed',
+        provider: this.embeddingProvider.id,
+        modelId: this.embeddingProvider.modelId,
+        query,
+        cacheHits: 0,
+        embeddedDocuments: 0,
+        candidates: [],
+        error: String(error?.message || error).slice(0, 1200)
+      };
+      state.runStats.semanticFailures += 1;
+      state.logs.push(this.log('warning', `Semantic retrieval failed; deterministic ranking retained: ${state.semanticRetrieval.error}`, 'Retrieval'));
+    }
+  }
+
   private rankRetrievalCandidates(state: HarnessState, activeTask?: TaskItem, limit = 10): RetrievalCandidate[] {
     const root = this.tools.getWorkspaceRoot();
     const queryText = [
@@ -1217,6 +1454,7 @@ export class AgentHarnessLoop {
     ].join(' ');
     const queryTokens = tokenize(queryText);
     const files = listRetrievalFiles(root, 300);
+    const semanticByPath = new Map((state.semanticRetrieval?.status === 'ready' ? state.semanticRetrieval.candidates : []).map(candidate => [candidate.path.replace(/\\/g, '/'), candidate.similarity]));
     const candidates = files.map(filePath => {
       const rel = path.relative(root, filePath).replace(/\\/g, '/');
       const language = path.extname(rel).replace('.', '') || 'text';
@@ -1233,19 +1471,24 @@ export class AgentHarnessLoop {
       const rememberedBoost = state.files[rel] ? 8 : 0;
       const sourceBoost = /\.(ts|tsx|js|jsx|py|cs|go|rs)$/i.test(rel) ? 2 : 0;
       const configBoost = /(^|\/)(package\.json|tsconfig\.json|vite\.config|jest\.config|AGENTS\.md|README\.md)$/i.test(rel) ? 2 : 0;
-      const score = pathHits * 6 + contentHits + rememberedBoost + sourceBoost + configBoost;
+      const semanticScore = semanticByPath.get(rel);
+      const semanticBoost = semanticScore === undefined ? 0 : Math.max(0, semanticScore) * 40;
+      const score = pathHits * 6 + contentHits + rememberedBoost + sourceBoost + configBoost + semanticBoost;
       const reasons = [
         pathHits ? `${pathHits} path token hits` : '',
         contentHits ? `${contentHits} content token hits` : '',
         rememberedBoost ? 'already in state.files' : '',
         sourceBoost ? 'source file' : '',
-        configBoost ? 'project config/doc' : ''
+        configBoost ? 'project config/doc' : '',
+        semanticScore === undefined ? '' : `semantic cosine ${semanticScore.toFixed(3)}`
       ].filter(Boolean);
       return {
         path: rel,
         score,
         reason: reasons.join('; ') || 'fallback candidate',
-        language
+        language,
+        semanticScore,
+        source: semanticScore === undefined ? 'deterministic' as const : 'hybrid' as const
       };
     });
     return candidates
@@ -1283,11 +1526,12 @@ export class AgentHarnessLoop {
       handoffSummary: `${role} owns "${activeTask.title}". Propose one valid tool call, keep mutations behind VALIDATE -> COMMIT, and leave success claims to green evidence plus reviewer proof.`
     };
     state.roleHandoffs[role] = handoff;
+    this.ensureWorkerContext(state, role, activeTask);
     state.runStats.roleHandoffRefreshes += 1;
     return handoff;
   }
 
-  private allowedToolsForRole(role: string, activeTask: TaskItem): string[] {
+  private allowedToolsForRole(role: string, activeTask: TaskItem): ToolName[] {
     if (role === 'Explorer') {
       return ['repo_search', 'symbol_search', 'read_file', 'read_range'];
     }
@@ -1295,7 +1539,7 @@ export class AgentHarnessLoop {
       return ['repo_search', 'symbol_search', 'read_file', 'read_range', 'update_plan', 'update_tasks'];
     }
     if (role === 'Editor') {
-      return ['repo_search', 'symbol_search', 'read_file', 'read_range', 'apply_patch'];
+      return ['repo_search', 'symbol_search', 'read_file', 'read_range', 'apply_patch', 'write_file', 'run_tests'];
     }
     if (role === 'Reviewer' || activeTask.title.toLowerCase().includes('verification')) {
       return ['run_tests', 'run_command', 'get_diff', 'record_evidence', 'declare_success'];
@@ -1306,6 +1550,160 @@ export class AgentHarnessLoop {
     return ['repo_search', 'read_file', 'read_range', 'update_plan'];
   }
 
+  private validateRoleCapability(state: HarnessState, activeTask: TaskItem, proposal: ToolProposal): { valid: boolean; reason?: string } {
+    void state;
+    const role = activeTask.owner || 'Orchestrator';
+    const allowed = this.allowedToolsForRole(role, activeTask);
+    if (allowed.includes(proposal.name)) {
+      return { valid: true };
+    }
+    return {
+      valid: false,
+      reason: `[role_capability_blocked] ${role} cannot use ${proposal.name} while assigned to "${activeTask.title}". Allowed tools: ${allowed.join(', ')}.`
+    };
+  }
+
+  private ensureWorkerContext(state: HarnessState, role: string, activeTask?: TaskItem): WorkerContext {
+    state.workerContexts = state.workerContexts || {};
+    const normalizedRole = role || 'Orchestrator';
+    const fallbackTask: TaskItem = activeTask || {
+      id: 'worker-context',
+      title: 'Persisted worker context',
+      status: 'running',
+      dependencies: [],
+      blockers: [],
+      owner: normalizedRole
+    };
+    const existing = state.workerContexts[normalizedRole];
+    if (existing) {
+      existing.updatedAt = new Date().toISOString();
+      existing.allowedTools = this.allowedToolsForRole(normalizedRole, fallbackTask);
+      if (activeTask) {
+        existing.lastTaskId = activeTask.id;
+        existing.lastTaskTitle = activeTask.title;
+      }
+      return existing;
+    }
+    const now = new Date().toISOString();
+    const worker: WorkerContext = {
+      role: normalizedRole,
+      sessionId: `${state.sessionId}:worker:${normalizedRole.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+      allowedTools: this.allowedToolsForRole(normalizedRole, fallbackTask),
+      createdAt: now,
+      updatedAt: now,
+      providerCalls: 0,
+      acceptedProposals: 0,
+      rejectedProposals: 0,
+      processExecutions: 0,
+      processFailures: 0,
+      lastWorkerPid: null,
+      lastWorkerDurationMs: 0,
+      lastWorkerBlockedEnvKeys: [],
+      recentTools: [],
+      lastTaskId: activeTask?.id || '',
+      lastTaskTitle: activeTask?.title || ''
+    };
+    state.workerContexts[normalizedRole] = worker;
+    return worker;
+  }
+
+  private recordWorkerProposal(state: HarnessState, activeTask: TaskItem, proposal: ToolProposal, accepted: boolean): void {
+    const worker = this.ensureWorkerContext(state, activeTask.owner || 'Orchestrator', activeTask);
+    if (accepted) worker.acceptedProposals += 1;
+    else worker.rejectedProposals += 1;
+    worker.recentTools = [...worker.recentTools, proposal.name].slice(-12);
+    worker.updatedAt = new Date().toISOString();
+  }
+
+  private recordWorkerExecution(state: HarnessState, activeTask: TaskItem, metadata: WorkerProcessMetadata, success: boolean): void {
+    state.runStats = state.runStats || this.createRunStats();
+    const worker = this.ensureWorkerContext(state, activeTask.owner || metadata.role || 'Orchestrator', activeTask);
+    worker.processExecutions += 1;
+    if (!success) worker.processFailures += 1;
+    worker.lastWorkerPid = metadata.pid;
+    worker.lastWorkerDurationMs = metadata.durationMs;
+    worker.lastWorkerBlockedEnvKeys = metadata.blockedEnvKeys;
+    worker.updatedAt = new Date().toISOString();
+    state.runStats.workerProcessExecutions += 1;
+    if (!success) state.runStats.workerProcessFailures += 1;
+    state.logs.push(this.log(success ? 'validation' : 'warning', `Worker process ${metadata.pid} executed ${activeTask.owner} tool in ${metadata.durationMs}ms; env allowed ${metadata.allowedEnvKeys.length}, blocked ${metadata.blockedEnvKeys.length}.`, 'Worker'));
+  }
+
+  private recordBlocker(state: HarnessState, source: BlockerSource, details: string, activeTask?: TaskItem): BlockerEntry {
+    state.blockers = state.blockers || [];
+    state.runStats = state.runStats || this.createRunStats();
+    const classification = classifyBlocker(source, details);
+    const role = activeTask?.owner || state.activeSubAgent || 'Orchestrator';
+    const taskId = activeTask?.id || '';
+    const existing = state.blockers.find(blocker => blocker.status === 'open' && blocker.category === classification.category && blocker.taskId === taskId && blocker.role === role);
+    const now = new Date().toISOString();
+    if (existing) {
+      existing.occurrences += 1;
+      existing.lastSeenAt = now;
+      existing.summary = String(details).slice(0, 1200);
+      existing.retryable = classification.retryable;
+      existing.suggestedAction = classification.suggestedAction;
+      state.runStats.blockerEvents += 1;
+      this.syncBlockerStats(state);
+      return existing;
+    }
+    const blocker: BlockerEntry = {
+      id: `blocker-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      source,
+      category: classification.category,
+      status: 'open',
+      retryable: classification.retryable,
+      taskId,
+      taskTitle: activeTask?.title || '',
+      role,
+      summary: String(details).slice(0, 1200),
+      suggestedAction: classification.suggestedAction,
+      occurrences: 1,
+      firstSeenAt: now,
+      lastSeenAt: now
+    };
+    state.blockers.push(blocker);
+    state.runStats.blockerEvents += 1;
+    this.syncBlockerStats(state);
+    state.logs.push(this.log('warning', `Blocker ${blocker.category} opened (${blocker.retryable ? 'retryable' : 'non-retryable'}): ${blocker.summary.slice(0, 400)}`, 'Harness'));
+    return blocker;
+  }
+
+  private resolveBlockers(state: HarnessState, activeTask: TaskItem | undefined, categories: BlockerCategory[], resolution: string): void {
+    state.blockers = state.blockers || [];
+    const now = new Date().toISOString();
+    for (const blocker of state.blockers) {
+      if (blocker.status !== 'open' || !categories.includes(blocker.category)) continue;
+      if (activeTask && blocker.taskId && blocker.taskId !== activeTask.id) continue;
+      blocker.status = 'resolved';
+      blocker.resolvedAt = now;
+      blocker.resolution = resolution;
+    }
+    this.syncBlockerStats(state);
+  }
+
+  private finalizeBlockers(state: HarnessState): void {
+    state.blockers = state.blockers || [];
+    if (state.status === 'success') {
+      this.resolveBlockers(state, undefined, state.blockers.filter(blocker => blocker.status === 'open').map(blocker => blocker.category), 'Run reached terminal success with green oracle evidence and required review.');
+      return;
+    }
+    if (!['failed', 'gave_up'].includes(state.status)) return;
+    for (const blocker of state.blockers) {
+      if (blocker.status === 'open') {
+        blocker.status = 'terminal';
+        blocker.resolution = state.haltReason || 'Run terminated with blocker unresolved.';
+      }
+    }
+    this.syncBlockerStats(state);
+  }
+
+  private syncBlockerStats(state: HarnessState): void {
+    state.runStats = state.runStats || this.createRunStats();
+    state.runStats.openBlockers = (state.blockers || []).filter(blocker => blocker.status !== 'resolved').length;
+    state.runStats.resolvedBlockers = (state.blockers || []).filter(blocker => blocker.status === 'resolved').length;
+  }
+
   private responsibilitiesForRole(role: string, activeTask: TaskItem): string[] {
     if (role === 'Explorer') {
       return ['Discover relevant files and symbols.', 'Avoid edits and terminal commands.', 'Populate durable context for later roles.'];
@@ -1314,7 +1712,7 @@ export class AgentHarnessLoop {
       return ['Convert findings into an implementation plan.', 'Update task graph only through structured tool calls.', 'Keep the plan executable and scoped.'];
     }
     if (role === 'Editor') {
-      return ['Make the smallest workspace-contained patch.', 'Do not claim success.', 'Expect the reviewer and oracle to verify the change.'];
+      return ['Make the smallest workspace-contained patch.', 'Use run_tests only to diagnose or prove that no edit is needed.', 'Do not review, record evidence, or claim success.'];
     }
     if (role === 'Reviewer' || activeTask.title.toLowerCase().includes('verification')) {
       return ['Inspect the diff with get_diff before success.', 'Run the selected oracle.', 'Record green evidence before declaring success.'];
@@ -1349,6 +1747,8 @@ export class AgentHarnessLoop {
     const forgeDir = path.join(root, '.forge');
     fs.mkdirSync(forgeDir, { recursive: true });
 
+    this.finalizeBlockers(state);
+
     if (['success', 'failed', 'gave_up'].includes(state.status) && !state.aar) {
       this.recordAar(state, forgeDir);
     }
@@ -1369,10 +1769,14 @@ export class AgentHarnessLoop {
     fs.writeFileSync(path.join(forgeDir, 'reviewer-critiques.json'), JSON.stringify(state.reviewerCritiques || [], null, 2), 'utf8');
     fs.writeFileSync(path.join(forgeDir, 'precommit-reviews.json'), JSON.stringify(state.preCommitReviews || [], null, 2), 'utf8');
     fs.writeFileSync(path.join(forgeDir, 'escalations.json'), JSON.stringify(state.escalations || [], null, 2), 'utf8');
+    fs.writeFileSync(path.join(forgeDir, 'blockers.json'), JSON.stringify(state.blockers || [], null, 2), 'utf8');
     this.refreshContextBundle(state);
     fs.writeFileSync(path.join(forgeDir, 'context-bundle.json'), JSON.stringify(state.contextBundle, null, 2), 'utf8');
     fs.writeFileSync(path.join(forgeDir, 'retrieval-index.json'), JSON.stringify(state.contextBundle.retrievalCandidates || [], null, 2), 'utf8');
+    fs.writeFileSync(path.join(forgeDir, 'semantic-retrieval.json'), JSON.stringify(state.semanticRetrieval, null, 2), 'utf8');
     fs.writeFileSync(path.join(forgeDir, 'role-handoffs.json'), JSON.stringify(state.roleHandoffs || {}, null, 2), 'utf8');
+    fs.writeFileSync(path.join(forgeDir, 'worker-contexts.json'), JSON.stringify(state.workerContexts || {}, null, 2), 'utf8');
+    fs.writeFileSync(path.join(forgeDir, 'architect-handoff.json'), JSON.stringify(state.architectHandoff || null, null, 2), 'utf8');
     fs.writeFileSync(path.join(forgeDir, 'safety-checkpoints.json'), JSON.stringify(state.safetyCheckpoints || [], null, 2), 'utf8');
     fs.writeFileSync(path.join(forgeDir, 'command-effects.json'), JSON.stringify(state.commandEffects || [], null, 2), 'utf8');
     fs.writeFileSync(path.join(forgeDir, 'budget.json'), JSON.stringify(state.runBudget || this.createRunBudget(state.goalContract), null, 2), 'utf8');
@@ -1454,7 +1858,9 @@ export class AgentHarnessLoop {
       providerFailures: stats.providerFailures || 0,
       repairAttempts: stats.repairAttempts || 0,
       safetyReverts: stats.safetyReverts || 0,
-      noProgressTurns: stats.noProgressTurns || 0
+      noProgressTurns: stats.noProgressTurns || 0,
+      blockerEvents: stats.blockerEvents || 0,
+      terminalBlockers: (state.blockers || []).filter(blocker => blocker.status === 'terminal').length
     };
     const clean = Object.values(triggers).every(count => count === 0);
     const success = state.status === 'success';
@@ -1484,6 +1890,10 @@ export class AgentHarnessLoop {
     }
     if (triggers.repairAttempts > 0) {
       improveTools.push(`${triggers.repairAttempts} malformed output repair(s); consider stricter structured-output settings for this model.`);
+    }
+    if (triggers.terminalBlockers > 0) {
+      const categories = Array.from(new Set((state.blockers || []).filter(blocker => blocker.status === 'terminal').map(blocker => blocker.category)));
+      improveWork.push(`${triggers.terminalBlockers} blocker(s) remained terminal: ${categories.join(', ') || 'uncategorized'}.`);
     }
     if (triggers.reflectionSuppressed > 0) {
       improveTools.push(`Reflection was suppressed ${triggers.reflectionSuppressed} time(s) (disabled lane); failures halted instead of recovering.`);
@@ -1525,6 +1935,10 @@ export class AgentHarnessLoop {
     }
     if (triggers.noProgressTurns > 0) {
       candidates.push({ category: 'progress', lesson: `No-progress detector fired on this goal shape; decompose before retrying.` });
+    }
+    if (triggers.terminalBlockers > 0) {
+      const categories = Array.from(new Set((state.blockers || []).filter(blocker => blocker.status === 'terminal').map(blocker => blocker.category)));
+      candidates.push({ category: 'blocker', lesson: `Terminal blockers for this goal shape: ${categories.join(', ') || 'uncategorized'}; address these categories before retrying.` });
     }
     const lessonsPath = path.join(forgeDir, 'lessons.json');
     let existing: LessonEntry[] = [];
@@ -1736,6 +2150,58 @@ function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
 }
 
+export function extractPlanFocusFiles(planMd: string, root: string, limit = 6): string[] {
+  const normalizedPlan = String(planMd || '').replace(/\\/g, '/');
+  const comparisonPlan = process.platform === 'win32' ? normalizedPlan.toLowerCase() : normalizedPlan;
+  return listRetrievalFiles(root, 10_000)
+    .map(filePath => path.relative(root, filePath).replace(/\\/g, '/'))
+    .map(filePath => ({ filePath, mentionIndex: exactPathMentionIndex(comparisonPlan, process.platform === 'win32' ? filePath.toLowerCase() : filePath) }))
+    .filter(item => item.mentionIndex >= 0)
+    .sort((a, b) => a.mentionIndex - b.mentionIndex || a.filePath.localeCompare(b.filePath))
+    .slice(0, Math.max(1, limit))
+    .map(item => item.filePath);
+}
+
+function exactPathMentionIndex(text: string, filePath: string): number {
+  let fromIndex = 0;
+  while (fromIndex < text.length) {
+    const index = text.indexOf(filePath, fromIndex);
+    if (index < 0) {
+      return -1;
+    }
+    const before = index > 0 ? text[index - 1] : '';
+    const afterIndex = index + filePath.length;
+    const after = afterIndex < text.length ? text[afterIndex] : '';
+    const pathChar = /[a-zA-Z0-9_.\/-]/;
+    if ((!before || !pathChar.test(before)) && (!after || !pathChar.test(after))) {
+      return index;
+    }
+    fromIndex = index + filePath.length;
+  }
+  return -1;
+}
+
+function extractMarkdownListSection(markdown: string, heading: string, limit: number): string[] {
+  const lines = String(markdown || '').split(/\r?\n/);
+  const headingPattern = new RegExp(`^#{1,6}\\s+${heading.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}\\s*$`, 'i');
+  const start = lines.findIndex(line => headingPattern.test(line.trim()));
+  if (start < 0) {
+    return [];
+  }
+  const items: string[] = [];
+  for (let index = start + 1; index < lines.length && items.length < limit; index += 1) {
+    const line = lines[index].trim();
+    if (/^#{1,6}\s+/.test(line)) {
+      break;
+    }
+    const match = line.match(/^(?:[-*+]\s+|\d+[.)]\s+)(.+)$/);
+    if (match?.[1]?.trim()) {
+      items.push(match[1].trim());
+    }
+  }
+  return items;
+}
+
 function snapshotWorkspaceFiles(root: string): Map<string, string> {
   const snapshot = new Map<string, string>();
   for (const filePath of listSideEffectFiles(root, 1000)) {
@@ -1823,7 +2289,7 @@ function listRetrievalFiles(root: string, limit: number): string[] {
           continue;
         }
         visit(fullPath);
-      } else if (entry.isFile() && isRetrievableFile(entry.name)) {
+      } else if (entry.isFile() && isRetrievableFile(entry.name) && !HARNESS_OWNED_RETRIEVAL_FILES.has(rel)) {
         results.push(fullPath);
       }
     }
@@ -1836,7 +2302,8 @@ function isRetrievableFile(fileName: string): boolean {
   return /\.(ts|tsx|js|jsx|json|md|py|cs|go|rs|java|kt|yml|yaml|toml|xml|html|css)$/i.test(fileName);
 }
 
-const RETRIEVAL_EXCLUDED_DIRS = new Set(['node_modules', 'out', 'dist', '.git', '.vscode-test', 'coverage', 'artifacts']);
+const RETRIEVAL_EXCLUDED_DIRS = new Set(['node_modules', 'out', 'dist', '.git', '.forge', '.vscode-test', 'coverage', 'artifacts']);
+const HARNESS_OWNED_RETRIEVAL_FILES = new Set(['PLAN.md', 'SCRATCHPAD.md', 'todos.json', 'evidence_ledger.json']);
 const SIDE_EFFECT_EXCLUDED_DIRS = new Set(['node_modules', 'out', 'dist', '.git', '.vscode-test', 'coverage', 'artifacts', '.forge']);
 const COMMON_RETRIEVAL_STOPWORDS = new Set([
   'the',
