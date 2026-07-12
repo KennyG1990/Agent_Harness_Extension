@@ -110,6 +110,15 @@ export default function App() {
         setState(message.state);
         setIsBusy(false);
         setStatusMessage(`Run ${message.state.status}: ${message.state.haltReason || message.state.firewall?.details || 'state updated'}`);
+        const pending = message.state?.clarifications?.find((item: any) => item.status === 'pending');
+        if (pending) {
+          const optionText = pending.options?.length ? `\n\nOptions: ${pending.options.join(' | ')}` : '';
+          const recommendation = pending.recommendedAnswer ? `\nRecommended: ${pending.recommendedAnswer}` : '';
+          const content = `${pending.question}${optionText}${recommendation}`;
+          setChatMessages(previous => previous.some(item => item.role === 'assistant' && item.content === content)
+            ? previous
+            : [...previous, { role: 'assistant', content }]);
+        }
       }
       if (message.command === 'models-list') {
         setModelsCatalog(message.models || STANDARD_MODELS);
@@ -292,6 +301,7 @@ export default function App() {
       command: 'chat',
       modelId: selectedModelId,
       sessionId: state?.sessionId,
+      modelBindings: bindings,
       messages: roleScopedMessages
     });
   };
@@ -549,7 +559,7 @@ export default function App() {
               <div data-testid="run-status-line" className="mt-2 flex items-center justify-between gap-2 text-[10px] text-slate-500">
                 <span className="truncate">{state?.status || 'idle'} · {activeTask?.title || statusMessage}</span>
                 <span className="shrink-0 font-mono">
-                  tests {state?.oracleStatuses.tests || '-'} · cost ${budgetSpent.toFixed(4)}/${budgetCap.toFixed(2)} · halt {state?.runStats?.budgetHalts ?? 0} · model {state?.runStats?.modelDrivenProposals ?? 0} · fallback {state?.runStats?.fallbackActions ?? 0} · repair {state?.runStats?.repairAttempts ?? 0} · reflect {state?.runStats?.reflectionAttempts ?? 0} · review {state?.runStats?.reviewerApprovals ?? 0} · crit {state?.runStats?.reviewerCritiques ?? 0} · pre {state?.runStats?.preCommitReviews ?? 0} · cmd {state?.runStats?.commandEffectCaptures ?? 0} · net {state?.runStats?.networkIntentCaptures ?? 0}/{state?.runStats?.networkWriteBlocks ?? 0} · perm {state?.runStats?.roleCapabilityBlocks ?? 0} · proc {state?.runStats?.workerProcessExecutions ?? 0}/{state?.runStats?.workerProcessFailures ?? 0} · txn {state?.runStats?.editTransactions ?? 0}+{state?.runStats?.commandTransactions ?? 0}/{(state?.runStats?.editTransactionConflicts ?? 0) + (state?.runStats?.commandTransactionConflicts ?? 0)} · skill {state?.runStats?.skillApplications ?? 0}/{state?.runStats?.skillRetrievals ?? 0} · blk {state?.runStats?.openBlockers ?? 0}/{state?.runStats?.blockerEvents ?? 0} · sem {state?.runStats?.semanticRefreshes ?? 0}/{state?.runStats?.semanticFailures ?? 0} · esc {state?.runStats?.escalationCount ?? 0} · ctx {state?.runStats?.contextRefreshes ?? 0} · hand {state?.runStats?.roleHandoffRefreshes ?? 0} · ret {state?.runStats?.retrievalRefreshes ?? 0} · safe {state?.runStats?.safetyCheckpoints ?? 0}
+                  tests {state?.oracleStatuses.tests || '-'} · cost ${budgetSpent.toFixed(4)}/${budgetCap.toFixed(2)} · ask {state?.runStats?.clarificationAnswers ?? 0}/{state?.runStats?.clarificationRequests ?? 0} · halt {state?.runStats?.budgetHalts ?? 0} · model {state?.runStats?.modelDrivenProposals ?? 0} · fallback {state?.runStats?.fallbackActions ?? 0} · repair {state?.runStats?.repairAttempts ?? 0} · reflect {state?.runStats?.reflectionAttempts ?? 0} · review {state?.runStats?.reviewerApprovals ?? 0} · crit {state?.runStats?.reviewerCritiques ?? 0} · pre {state?.runStats?.preCommitReviews ?? 0} · cmd {state?.runStats?.commandEffectCaptures ?? 0} · net {state?.runStats?.networkIntentCaptures ?? 0}/{state?.runStats?.networkWriteBlocks ?? 0} · perm {state?.runStats?.roleCapabilityBlocks ?? 0} · proc {state?.runStats?.workerProcessExecutions ?? 0}/{state?.runStats?.workerProcessFailures ?? 0} · txn {state?.runStats?.editTransactions ?? 0}+{state?.runStats?.commandTransactions ?? 0}/{(state?.runStats?.editTransactionConflicts ?? 0) + (state?.runStats?.commandTransactionConflicts ?? 0)} · flow {state?.workflow?.currentStage ?? '-'}/{state?.runStats?.workflowGateBlocks ?? 0} · skill {state?.runStats?.skillApplications ?? 0}/{state?.runStats?.skillRetrievals ?? 0} · blk {state?.runStats?.openBlockers ?? 0}/{state?.runStats?.blockerEvents ?? 0} · sem {state?.runStats?.semanticRefreshes ?? 0}/{state?.runStats?.semanticFailures ?? 0} · esc {state?.runStats?.escalationCount ?? 0} · ctx {state?.runStats?.contextRefreshes ?? 0} · hand {state?.runStats?.roleHandoffRefreshes ?? 0} · ret {state?.runStats?.retrievalRefreshes ?? 0} · safe {state?.runStats?.safetyCheckpoints ?? 0}
                 </span>
               </div>
             </div>

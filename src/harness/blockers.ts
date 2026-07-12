@@ -10,6 +10,7 @@ export function classifyBlocker(source: BlockerSource, details: string): Blocker
   const normalized = String(details || '').toLowerCase();
   if (source === 'provider') return result('provider', true, 'Retry with the configured fallback or escalation model.');
   if (source === 'schema') return result('schema', true, 'Repair the structured response to match the tool schema exactly.');
+  if (source === 'clarification') return result('clarification', true, 'Wait for the user answer, then resume the same run with that answer as authoritative context.');
   if (source === 'precommit') return result('precommit_review', true, 'Address the reviewer concerns and propose a narrower mutation.');
   if (source === 'oracle') return result('oracle', true, 'Use the failing oracle output to revise the implementation before rerunning tests.');
   if (source === 'budget') return result('budget', false, 'Pause and request an explicit budget or time extension.');
@@ -22,6 +23,7 @@ export function classifyBlocker(source: BlockerSource, details: string): Blocker
     return result('tool_failure', true, 'Inspect the concrete tool output and propose a corrected action.');
   }
   if (/\[role_capability_blocked\]/.test(normalized)) return result('role_capability', true, 'Use only tools allowed for the active role or wait for the owning role.');
+  if (/\[workflow_gate_blocked\]/.test(normalized)) return result('workflow_gate', true, 'Complete the named predecessor workflow stage before retrying this action.');
   if (/\[network_intent_blocked\]/.test(normalized)) return result('network_policy', true, 'Replace outbound mutation with an auditable local operation or explicit user-controlled workflow.');
   if (/outside the workspace|lies outside|path must be workspace-relative|access denied/.test(normalized)) return result('workspace_scope', true, 'Use an existing workspace-relative path contained by the active root.');
   if (/command policy|blocked token/.test(normalized)) return result('command_policy', true, 'Use a non-destructive command allowed by deterministic policy.');

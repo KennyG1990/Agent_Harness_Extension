@@ -105,7 +105,7 @@ export async function runIsolatedAgentGoal(options: IsolatedRunOptions = {}, pro
   if (Number.isFinite(options.maxSteps) && Number(options.maxSteps) > 0) {
     state.maxSteps = Number(options.maxSteps);
   }
-  while (!['success', 'failed', 'gave_up', 'paused'].includes(state.status) && state.currentStepIndex < state.maxSteps) {
+  while (!['success', 'failed', 'gave_up', 'paused', 'awaiting_input'].includes(state.status) && state.currentStepIndex < state.maxSteps) {
     state = await loop.runStep(state, options.modelBindings || {});
   }
 

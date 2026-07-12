@@ -27,10 +27,92 @@ async function runSuite(): Promise<void> {
   const { runIsolatedAgentGoal } = await import('../../harness/isolation');
   const { assemblePromptWithinBudget } = await import('../../harness/contextBudget');
   const { bankProceduralSkills, selectProceduralSkills } = await import('../../harness/proceduralSkills');
+  const { classifyWorkflowLane, createWorkflowGovernance, enforceWorkflowPlan, finalizeWorkflow, recordWorkflowEvent, validateWorkflowProposal, workflowReadyForSuccess } = await import('../../harness/workflowGovernance');
   assert.equal(classifyBlocker('firewall', '[role_capability_blocked] Editor cannot use declare_success.').category, 'role_capability', 'role denials need a distinct blocker category.');
   assert.equal(classifyBlocker('firewall', '[network_intent_blocked] outbound upload denied.').category, 'network_policy', 'network policy needs a distinct blocker category.');
   assert.equal(classifyBlocker('firewall', 'Edit applicability failed: search block not found.').category, 'patch_applicability', 'patch drift needs an applicability category.');
   assert.equal(classifyBlocker('budget', 'cost cap reached').retryable, false, 'budget blockers must not spin within the same run.');
+  assert.equal(classifyBlocker('firewall', '[workflow_gate_blocked] plan first').category, 'workflow_gate', 'workflow bypass needs a distinct blocker category.');
+  assert.equal(classifyBlocker('clarification', '[clarification_required] target behavior unknown').category, 'clarification', 'clarification pauses need a distinct blocker category.');
+  const clarificationWorkspace = createTempWorkspace('forge-clarification-');
+  let clarificationProviderCalls = 0;
+  const clarificationProvider = {
+    id: 'clarification-provider', modelId: 'weak-model',
+    generateChat: async () => {
+      clarificationProviderCalls += 1;
+      return { text: JSON.stringify({ explanation: 'The requested compatibility behavior is user-owned and changes the implementation.', confidence: 45, materialUncertainty: true, uncertainties: ['Whether legacy callers must remain supported.'], proposal: { name: 'ask_user', arguments: { question: 'Must legacy callers remain supported?', uncertainty: 'This decides whether the public API may change.', options: ['Yes, preserve compatibility', 'No, breaking change is allowed'], recommendedAnswer: 'Yes, preserve compatibility' } } }) };
+    }
+  };
+  const clarificationLoop = new AgentHarnessLoop(clarificationProvider as any, clarificationWorkspace);
+  let clarificationState: any = await clarificationLoop.initializeHarness('Change the public API behavior');
+  clarificationState = await clarificationLoop.runStep(clarificationState);
+  assert.equal(clarificationState.status, 'awaiting_input', 'ask_user must pause the run before mutation.');
+  assert.equal(clarificationState.clarifications[0].status, 'pending');
+  const callsBeforeBlockedStep = clarificationProviderCalls;
+  clarificationState = await clarificationLoop.runStep(clarificationState);
+  assert.equal(clarificationProviderCalls, callsBeforeBlockedStep, 'pending clarification must prevent provider calls.');
+  clarificationState = clarificationLoop.answerClarification('Yes, preserve compatibility.');
+  assert.equal(clarificationState.status, 'idle');
+  assert.equal(clarificationState.clarifications[0].status, 'answered');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(clarificationWorkspace, '.forge', 'clarifications.json'), 'utf8'))[0].answer, 'Yes, preserve compatibility.');
+  const uncertainMutationProvider = { id: 'uncertain-mutation', modelId: 'weak-model', generateChat: async () => ({ text: JSON.stringify({ explanation: 'I am unsure which behavior is intended.', confidence: 30, materialUncertainty: true, uncertainties: ['Target behavior'], proposal: { name: 'write_file', arguments: { path: 'unsafe.txt', content: 'must not land' } } }) }) };
+  const uncertainMutationLoop = new AgentHarnessLoop(uncertainMutationProvider as any, createTempWorkspace('forge-uncertain-mutation-'));
+  let uncertainMutationState: any = await uncertainMutationLoop.initializeHarness('Change ambiguous behavior');
+  uncertainMutationState = await uncertainMutationLoop.runStep(uncertainMutationState);
+  assert.equal(uncertainMutationState.runStats.clarificationGateBlocks, 1, 'material uncertainty must block non-question proposals.');
+  assert.equal(fs.existsSync(path.join((uncertainMutationLoop as any).tools.getWorkspaceRoot(), 'unsafe.txt')), false, 'uncertain mutation must not reach commit.');
+  assert.equal(classifyWorkflowLane('Fix the API bug').lane, 'full', 'behavioral work must use the full lane.');
+  assert.equal(classifyWorkflowLane('Correct a README typo').lane, 'light', 'documentation-only work should use the light lane.');
+  assert.equal(classifyWorkflowLane('Fix a README typo').lane, 'light', 'generic fix wording must not inflate a documentation-only task to full lane.');
+  assert.equal(classifyWorkflowLane('Improve the workspace').lane, 'full', 'ambiguous work must default to the full lane.');
+  const workflowWorkspace = createTempWorkspace('forge-workflow-governance-');
+  const workflowGoal: any = { goal: 'Fix the API bug', context: '', constraints: [], doneWhen: ['tests pass'], nonGoals: ['no unrelated refactor'], budget: 2, spent: 0 };
+  const governedState: any = { workflow: createWorkflowGovernance(workflowWorkspace, workflowGoal), lastOraclePass: false, diffReviews: [], files: {}, aar: undefined, status: 'idle' };
+  const earlyMutation = validateWorkflowProposal(governedState, { name: 'apply_patch', arguments: { path: 'src/a.ts', patchContent: 'x' } });
+  assert.equal(earlyMutation.valid, false, 'implementation before reconcile/plan must be blocked.');
+  assert.match(String(earlyMutation.reason), /workflow_gate_blocked/);
+  assert.equal(governedState.workflow.violations.length, 1, 'workflow bypass must persist a violation.');
+  recordWorkflowEvent(governedState, { name: 'repo_search', arguments: { query: 'api' } }, true);
+  assert.equal(governedState.workflow.currentStage, 'document_plan');
+  assert.equal(validateWorkflowProposal(governedState, { name: 'update_plan', arguments: { planMd: '# Plan' } }).valid, true);
+  recordWorkflowEvent(governedState, { name: 'update_plan', arguments: { planMd: '# Plan' } }, true);
+  const governedPlan = enforceWorkflowPlan('# Plan\n\n## Ordered Steps\n1. Fix it.', governedState.workflow);
+  for (const heading of ['Acceptance Contract', 'Validation', 'Negative Path', 'Rollback']) assert.match(governedPlan, new RegExp(`## ${heading}`));
+  assert.equal(validateWorkflowProposal(governedState, { name: 'apply_patch', arguments: { path: 'src/a.ts', patchContent: 'x' } }).valid, true);
+  recordWorkflowEvent(governedState, { name: 'apply_patch', arguments: { path: 'src/a.ts', patchContent: 'x' } }, true);
+  assert.equal(validateWorkflowProposal(governedState, { name: 'record_evidence', arguments: { observation: 'too early' } }).valid, false, 'close evidence before validation must be blocked.');
+  governedState.lastOraclePass = true;
+  recordWorkflowEvent(governedState, { name: 'run_tests', arguments: {} }, true);
+  governedState.diffReviews = [{ status: 'no_changes' }];
+  recordWorkflowEvent(governedState, { name: 'get_diff', arguments: {} }, true);
+  assert.equal(validateWorkflowProposal(governedState, { name: 'record_evidence', arguments: { observation: 'green' } }).valid, true);
+  recordWorkflowEvent(governedState, { name: 'record_evidence', arguments: { observation: 'green' } }, true);
+  assert.equal(workflowReadyForSuccess(governedState.workflow).ready, true, 'all preterminal workflow gates should now be ready.');
+  governedState.status = 'success';
+  governedState.aar = { generatedAt: new Date().toISOString() };
+  finalizeWorkflow(governedState);
+  assert.equal(governedState.workflow.finalStatus, 'VERIFIED');
+  assert.equal(governedState.workflow.currentStage, 'complete');
+  const satisfyWorkflowPlanning = (state: any) => {
+    recordWorkflowEvent(state, { name: 'repo_search', arguments: { query: 'fixture' } }, true);
+    recordWorkflowEvent(state, { name: 'update_plan', arguments: { planMd: '# Plan' } }, true);
+  };
+  const workflowBypassWorkspace = createTempWorkspace('forge-workflow-bypass-');
+  fs.mkdirSync(path.join(workflowBypassWorkspace, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(workflowBypassWorkspace, 'src', 'guard.txt'), 'unchanged', 'utf8');
+  const workflowBypassProvider = {
+    capabilities: () => ({ structuredOutput: true, toolCalls: true, vision: false, contextLength: 128000 }),
+    listModels: async () => [],
+    generateChat: async () => ({ text: JSON.stringify({ explanation: 'Attempt to skip reconciliation and planning.', proposal: { name: 'write_file', arguments: { path: 'src/guard.txt', content: 'bypassed' } } }) })
+  };
+  const workflowBypassLoop = new AgentHarnessLoop(workflowBypassProvider as any, workflowBypassWorkspace);
+  let workflowBypassState = await workflowBypassLoop.initializeHarness('Fix a code bug without planning.');
+  workflowBypassState.taskGraph.tasks[0].status = 'completed';
+  workflowBypassState.taskGraph.tasks[1].status = 'completed';
+  workflowBypassState = await workflowBypassLoop.runStep(workflowBypassState, {});
+  assert.equal(fs.readFileSync(path.join(workflowBypassWorkspace, 'src', 'guard.txt'), 'utf8'), 'unchanged', 'workflow bypass must be rejected before filesystem mutation.');
+  assert.equal(workflowBypassState.runStats.workflowGateBlocks, 1);
+  assert.ok(workflowBypassState.workflow.violations.some((item: any) => /Implementation requires/.test(item.reason)));
   const failedSkillBank = bankProceduralSkills([], {
     terminalStatus: 'failed', goal: 'repair malformed patch', sessionId: 'failed-session', languageExtensions: ['.ts'], reflectionAttempts: 2, validationFailures: 2, repairAttempts: 1, preCommitBlocks: 0, escalationCount: 0, resolvedBlockerCategories: ['patch_format']
   });
@@ -309,6 +391,7 @@ async function runSuite(): Promise<void> {
   blockedNetworkState.taskGraph.tasks[0].status = 'completed';
   blockedNetworkState.taskGraph.tasks[1].status = 'completed';
   blockedNetworkState.taskGraph.tasks[2].status = 'completed';
+  satisfyWorkflowPlanning(blockedNetworkState);
   blockedNetworkState = await blockedNetworkLoop.runStep(blockedNetworkState, {});
   assert.equal(blockedNetworkState.runStats.networkWriteBlocks, 1, 'blocked network mutation should increment an explicit run counter.');
   assert.equal(blockedNetworkState.commandEffects.length, 0, 'blocked network mutation must never reach command execution or its post-execution ledger.');
@@ -691,6 +774,7 @@ async function runSuite(): Promise<void> {
   let preCommitState = await preCommitLoop.initializeHarness('Validate pre-commit review block.');
   preCommitState.taskGraph.tasks[0].status = 'completed';
   preCommitState.taskGraph.tasks[1].status = 'completed';
+  satisfyWorkflowPlanning(preCommitState);
   preCommitState = await preCommitLoop.runStep(preCommitState, { Reviewer: 'fake/reviewer-model' });
   assert.equal(fs.readFileSync(path.join(preCommitWorkspace, 'src', 'block.txt'), 'utf8'), 'before', 'blocked pre-commit review should prevent patch mutation.');
   assert.ok(preCommitState.preCommitReviews.some((entry: any) => entry.status === 'blocked' && entry.source === 'model'), 'blocked pre-commit model review should persist.');
@@ -719,6 +803,7 @@ async function runSuite(): Promise<void> {
   commandState.taskGraph.tasks[0].status = 'completed';
   commandState.taskGraph.tasks[1].status = 'completed';
   commandState.taskGraph.tasks[2].status = 'completed';
+  satisfyWorkflowPlanning(commandState);
   commandState = await commandLoop.runStep(commandState, {});
   delete process.env.FORGE_SANDBOX_SECRET;
   assert.ok(fs.existsSync(path.join(commandWorkspace, 'generated', 'effect.txt')), 'command should create fixture file.');
@@ -1063,7 +1148,7 @@ async function runSuite(): Promise<void> {
   assert.equal(isolatedCommandReport.sourceMutated, false, 'isolated command report should prove source workspace stayed unchanged.');
   assert.equal(isolatedCommandReport.reportPath, path.join(workspace, '.forge', 'isolated-runs', 'latest-isolated-run.json'), 'isolated command should persist report in workspace.');
 
-  for (const rel of ['.forge/state.json', '.forge/context-bundle.json', '.forge/retrieval-index.json', '.forge/semantic-retrieval.json', '.forge/role-handoffs.json', '.forge/worker-contexts.json', '.forge/worker-edit-transactions.json', '.forge/worker-command-transactions.json', '.forge/skill-registry.json', '.forge/blockers.json', '.forge/safety-checkpoints.json', '.forge/command-effects.json', '.forge/budget.json', '.forge/isolated-runs/latest-isolated-run.json', '.forge/isolated-runs/latest-isolated-run.diff', '.forge/goal-contract.json', '.forge/task-graph.json', '.forge/evidence-ledger.json', '.forge/diff-reviews.json', '.forge/reviewer-critiques.json', '.forge/precommit-reviews.json', '.forge/escalations.json', '.forge/latest-proof-report.json', '.forge/evals/latest-weak-model-eval.json', '.forge/verification-fixture-matrix.json', 'PLAN.md', 'todos.json', 'SCRATCHPAD.md', 'evidence_ledger.json']) {
+  for (const rel of ['.forge/state.json', '.forge/workflow-governance.json', '.forge/workflow-task-record.md', '.forge/context-bundle.json', '.forge/retrieval-index.json', '.forge/semantic-retrieval.json', '.forge/role-handoffs.json', '.forge/worker-contexts.json', '.forge/worker-edit-transactions.json', '.forge/worker-command-transactions.json', '.forge/skill-registry.json', '.forge/blockers.json', '.forge/safety-checkpoints.json', '.forge/command-effects.json', '.forge/budget.json', '.forge/isolated-runs/latest-isolated-run.json', '.forge/isolated-runs/latest-isolated-run.diff', '.forge/goal-contract.json', '.forge/task-graph.json', '.forge/evidence-ledger.json', '.forge/diff-reviews.json', '.forge/reviewer-critiques.json', '.forge/precommit-reviews.json', '.forge/escalations.json', '.forge/latest-proof-report.json', '.forge/evals/latest-weak-model-eval.json', '.forge/verification-fixture-matrix.json', 'PLAN.md', 'todos.json', 'SCRATCHPAD.md', 'evidence_ledger.json']) {
     assert.ok(fs.existsSync(path.join(workspace, rel)), `${rel} should exist`);
   }
 
@@ -1102,6 +1187,11 @@ async function runSuite(): Promise<void> {
 
   const openedSkills = await vscode.commands.executeCommand('forge-agent.openArtifact', 'skills');
   assert.equal(openedSkills, path.join(workspace, '.forge', 'skill-registry.json'), 'procedural skill registry should open through native editor command.');
+
+  const openedWorkflow = await vscode.commands.executeCommand('forge-agent.openArtifact', 'workflow');
+  assert.equal(openedWorkflow, path.join(workspace, '.forge', 'workflow-governance.json'), 'workflow governance ledger should open through native editor command.');
+  const openedWorkflowRecord = await vscode.commands.executeCommand('forge-agent.openArtifact', 'workflowRecord');
+  assert.equal(openedWorkflowRecord, path.join(workspace, '.forge', 'workflow-task-record.md'), 'workflow task record should open through native editor command.');
 
   const openedSafety = await vscode.commands.executeCommand('forge-agent.openArtifact', 'safety');
   assert.equal(openedSafety, path.join(workspace, '.forge', 'safety-checkpoints.json'), 'safety checkpoints should open through native editor command.');
@@ -1145,6 +1235,10 @@ async function runSuite(): Promise<void> {
   assert.ok(typeof autonomousState.runStats.retrievalRefreshes === 'number', 'autonomous run should expose retrieval stats.');
   assert.ok(typeof autonomousState.runStats.safetyCheckpoints === 'number', 'autonomous run should expose safety checkpoint stats.');
   assert.ok(typeof autonomousState.runStats.commandEffectCaptures === 'number', 'autonomous run should expose command side-effect stats.');
+  if (autonomousState.status === 'success') {
+    assert.equal(autonomousState.workflow.finalStatus, 'VERIFIED', 'successful autonomous run must complete every universal workflow gate.');
+    assert.ok(autonomousState.workflow.stages.every((stage: any) => stage.status === 'completed'), 'successful workflow must leave no pending stages.');
+  }
 }
 
 export async function run(): Promise<void> {

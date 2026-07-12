@@ -30,6 +30,7 @@ export class WorkspaceTools {
       update_tasks: async () => ({ success: true, output: 'Task graph update handled by harness state.' }),
       update_plan: async () => ({ success: true, output: 'Plan update handled by harness state.' }),
       record_evidence: async () => ({ success: true, output: 'Evidence update handled by harness state.' }),
+      ask_user: async () => ({ success: true, output: 'Clarification request handled by harness state.' }),
       declare_success: async () => ({ success: true, output: 'Success declaration accepted for oracle validation.' })
     };
   }

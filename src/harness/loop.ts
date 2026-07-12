@@ -1,7 +1,7 @@
 import * as path from 'path';
 import * as fs from 'fs';
 import * as crypto from 'crypto';
-import { AarReport, AarTriggerCounts, ArchitectHandoff, BlockerCategory, BlockerEntry, BlockerSource, CommandSideEffectEntry, ContextBundle, DiffReviewEntry, EscalationEntry, EvidenceLedgerItem, GoalContract, HarnessState, LessonEntry, PreCommitReviewEntry, ReflectionEntry, RetrievalCandidate, ReviewerCritiqueEntry, RoleHandoff, RunBudget, SafetyCheckpoint, StepLog, TaskItem, ToolName, ToolProposal, WorkerCommandTransaction, WorkerContext, WorkerEditTransaction } from './types';
+import { AarReport, AarTriggerCounts, ArchitectHandoff, BlockerCategory, BlockerEntry, BlockerSource, ClarificationRequest, CommandSideEffectEntry, ContextBundle, DiffReviewEntry, EscalationEntry, EvidenceLedgerItem, GoalContract, HarnessState, LessonEntry, PreCommitReviewEntry, ReflectionEntry, RetrievalCandidate, ReviewerCritiqueEntry, RoleHandoff, RunBudget, SafetyCheckpoint, StepLog, TaskItem, ToolName, ToolProposal, WorkerCommandTransaction, WorkerContext, WorkerEditTransaction } from './types';
 import { createConfiguredProvider, OpenRouterProvider, Provider } from './provider';
 import { resolvePatchTargetByContent, WorkspaceTools } from './tools';
 import { Firewall } from './firewall';
@@ -13,6 +13,7 @@ import { createConfiguredEmbeddingProvider, EmbeddingProvider, rankSemantically,
 import { TransactionalEditExecutor } from './transactionalEdits';
 import { TransactionalCommandExecutor } from './transactionalCommands';
 import { bankProceduralSkills, renderProceduralSkills, selectProceduralSkills } from './proceduralSkills';
+import { createWorkflowGovernance, enforceWorkflowPlan, finalizeWorkflow, recordWorkflowEvent, renderWorkflowTaskRecord, validateWorkflowProposal, workflowReadyForSuccess } from './workflowGovernance';
 
 const MAX_REPAIR_ATTEMPTS = 2;
 const MAX_NO_PROGRESS_TURNS = 4;
@@ -20,6 +21,14 @@ const MAX_REFLECTION_ATTEMPTS = 3;
 const ESCALATE_AFTER_REFLECTIONS = 2;
 const DEFAULT_MAX_WALL_CLOCK_MS = 30 * 60 * 1000;
 export const DEFAULT_PROMPT_CHAR_BUDGET = 96_000;
+
+interface ProposalEnvelope {
+  explanation: string;
+  proposal: ToolProposal;
+  confidence?: number;
+  materialUncertainty?: boolean;
+  uncertainties?: string[];
+}
 
 export const TOOL_SCHEMA = {
   type: 'object',
@@ -34,7 +43,7 @@ export const TOOL_SCHEMA = {
       properties: {
         name: {
           type: 'string',
-          enum: ['repo_search', 'symbol_search', 'read_file', 'read_range', 'write_file', 'apply_patch', 'run_command', 'run_tests', 'get_diff', 'update_tasks', 'update_plan', 'record_evidence', 'declare_success']
+          enum: ['repo_search', 'symbol_search', 'read_file', 'read_range', 'write_file', 'apply_patch', 'run_command', 'run_tests', 'get_diff', 'update_tasks', 'update_plan', 'record_evidence', 'ask_user', 'declare_success']
         },
         // Live constrained decoders emit ONLY schema-declared properties. A bare
         // { type: 'object' } here forces `arguments: {}` under strict grammar
@@ -55,10 +64,17 @@ export const TOOL_SCHEMA = {
             planMd: { type: 'string' },
             tasks: { type: 'array', items: { type: 'object' } },
             observation: { type: 'string' }
+            ,question: { type: 'string' }
+            ,uncertainty: { type: 'string' }
+            ,options: { type: 'array', items: { type: 'string' } }
+            ,recommendedAnswer: { type: 'string' }
           }
         }
       }
-    }
+    },
+    confidence: { type: 'number' },
+    materialUncertainty: { type: 'boolean' },
+    uncertainties: { type: 'array', items: { type: 'string' } }
   }
 };
 
@@ -140,20 +156,22 @@ export class AgentHarnessLoop {
     const mergedBudgetOverrides: Partial<RunBudget> = Number.isFinite(overrides.budgetUsd)
       ? { ...budgetOverrides, maxCostUsd: Number(overrides.budgetUsd) }
       : budgetOverrides;
+    const workflow = createWorkflowGovernance(this.tools.getWorkspaceRoot(), goalContract);
+    const initialTasks: TaskItem[] = [
+      { id: '1', title: 'Inspect workspace and identify relevant files', status: 'pending', dependencies: [], blockers: [], owner: 'Explorer' },
+      { id: '2', title: 'Create or update the implementation plan', status: workflow.lane === 'light' ? 'completed' : 'pending', dependencies: ['1'], blockers: [], owner: 'Architect' },
+      { id: '3', title: 'Apply scoped code changes through the firewall', status: 'pending', dependencies: ['2'], blockers: [], owner: 'Editor' },
+      { id: '4', title: 'Run verification oracle', status: 'pending', dependencies: ['3'], blockers: [], owner: 'Reviewer' },
+      { id: '5', title: 'Record green evidence and declare success', status: 'pending', dependencies: ['4'], blockers: [], owner: 'Reviewer' }
+    ];
 
     const state: HarnessState = {
       sessionId,
       goalContract,
       taskGraph: {
-        tasks: [
-          { id: '1', title: 'Inspect workspace and identify relevant files', status: 'pending', dependencies: [], blockers: [], owner: 'Explorer' },
-          { id: '2', title: 'Create or update the implementation plan', status: 'pending', dependencies: ['1'], blockers: [], owner: 'Architect' },
-          { id: '3', title: 'Apply scoped code changes through the firewall', status: 'pending', dependencies: ['2'], blockers: [], owner: 'Editor' },
-          { id: '4', title: 'Run verification oracle', status: 'pending', dependencies: ['3'], blockers: [], owner: 'Reviewer' },
-          { id: '5', title: 'Record green evidence and declare success', status: 'pending', dependencies: ['4'], blockers: [], owner: 'Reviewer' }
-        ]
+        tasks: initialTasks
       },
-      planMd: `# PLAN.md\n\n## Goal\n${goalContract.goal}\n\n## Steps\n- [x] Create durable harness artifacts.\n- [ ] Run the selected verification oracle.\n- [ ] Record evidence and declare success only if the oracle is green.\n`,
+      planMd: `# PLAN.md\n\n## Goal\n${goalContract.goal}\n\n## Acceptance Contract\n- ${goalContract.doneWhen.join('\n- ')}\n\n## Validation\n- Run deterministic firewall checks.\n- Run tests and record green evidence.\n\n## Negative Path\n- Reject workflow-order bypass and false success.\n\n## Rollback\n- Use Forge transactions and safety checkpoints.\n\n## Steps\n- [x] Create durable harness artifacts and baseline.\n- [ ] Reconcile the workspace.\n- [ ] Implement the bounded unit.\n- [ ] Run the selected verification oracle.\n- [ ] Review the diff and record evidence.\n`,
       scratchpadMd: `# SCRATCHPAD.md\n\n- Session: ${sessionId}\n- Workspace: ${this.tools.getWorkspaceRoot()}\n`,
       evidenceLedger: [],
       knowledge: this.loadRepositoryKnowledge(),
@@ -172,6 +190,8 @@ export class AgentHarnessLoop {
       },
       workerEditTransactions: [],
       workerCommandTransactions: [],
+      clarifications: [],
+      workflow,
       contextBundle: this.createContextBundleSkeleton(goalContract.goal),
       roleHandoffs: {},
       workerContexts: {},
@@ -233,6 +253,7 @@ export class AgentHarnessLoop {
     state.runStats.commandTransactionRollbacks = state.runStats.commandTransactionRollbacks || 0;
     state.runStats.skillRetrievals = state.runStats.skillRetrievals || 0;
     state.runStats.skillApplications = state.runStats.skillApplications || 0;
+    state.runStats.workflowGateBlocks = state.runStats.workflowGateBlocks || 0;
     state.runStats.budgetHalts = state.runStats.budgetHalts || 0;
     state.runBudget = state.runBudget || this.createRunBudget(state.goalContract);
     const preStepBudget = this.enforceBudget(state);
@@ -254,6 +275,17 @@ export class AgentHarnessLoop {
     };
     state.workerEditTransactions = state.workerEditTransactions || [];
     state.workerCommandTransactions = state.workerCommandTransactions || [];
+    state.clarifications = state.clarifications || [];
+    state.runStats.clarificationRequests = state.runStats.clarificationRequests || 0;
+    state.runStats.clarificationAnswers = state.runStats.clarificationAnswers || 0;
+    state.runStats.clarificationGateBlocks = state.runStats.clarificationGateBlocks || 0;
+    if (state.clarifications.some(item => item.status === 'pending')) {
+      state.status = 'awaiting_input';
+      this.persistStateToDisk(state);
+      this.latestState = state;
+      return state;
+    }
+    state.workflow = state.workflow || createWorkflowGovernance(this.tools.getWorkspaceRoot(), state.goalContract);
     state.roleHandoffs = state.roleHandoffs || {};
     state.workerContexts = state.workerContexts || {};
     state.safetyCheckpoints = state.safetyCheckpoints || [];
@@ -278,12 +310,13 @@ export class AgentHarnessLoop {
     }
 
     if (!activeTask) {
-      if (this.hasGreenEvidence(state)) {
+      const workflowGate = workflowReadyForSuccess(state.workflow);
+      if (this.hasGreenEvidence(state) && workflowGate.ready) {
         state.status = 'success';
         state.haltReason = 'All tasks complete and green oracle evidence is present.';
       } else {
         state.status = 'failed';
-        state.haltReason = 'Tasks completed without green oracle evidence.';
+        state.haltReason = this.hasGreenEvidence(state) ? `Tasks completed with incomplete workflow gates: ${workflowGate.missing.join(', ')}.` : 'Tasks completed without green oracle evidence.';
       }
       this.persistStateToDisk(state);
       this.latestState = state;
@@ -297,6 +330,18 @@ export class AgentHarnessLoop {
       return postProposalBudget;
     }
     const proposal = proposalEnvelope.proposal;
+    const uncertaintyValidation = this.validateUncertaintyGate(state, proposalEnvelope, proposal);
+    if (!uncertaintyValidation.valid) {
+      state.runStats.clarificationGateBlocks += 1;
+      state.runStats.validationFailures += 1;
+      state.firewall = { stage: 'VALIDATE', timestamp: new Date().toISOString(), details: proposalEnvelope.explanation, proposalToolCall: proposal, isValidated: false, validationReason: uncertaintyValidation.reason };
+      this.recordBlocker(state, 'clarification', String(uncertaintyValidation.reason), activeTask);
+      state.logs.push(this.log('error', String(uncertaintyValidation.reason), 'Clarification Gate'));
+      state.status = 'idle';
+      this.persistStateToDisk(state);
+      this.latestState = state;
+      return state;
+    }
     // Ported from the proven eval-lane gradient (Phase 46): content-addressed
     // path repair. Candidate policy is bounded and deterministic — only files
     // the agent has actually read this run; unique match or refuse.
@@ -321,7 +366,8 @@ export class AgentHarnessLoop {
 
     state.firewall.stage = 'VALIDATE';
     const roleValidation = this.validateRoleCapability(state, activeTask, proposal);
-    const validation = roleValidation.valid ? await this.firewall.validateProposal(proposal) : roleValidation;
+    const workflowValidation = roleValidation.valid ? validateWorkflowProposal(state, proposal) : roleValidation;
+    const validation = workflowValidation.valid ? await this.firewall.validateProposal(proposal) : workflowValidation;
     if (!validation.valid) {
       state.runStats.validationFailures += 1;
       this.recordBlocker(state, 'firewall', String(validation.reason || 'Proposal validation failed.'), activeTask);
@@ -331,6 +377,9 @@ export class AgentHarnessLoop {
       }
       if (/\[network_intent_blocked\]/.test(String(validation.reason || ''))) {
         state.runStats.networkWriteBlocks = (state.runStats.networkWriteBlocks || 0) + 1;
+      }
+      if (/\[workflow_gate_blocked\]/.test(String(validation.reason || ''))) {
+        state.runStats.workflowGateBlocks = (state.runStats.workflowGateBlocks || 0) + 1;
       }
       state.firewall.isValidated = false;
       state.firewall.validationReason = validation.reason;
@@ -355,12 +404,22 @@ export class AgentHarnessLoop {
       this.latestState = state;
       return state;
     }
-    this.resolveBlockers(state, activeTask, ['role_capability', 'workspace_scope', 'command_policy', 'network_policy', 'patch_format', 'patch_applicability', 'firewall'], 'A corrected proposal passed deterministic validation.');
+    this.resolveBlockers(state, activeTask, ['workflow_gate', 'role_capability', 'workspace_scope', 'command_policy', 'network_policy', 'patch_format', 'patch_applicability', 'firewall'], 'A corrected proposal passed deterministic validation.');
     this.recordWorkerProposal(state, activeTask, proposal, true);
     state.firewall.isValidated = true;
     state.firewall.validationReason = 'Proposal accepted by deterministic validator.';
     if (proposalEnvelope.fallback) {
       state.runStats.fallbackActions += 1;
+    }
+
+    if (proposal.name === 'ask_user') {
+      this.commitClarification(state, activeTask, proposal);
+      state.firewall.stage = 'NARRATE';
+      state.firewall.isValidated = true;
+      state.firewall.validationReason = 'Clarification request accepted; run paused before any mutation.';
+      this.persistStateToDisk(state);
+      this.latestState = state;
+      return state;
     }
 
     if (this.firewall.isMutating(proposal)) {
@@ -404,6 +463,7 @@ export class AgentHarnessLoop {
 
     const commitResult = await this.commitProposal(state, activeTask, proposal, modelBindings);
     await this.runOracles(state);
+    recordWorkflowEvent(state, proposal, commitResult.success);
     if ((proposal.name === 'apply_patch' || proposal.name === 'write_file') && commitResult.success) {
       // Any successful file mutation clears the malformed streak — matching
       // the eval lane, which clears its rejection state on any valid commit.
@@ -474,10 +534,11 @@ export class AgentHarnessLoop {
     }
 
     if (state.status !== 'success' && state.taskGraph.tasks.every(t => t.status === 'completed')) {
-      state.status = this.hasGreenEvidence(state) && this.hasRequiredDiffReview(state) ? 'success' : 'failed';
+      const workflowGate = workflowReadyForSuccess(state.workflow);
+      state.status = this.hasGreenEvidence(state) && this.hasRequiredDiffReview(state) && workflowGate.ready ? 'success' : 'failed';
       state.haltReason = state.status === 'success'
         ? 'All tasks complete with green evidence and required diff review.'
-        : 'All tasks complete but evidence is not green or required diff review is missing.';
+        : `All tasks complete but required proof is missing${workflowGate.ready ? '.' : `; workflow=${workflowGate.missing.join(', ')}.`}`;
     } else if (state.status !== 'success' && state.status !== 'failed') {
       state.status = 'idle';
     }
@@ -500,7 +561,7 @@ export class AgentHarnessLoop {
 
   private async commitProposal(state: HarnessState, activeTask: TaskItem, proposal: ToolProposal, modelBindings: Record<string, string> = {}): Promise<{ success: boolean; output: string }> {
     if (proposal.name === 'update_plan') {
-      state.planMd = String(proposal.arguments.planMd || proposal.arguments.patchContent || state.planMd);
+      state.planMd = enforceWorkflowPlan(String(proposal.arguments.planMd || proposal.arguments.patchContent || state.planMd), state.workflow);
       if (activeTask.owner === 'Architect') {
         state.architectHandoff = this.createArchitectHandoff(state, activeTask);
       }
@@ -579,7 +640,7 @@ export class AgentHarnessLoop {
     }
   }
 
-  private async getProposal(state: HarnessState, activeTask: TaskItem, modelBindings: Record<string, string>): Promise<{ explanation: string; proposal: ToolProposal; fallback: boolean }> {
+  private async getProposal(state: HarnessState, activeTask: TaskItem, modelBindings: Record<string, string>): Promise<ProposalEnvelope & { fallback: boolean }> {
     state.runStats = state.runStats || this.createRunStats();
     const reviewerGate = this.reviewerGateProposal(state, activeTask);
     if (reviewerGate) {
@@ -623,7 +684,7 @@ export class AgentHarnessLoop {
 
         state.runStats.modelDrivenProposals += 1;
         state.runStats.actuallyModelDriven = true;
-        return { explanation: parsed.explanation, proposal: parsed.proposal, fallback: false };
+        return { ...parsed, fallback: false };
       } catch (e: any) {
         state.runStats.providerFailures += 1;
         this.proofStats.providerFailures += 1;
@@ -639,7 +700,7 @@ export class AgentHarnessLoop {
     return { ...fallback, fallback: true };
   }
 
-  private parseProposalEnvelope(text: string): { explanation: string; proposal: ToolProposal } {
+  private parseProposalEnvelope(text: string): ProposalEnvelope {
     const parsed = JSON.parse(text);
     if (!parsed || typeof parsed !== 'object') {
       throw new Error('Response envelope must be a JSON object.');
@@ -649,8 +710,69 @@ export class AgentHarnessLoop {
     }
     return {
       explanation: String(parsed.explanation || 'Model proposed next action.'),
-      proposal: parsed.proposal
+      proposal: parsed.proposal,
+      confidence: Number.isFinite(parsed.confidence) ? Number(parsed.confidence) : undefined,
+      materialUncertainty: parsed.materialUncertainty === true,
+      uncertainties: Array.isArray(parsed.uncertainties) ? parsed.uncertainties.map(String).filter(Boolean) : []
     };
+  }
+
+  private validateUncertaintyGate(state: HarnessState, envelope: ProposalEnvelope, proposal: ToolProposal): { valid: boolean; reason?: string } {
+    if (proposal.name === 'ask_user') return { valid: true };
+    const material = envelope.materialUncertainty === true || (envelope.uncertainties || []).length > 0 || (envelope.confidence !== undefined && envelope.confidence < 70);
+    if (!material) return { valid: true };
+    const detail = (envelope.uncertainties || []).join('; ') || envelope.explanation || 'Model confidence is below 70.';
+    return { valid: false, reason: `[clarification_required] Material uncertainty must be resolved with ask_user before ${proposal.name}: ${detail}` };
+  }
+
+  private commitClarification(state: HarnessState, activeTask: TaskItem, proposal: ToolProposal): void {
+    const question = String(proposal.arguments.question || '').trim();
+    const normalized = question.toLowerCase().replace(/\s+/g, ' ');
+    const prior = state.clarifications.find(item => item.question.toLowerCase().replace(/\s+/g, ' ') === normalized);
+    if (prior || state.clarifications.length >= 3) {
+      state.runStats.clarificationGateBlocks += 1;
+      state.status = 'failed';
+      state.haltReason = prior ? 'Duplicate clarification request rejected.' : 'Clarification request cap (3) exceeded.';
+      state.logs.push(this.log('error', state.haltReason, 'Clarification Gate'));
+      return;
+    }
+    const request: ClarificationRequest = {
+      id: `clarification-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      question,
+      uncertainty: String(proposal.arguments.uncertainty || '').trim(),
+      options: Array.isArray(proposal.arguments.options) ? proposal.arguments.options.map(String).filter(Boolean).slice(0, 5) : [],
+      recommendedAnswer: String(proposal.arguments.recommendedAnswer || '').trim() || undefined,
+      status: 'pending', role: activeTask.owner, taskId: activeTask.id, askedAt: new Date().toISOString()
+    };
+    state.clarifications.push(request);
+    state.runStats.clarificationRequests += 1;
+    state.status = 'awaiting_input';
+    state.haltReason = `Awaiting user clarification: ${question}`;
+    state.logs.push(this.log('info', question, 'Forge Agent'));
+    state.scratchpadMd += `\n## Clarification requested - ${request.askedAt}\n- Uncertainty: ${request.uncertainty}\n- Question: ${request.question}\n`;
+  }
+
+  public answerClarification(answer: string, clarificationId?: string): HarnessState {
+    let state = this.latestState;
+    if (!state) {
+      const statePath = path.join(this.tools.getWorkspaceRoot(), '.forge', 'state.json');
+      if (!fs.existsSync(statePath)) throw new Error('No persisted Forge run is available.');
+      state = JSON.parse(fs.readFileSync(statePath, 'utf8')) as HarnessState;
+    }
+    state.clarifications = state.clarifications || [];
+    const pending = state.clarifications.find(item => item.status === 'pending' && (!clarificationId || item.id === clarificationId));
+    if (!pending) throw new Error('No pending clarification request was found.');
+    const value = String(answer || '').trim();
+    if (!value) throw new Error('Clarification answer cannot be empty.');
+    pending.status = 'answered'; pending.answer = value; pending.answeredAt = new Date().toISOString();
+    state.runStats = state.runStats || this.createRunStats();
+    state.runStats.clarificationAnswers = (state.runStats.clarificationAnswers || 0) + 1;
+    state.status = 'idle'; state.haltReason = undefined;
+    state.logs.push(this.log('info', `Clarification answered: ${value}`, 'User'));
+    state.scratchpadMd += `- Answer (${pending.answeredAt}): ${value}\n`;
+    this.resolveBlockers(state, state.taskGraph.tasks.find(item => item.id === pending.taskId), ['clarification'], 'User supplied the requested clarification.');
+    this.persistStateToDisk(state); this.latestState = state;
+    return state;
   }
 
   private proposalRequest(repairHint: string): string {
@@ -744,6 +866,8 @@ export class AgentHarnessLoop {
     const handoffContext = handoff.recentContext.map(item => `- ${item}`).join('\n') || '- none';
     const toolGuidance = this.toolGuidanceForTask(activeTask);
     const architectExecutionSections = this.architectExecutionSections(state, activeTask);
+    const workflowSummary = `Lane: ${state.workflow.lane}\nCurrent stage: ${state.workflow.currentStage}\nStages: ${state.workflow.stages.map(stage => `${stage.id}=${stage.status}`).join(', ')}\nAcceptance: ${state.workflow.acceptance.acceptanceCriteria.join('; ')}\nRequired validation: ${state.workflow.acceptance.requiredValidation.join('; ')}`;
+    const clarificationHistory = (state.clarifications || []).map(item => `- Q: ${item.question}\n  A: ${item.answer || '(pending)'}`).join('\n') || '- none';
     const skillSelection = selectProceduralSkills(
       state.skills || [],
       `${state.goalContract.goal} ${activeTask.title}`,
@@ -763,6 +887,8 @@ export class AgentHarnessLoop {
         content: 'You are a Forge Agent worker. The harness owns correctness.\nAllowed behavior: propose one structured tool call only. The deterministic firewall validates, then commits. Success requires run_tests pass and evidence ledger proof.'
       },
       { id: 'goal-contract', required: true, priority: 100, content: `Goal: ${state.goalContract.goal}` },
+      { id: 'workflow-governance', required: true, priority: 100, content: `Universal workflow governance:\n${workflowSummary}` },
+      { id: 'clarification-history', required: true, priority: 100, content: `User-owned clarification history (answers are authoritative):\n${clarificationHistory}` },
       { id: 'active-task', required: true, priority: 100, content: `Active task: ${activeTask.title}` },
       ...architectExecutionSections,
       {
@@ -775,7 +901,7 @@ export class AgentHarnessLoop {
         id: 'tool-contract',
         required: true,
         priority: 100,
-        content: `Tool contract:\n- repo_search: {"query":"text"}\n- symbol_search: {"query":"symbol"}\n- read_file: {"path":"workspace-relative/path"}\n- read_range: {"path":"workspace-relative/path","startLine":1,"endLine":80}\n- apply_patch: {"path":"workspace-relative/path","patchContent":"<<<<<<< SEARCH\\nold\\n=======\\nnew\\n>>>>>>> REPLACE"}\n- run_command: {"command":"safe non-destructive command"}\n- run_tests: {}\n- get_diff: {}\n- update_plan: {"planMd":"# PLAN.md..."}\n- update_tasks: {"tasks":[...]}\n- record_evidence: {"observation":"what passed"}\n- declare_success: {}`
+        content: `Tool contract:\n- repo_search: {"query":"text"}\n- symbol_search: {"query":"symbol"}\n- read_file: {"path":"workspace-relative/path"}\n- read_range: {"path":"workspace-relative/path","startLine":1,"endLine":80}\n- apply_patch: {"path":"workspace-relative/path","patchContent":"<<<<<<< SEARCH\\nold\\n=======\\nnew\\n>>>>>>> REPLACE"}\n- run_command: {"command":"safe non-destructive command"}\n- run_tests: {}\n- get_diff: {}\n- update_plan: {"planMd":"# PLAN.md..."}\n- update_tasks: {"tasks":[...]}\n- record_evidence: {"observation":"what passed"}\n- ask_user: {"question":"one focused question","uncertainty":"why the answer changes the work","options":["choice"],"recommendedAnswer":"best default"}\n- declare_success: {}\n\nUNCERTAINTY GATE: Report confidence (0-100), materialUncertainty, and uncertainties in every response. If material uncertainty about user intent, scope, authorization, behavior, cost, or acceptance could change the implementation, call ask_user before mutation. Do not ask for facts discoverable from the workspace: use read/search tools first. Non-material uncertainty should be handled conservatively without asking.`
       },
       { id: 'task-guidance', required: true, priority: 100, content: `Task guidance: ${toolGuidance}` },
       { id: 'known-files', priority: 90, content: `Known files:\n${fileMemory}` },
@@ -902,6 +1028,10 @@ export class AgentHarnessLoop {
       commandTransactionRollbacks: 0,
       skillRetrievals: 0,
       skillApplications: 0,
+      workflowGateBlocks: 0,
+      clarificationRequests: 0,
+      clarificationAnswers: 0,
+      clarificationGateBlocks: 0,
       budgetHalts: 0,
       noProgressTurns: 0,
       lastProgressSignature: '',
@@ -1586,22 +1716,23 @@ export class AgentHarnessLoop {
   }
 
   private allowedToolsForRole(role: string, activeTask: TaskItem): ToolName[] {
+    const withAsk = (tools: ToolName[]): ToolName[] => [...tools, 'ask_user'];
     if (role === 'Explorer') {
-      return ['repo_search', 'symbol_search', 'read_file', 'read_range'];
+      return withAsk(['repo_search', 'symbol_search', 'read_file', 'read_range']);
     }
     if (role === 'Architect') {
-      return ['repo_search', 'symbol_search', 'read_file', 'read_range', 'update_plan', 'update_tasks'];
+      return withAsk(['repo_search', 'symbol_search', 'read_file', 'read_range', 'update_plan', 'update_tasks']);
     }
     if (role === 'Editor') {
-      return ['repo_search', 'symbol_search', 'read_file', 'read_range', 'apply_patch', 'write_file', 'run_tests'];
+      return withAsk(['repo_search', 'symbol_search', 'read_file', 'read_range', 'apply_patch', 'write_file', 'run_tests']);
     }
     if (role === 'Reviewer' || activeTask.title.toLowerCase().includes('verification')) {
-      return ['run_tests', 'run_command', 'get_diff', 'record_evidence', 'declare_success'];
+      return withAsk(['run_tests', 'run_command', 'get_diff', 'record_evidence', 'declare_success']);
     }
     if (role === 'Escalation') {
-      return ['repo_search', 'symbol_search', 'read_file', 'read_range', 'apply_patch', 'run_tests', 'get_diff'];
+      return withAsk(['repo_search', 'symbol_search', 'read_file', 'read_range', 'apply_patch', 'run_tests', 'get_diff']);
     }
-    return ['repo_search', 'read_file', 'read_range', 'update_plan'];
+    return withAsk(['repo_search', 'read_file', 'read_range', 'update_plan']);
   }
 
   private validateRoleCapability(state: HarnessState, activeTask: TaskItem, proposal: ToolProposal): { valid: boolean; reason?: string } {
@@ -1828,6 +1959,7 @@ export class AgentHarnessLoop {
     if (['success', 'failed', 'gave_up'].includes(state.status) && !state.aar) {
       this.recordAar(state, forgeDir);
     }
+    finalizeWorkflow(state);
     if (state.aar) {
       fs.writeFileSync(path.join(forgeDir, 'aar.json'), JSON.stringify(state.aar, null, 2), 'utf8');
     }
@@ -1852,6 +1984,9 @@ export class AgentHarnessLoop {
     fs.writeFileSync(path.join(forgeDir, 'semantic-retrieval.json'), JSON.stringify(state.semanticRetrieval, null, 2), 'utf8');
     fs.writeFileSync(path.join(forgeDir, 'worker-edit-transactions.json'), JSON.stringify(state.workerEditTransactions || [], null, 2), 'utf8');
     fs.writeFileSync(path.join(forgeDir, 'worker-command-transactions.json'), JSON.stringify(state.workerCommandTransactions || [], null, 2), 'utf8');
+    fs.writeFileSync(path.join(forgeDir, 'clarifications.json'), JSON.stringify(state.clarifications || [], null, 2), 'utf8');
+    fs.writeFileSync(path.join(forgeDir, 'workflow-governance.json'), JSON.stringify(state.workflow, null, 2), 'utf8');
+    fs.writeFileSync(path.join(forgeDir, 'workflow-task-record.md'), renderWorkflowTaskRecord(state), 'utf8');
     fs.writeFileSync(path.join(forgeDir, 'role-handoffs.json'), JSON.stringify(state.roleHandoffs || {}, null, 2), 'utf8');
     fs.writeFileSync(path.join(forgeDir, 'worker-contexts.json'), JSON.stringify(state.workerContexts || {}, null, 2), 'utf8');
     fs.writeFileSync(path.join(forgeDir, 'architect-handoff.json'), JSON.stringify(state.architectHandoff || null, null, 2), 'utf8');

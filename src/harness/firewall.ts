@@ -32,6 +32,7 @@ const TOOL_NAMES: ToolName[] = [
   'update_tasks',
   'update_plan',
   'record_evidence',
+  'ask_user',
   'declare_success'
 ];
 
@@ -68,6 +69,15 @@ export class Firewall {
 
     if (typed.name === 'write_file' && typeof typed.arguments.content !== 'string') {
       return { valid: false, reason: 'write_file requires string content.' };
+    }
+
+    if (typed.name === 'ask_user') {
+      if (!String(typed.arguments.question || '').trim() || !String(typed.arguments.uncertainty || '').trim()) {
+        return { valid: false, reason: 'ask_user requires non-empty question and uncertainty arguments.' };
+      }
+      if (typed.arguments.options !== undefined && !Array.isArray(typed.arguments.options)) {
+        return { valid: false, reason: 'ask_user options must be an array when provided.' };
+      }
     }
 
     return { valid: true };

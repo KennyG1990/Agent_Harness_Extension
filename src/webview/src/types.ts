@@ -179,6 +179,7 @@ export interface RunStats {
   commandTransactionRollbacks?: number;
   skillRetrievals?: number;
   skillApplications?: number;
+  workflowGateBlocks?: number;
   budgetHalts: number;
   noProgressTurns: number;
   lastProgressSignature: string;
@@ -213,6 +214,12 @@ export interface HarnessState {
   escalations?: EscalationEntry[];
   contextBundle?: ContextBundle;
   architectHandoff?: ArchitectHandoff;
+  workflow?: {
+    lane: 'full' | 'light';
+    currentStage: string;
+    finalStatus?: string;
+    violations: Array<{ reason: string }>;
+  };
   runBudget?: RunBudget;
   runStats?: RunStats;
   currentStepIndex: number;

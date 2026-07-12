@@ -1,8 +1,8 @@
 {
   "name": "forge-agent",
   "displayName": "Forge Agent",
-  "description": "Forge Agent Harness VS Code Extension (Phase 67: verified procedural skill memory)",
-  "version": "0.67.0",
+  "description": "Forge Agent Harness VS Code Extension (Phase 68: enforced universal task workflow)",
+  "version": "0.69.0",
   "publisher": "kennyg",
   "engines": {
     "vscode": "^1.80.0"
@@ -33,7 +33,8 @@
     "onCommand:forge-agent.pauseGoal",
     "onCommand:forge-agent.resumeGoal",
     "onCommand:forge-agent.steerGoal",
-    "onCommand:forge-agent.resumeAgentGoal"
+    "onCommand:forge-agent.resumeAgentGoal",
+    "onCommand:forge-agent.answerClarification"
   ],
   "contributes": {
     "commands": [
@@ -120,6 +121,10 @@
       {
         "command": "forge-agent.resumeAgentGoal",
         "title": "Forge Agent: Resume Goal Run From Disk"
+      },
+      {
+        "command": "forge-agent.answerClarification",
+        "title": "Forge Agent: Answer Pending Clarification"
       }
     ],
     "viewsContainers": {
@@ -151,7 +156,10 @@
         "forge.providerDefault": {
           "type": "string",
           "default": "openrouter",
-          "enum": ["openrouter", "openai-compatible"],
+          "enum": [
+            "openrouter",
+            "openai-compatible"
+          ],
           "description": "Default model provider."
         },
         "forge.maxCostUsd": {

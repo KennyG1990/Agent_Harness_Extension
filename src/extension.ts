@@ -127,7 +127,7 @@ export function activate(context: vscode.ExtensionContext) {
         ? { ...directiveToGoalOverrides(directive), ...(options?.goalOverrides || {}) }
         : options?.goalOverrides;
       let state = await loop.initializeHarness(directive.isDirective ? directive.goal : rawGoal, options?.modelBindings || {}, options?.runBudget || {}, { goalOverrides });
-      while (!['success', 'failed', 'gave_up', 'paused'].includes(state.status) && state.currentStepIndex < state.maxSteps) {
+      while (!['success', 'failed', 'gave_up', 'paused', 'awaiting_input'].includes(state.status) && state.currentStepIndex < state.maxSteps) {
         state = await loop.runStep(state, options?.modelBindings || {});
       }
       return state;
@@ -156,6 +156,13 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand('forge-agent.answerClarification', (answer: string, clarificationId?: string) => {
+      const loop = new AgentHarnessLoop();
+      return loop.answerClarification(answer, clarificationId);
+    })
+  );
+
+  context.subscriptions.push(
     vscode.commands.registerCommand('forge-agent.steerGoal', (edit?: any) => {
       const current = readRunControl();
       writeRunControl({ ...(current || {}), editedGoal: edit || {}, requestedAt: new Date().toISOString() });
@@ -173,7 +180,7 @@ export function activate(context: vscode.ExtensionContext) {
       if (!state) {
         return null;
       }
-      while (!['success', 'failed', 'gave_up', 'paused'].includes(state.status) && state.currentStepIndex < state.maxSteps) {
+      while (!['success', 'failed', 'gave_up', 'paused', 'awaiting_input'].includes(state.status) && state.currentStepIndex < state.maxSteps) {
         state = await loop.runStep(state, options?.modelBindings || {});
       }
       return state;
@@ -260,7 +267,7 @@ class ForgeStudioWebviewProvider implements vscode.WebviewViewProvider {
               { reflectionEnabled: config.get<boolean>('reflectionEnabled', true), goalOverrides }
             );
             webviewView.webview.postMessage({ command: 'state-update', state });
-            while (!['success', 'failed', 'gave_up', 'paused'].includes(state.status) && state.currentStepIndex < state.maxSteps) {
+            while (!['success', 'failed', 'gave_up', 'paused', 'awaiting_input'].includes(state.status) && state.currentStepIndex < state.maxSteps) {
               state = await this.harnessLoop.runStep(state, message.modelBindings);
               webviewView.webview.postMessage({ command: 'state-update', state });
             }
@@ -371,6 +378,17 @@ class ForgeStudioWebviewProvider implements vscode.WebviewViewProvider {
         case 'chat': {
           try {
             const lastUser = String((message.messages || []).slice(-1)[0]?.content || '');
+            const pending = this.harnessLoop.getDiagnostics()?.state?.clarifications?.find((item: any) => item.status === 'pending');
+            if (pending) {
+              let state = this.harnessLoop.answerClarification(lastUser, pending.id);
+              webviewView.webview.postMessage({ command: 'chat-response', text: `Clarification recorded. Resuming the same run with your answer: ${lastUser}` });
+              webviewView.webview.postMessage({ command: 'state-update', state });
+              while (!['success', 'failed', 'gave_up', 'paused', 'awaiting_input'].includes(state.status) && state.currentStepIndex < state.maxSteps) {
+                state = await this.harnessLoop.runStep(state, message.modelBindings || {});
+                webviewView.webview.postMessage({ command: 'state-update', state });
+              }
+              break;
+            }
             if (/^\/research\s+/i.test(lastUser.trim())) {
               const question = lastUser.trim().replace(/^\/research\s+/i, '');
               webviewView.webview.postMessage({ command: 'chat-response', text: `🔎 Deep research: "${question}" — planning sub-questions and dispatching web-grounded workers (OpenRouter :online)...` });
@@ -481,7 +499,7 @@ class ForgeStudioWebviewProvider implements vscode.WebviewViewProvider {
                 state = await this.harnessLoop.runStep(state, message.modelBindings || {});
                 webviewView.webview.postMessage({ command: 'state-update', state });
               }
-              while (!['success', 'failed', 'gave_up', 'paused'].includes(state.status) && state.currentStepIndex < state.maxSteps) {
+              while (!['success', 'failed', 'gave_up', 'paused', 'awaiting_input'].includes(state.status) && state.currentStepIndex < state.maxSteps) {
                 state = await this.harnessLoop.runStep(state, message.modelBindings || {});
                 webviewView.webview.postMessage({ command: 'state-update', state });
               }
@@ -623,6 +641,8 @@ async function openArtifact(artifact: string, runner: BlueprintProofRunner): Pro
     semanticRetrieval: path.join('.forge', 'semantic-retrieval.json'),
     editTransactions: path.join('.forge', 'worker-edit-transactions.json'),
     commandTransactions: path.join('.forge', 'worker-command-transactions.json'),
+    workflow: path.join('.forge', 'workflow-governance.json'),
+    workflowRecord: path.join('.forge', 'workflow-task-record.md'),
     architectHandoff: path.join('.forge', 'architect-handoff.json'),
     safety: path.join('.forge', 'safety-checkpoints.json'),
     commandEffects: path.join('.forge', 'command-effects.json'),

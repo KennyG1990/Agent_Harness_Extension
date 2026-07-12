@@ -157,6 +157,24 @@ try {
             id: 'command-visual', role: 'Reviewer', command: 'node scripts/write-fixture.js', mode: 'git-worktree', baseCommit: 'abc123', changedFiles: ['generated/output.txt'], created: ['generated/output.txt'], modified: [], deleted: [], mergedFileCount: 1, mergedBytes: 32, committed: true, conflict: false, rollbackAttempted: false, rollbackSucceeded: false, cleanupSucceeded: true, workerPid: 4243, startedAt: new Date().toISOString(), completedAt: new Date().toISOString(), durationMs: 90
           }
         ],
+        clarifications: [{
+          id: 'clarification-visual',
+          question: 'Must legacy callers remain supported?',
+          uncertainty: 'This decides whether the public API may change.',
+          options: ['Yes, preserve compatibility', 'No, breaking change is allowed'],
+          recommendedAnswer: 'Yes, preserve compatibility',
+          status: 'pending', role: 'Editor', taskId: '3', askedAt: new Date().toISOString()
+        }],
+        workflow: {
+          version: 1,
+          lane: 'full',
+          laneReason: 'Behavioral task uses the full lane.',
+          currentStage: 'review',
+          stages: ['classify', 'plan', 'baseline', 'reconcile', 'document_plan', 'implement', 'validate', 'review', 'document_close', 'aar', 'complete'].map((id, index) => ({ id, status: index < 7 ? 'completed' : 'pending', evidence: [] })),
+          acceptance: { boundedUnit: 'Validate workflow governance.', assumptions: [], inScope: [], outOfScope: [], risks: [], rollbackMethod: 'transaction', acceptanceCriteria: ['tests pass'], requiredValidation: ['tests'], negativePaths: ['bypass rejected'], evidenceArtifacts: [] },
+          baseline: { capturedAt: new Date().toISOString(), workspaceRoot: 'F:/fixture', packageVersion: '0.68.0', gitHead: 'abc123', gitStatus: [], fileCount: 12, existingForgeState: false, rollbackMethod: 'transaction' },
+          violations: [], capabilityMapDelta: 'no capability-map delta', generatedAt: new Date().toISOString(), updatedAt: new Date().toISOString()
+        },
         safetyCheckpoints: [
           {
             id: 'step-3-demo',
@@ -256,6 +274,10 @@ try {
           commandTransactionRollbacks: 0,
           skillRetrievals: 2,
           skillApplications: 1,
+          workflowGateBlocks: 0,
+          clarificationRequests: 1,
+          clarificationAnswers: 0,
+          clarificationGateBlocks: 0,
           budgetHalts: 0,
           noProgressTurns: 0,
           lastProgressSignature: '',
@@ -263,7 +285,8 @@ try {
         },
         currentStepIndex: 4,
         maxSteps: 30,
-        status: 'idle',
+        status: 'awaiting_input',
+        haltReason: 'Awaiting user clarification: Must legacy callers remain supported?',
         activeSubAgent: 'Reviewer',
         activeFilePath: '',
         oracleStatuses: { linter: 'pass', compiler: 'pass', tests: 'fail' },

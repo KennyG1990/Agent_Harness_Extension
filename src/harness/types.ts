@@ -10,7 +10,7 @@ export interface GoalContract {
 
 // Persisted task status
 export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed';
-export type HarnessStatus = 'idle' | 'running' | 'paused' | 'success' | 'failed' | 'gave_up';
+export type HarnessStatus = 'idle' | 'running' | 'paused' | 'awaiting_input' | 'success' | 'failed' | 'gave_up';
 export type ToolName =
   | 'repo_search'
   | 'symbol_search'
@@ -24,7 +24,22 @@ export type ToolName =
   | 'update_tasks'
   | 'update_plan'
   | 'record_evidence'
+  | 'ask_user'
   | 'declare_success';
+
+export interface ClarificationRequest {
+  id: string;
+  question: string;
+  uncertainty: string;
+  options: string[];
+  recommendedAnswer?: string;
+  status: 'pending' | 'answered';
+  answer?: string;
+  role: string;
+  taskId: string;
+  askedAt: string;
+  answeredAt?: string;
+}
 
 export interface TaskItem {
   id: string;
@@ -162,8 +177,8 @@ export interface EscalationEntry {
   timestamp: string;
 }
 
-export type BlockerSource = 'provider' | 'schema' | 'firewall' | 'precommit' | 'tool' | 'oracle' | 'budget' | 'progress' | 'step_cap';
-export type BlockerCategory = 'provider' | 'schema' | 'role_capability' | 'workspace_scope' | 'command_policy' | 'network_policy' | 'patch_format' | 'patch_applicability' | 'firewall' | 'precommit_review' | 'worker_process' | 'tool_failure' | 'oracle' | 'budget' | 'no_progress' | 'step_cap';
+export type BlockerSource = 'provider' | 'schema' | 'clarification' | 'firewall' | 'precommit' | 'tool' | 'oracle' | 'budget' | 'progress' | 'step_cap';
+export type BlockerCategory = 'provider' | 'schema' | 'clarification' | 'workflow_gate' | 'role_capability' | 'workspace_scope' | 'command_policy' | 'network_policy' | 'patch_format' | 'patch_applicability' | 'firewall' | 'precommit_review' | 'worker_process' | 'tool_failure' | 'oracle' | 'budget' | 'no_progress' | 'step_cap';
 
 export interface BlockerEntry {
   id: string;
@@ -249,6 +264,62 @@ export interface AarReport {
   improveTools: string[];
   lessonsBanked: string[];
   skillsBanked?: string[];
+}
+
+export type WorkflowLane = 'full' | 'light';
+export type WorkflowStageId = 'classify' | 'plan' | 'baseline' | 'reconcile' | 'document_plan' | 'implement' | 'validate' | 'review' | 'document_close' | 'aar' | 'complete';
+
+export interface WorkflowStageRecord {
+  id: WorkflowStageId;
+  status: 'pending' | 'completed' | 'blocked' | 'skipped';
+  completedAt?: string;
+  evidence: string[];
+}
+
+export interface WorkflowBaseline {
+  capturedAt: string;
+  workspaceRoot: string;
+  packageVersion: string;
+  gitHead: string;
+  gitStatus: string[];
+  fileCount: number;
+  existingForgeState: boolean;
+  rollbackMethod: string;
+}
+
+export interface WorkflowAcceptanceContract {
+  boundedUnit: string;
+  assumptions: string[];
+  inScope: string[];
+  outOfScope: string[];
+  risks: string[];
+  rollbackMethod: string;
+  acceptanceCriteria: string[];
+  requiredValidation: string[];
+  negativePaths: string[];
+  evidenceArtifacts: string[];
+}
+
+export interface WorkflowViolation {
+  timestamp: string;
+  stage: WorkflowStageId;
+  proposalName: ToolName;
+  reason: string;
+}
+
+export interface WorkflowGovernance {
+  version: 1;
+  lane: WorkflowLane;
+  laneReason: string;
+  currentStage: WorkflowStageId;
+  stages: WorkflowStageRecord[];
+  acceptance: WorkflowAcceptanceContract;
+  baseline: WorkflowBaseline;
+  violations: WorkflowViolation[];
+  capabilityMapDelta: string;
+  finalStatus?: 'VERIFIED' | 'PARTIAL' | 'FAILED' | 'BLOCKED' | 'REVERTED';
+  generatedAt: string;
+  updatedAt: string;
 }
 
 export interface RetrievalCandidate {
@@ -449,6 +520,10 @@ export interface RunStats {
   sparseEditTransactions: number;
   skillRetrievals: number;
   skillApplications: number;
+  workflowGateBlocks: number;
+  clarificationRequests: number;
+  clarificationAnswers: number;
+  clarificationGateBlocks: number;
   commandTransactions: number;
   commandTransactionConflicts: number;
   commandTransactionMergedFiles: number;
@@ -485,6 +560,8 @@ export interface HarnessState {
   semanticRetrieval: SemanticRetrievalState;
   workerEditTransactions: WorkerEditTransaction[];
   workerCommandTransactions: WorkerCommandTransaction[];
+  clarifications: ClarificationRequest[];
+  workflow: WorkflowGovernance;
   contextBundle: ContextBundle;
   roleHandoffs: Record<string, RoleHandoff>;
   workerContexts: Record<string, WorkerContext>;
