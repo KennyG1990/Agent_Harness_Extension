@@ -190,9 +190,9 @@ Important limitation: the harness exists, but it is not yet mature. Current agen
 |---|---|---|---|---|
 | Phase 0: Extension skeleton + provider layer | Loadable extension, OpenRouter provider, chat/webview, capability probe, fallback provider, `session_id`, structured outputs | VSIX, extension host, OpenRouter provider, OpenAI-compatible fallback, chat, model catalog, `session_id`, fallback models, JSON-schema format exist | Partial | Capability probing is heuristic, PONG integration against multiple providers is not fully proven, and streaming is not mature |
 | Phase 1: Tool surface + firewall | Repo-native tools, deterministic validation, no direct mutation, diffs, reversible checkpoints | Tool registry, firewall, patch/path/command validation, pre-commit review, checkpoints, transactional file edits and multi-file command staging with conflict/rollback evidence, network-intent policy, native diffs, and reviewer artifacts exist | Partial | Git/copy transactions prevent normal cwd-relative direct mutation and shared Git writes are blocked, but arbitrary OS paths, socket-level observation, and kernel/container containment remain missing |
-| Phase 2: Verification oracles | Tests/build/lint/typecheck with real pass/fail fixtures; no-test handling | Test/typecheck/lint detection exists; success is gated by test evidence; disposable fixture matrix covers pass/fail/no-test/typecheck/lint/firewall and unsolvable step-cap cases | Partial | Build oracle and no-test remediation are still underdeveloped; matrix proves detection/terminal honesty, not automated remediation |
+| Phase 2: Verification oracles | Tests/build/lint/typecheck with real pass/fail fixtures; no-test handling | Typed adapter contracts drive separate test/lint/typecheck/build oracles; composite green requires every detected required oracle; the 11-case disposable matrix covers pass/fail/no-test/typecheck/build/lint/firewall and unsolvable step-cap cases | Partial | Detection and terminal honesty are proven, but automated no-test/build remediation and monorepo scheduling remain underdeveloped |
 | Phase 3: Goal loop | Run until green or honest cap; anti-spin/no-progress detection; weak model never false-successes | Autonomous loop, green-evidence success, caps, blocker lifecycle, and enforced universal workflow/success gates exist | Partial | Retry actions remain centrally orchestrated and persistent autonomous role lifecycles are absent |
-| Phase 4: Auto-plan + todos + scratchpad + evidence | Create artifacts before edits; todos transition correctly; evidence backs completion | Artifacts plus baseline/acceptance/task record persist; edits require reconciliation and plan; validation/review/close/AAR are evidence-gated | Partial | Typed project-adapter validation remains absent and todo quality still depends on the planner |
+| Phase 4: Auto-plan + todos + scratchpad + evidence | Create artifacts before edits; todos transition correctly; evidence backs completion | Artifacts plus baseline/acceptance/task record persist; edits require reconciliation and plan; validation/review/close/AAR are evidence-gated; typed root project adapters persist exact oracle contracts | Partial | Todo quality still depends on the planner, and adapters do not yet schedule monorepo/package-specific validation graphs |
 | Phase 5: Reflection/self-critique | On validation/oracle failure, inject bounded reflection and retry with changed approach | Bounded reflection, reviewer critique, reflection A/B, deterministic blocker taxonomy, and verified procedural recovery skills exist | Partial | Skill lifecycle/prompt delivery are proven locally, but no held-out or live skill on/off solve-rate uplift exists and reflection remains single-agent |
 | Phase 6: Sub-agents | Isolated planner/implementer/reviewer/explorer/escalation roles with non-nesting contexts | Role capabilities/provider sessions are isolated; tools run in role-tagged child processes; edits and cwd-relative multi-file commands use temporary transactions with conflict/rollback evidence | Partial | Model calls and orchestration still share the parent; no persistent autonomous workers, parallelism, long-lived worktree-per-role lifecycle, or kernel sandbox |
 | Phase 7: Model-agnostic enablement | Structured-output repair, V4A/context edits, forced decomposition, weak-model uplift | JSON-schema response format, bounded malformed-output repair, SEARCH/REPLACE patch validation, and weak eval model/fallback separation exist | Partial | No V4A `*** Begin Patch` format, no fuzzy/lenient patching, no whole-file fallback policy, and decomposition is shallow |
@@ -236,14 +236,17 @@ Important limitation: the harness exists, but it is not yet mature. Current agen
    - Status update: explicit budget cap enforcement implemented in Phase 32.
    - Runs persist `.forge/budget.json`; wall-clock caps halt before provider calls, cost caps halt after usage is recorded and before validation/commit mutation.
    - Status update: deterministic blocker taxonomy/lifecycle implemented in Phase 63 and injected into bounded retry context.
-   - Remaining: user-configurable budget presets and richer category-specific red-oracle repair strategies beyond suggested-action context.
+   - Status update: Phases 71-72 add category-specific remediation capsules plus signature-based unchanged-oracle `gave_up` with changed-diagnostic and eventual-green causal controls.
+   - Remaining: user-configurable budget presets, semantic detection of lateral thrashing across changing diagnostics, and live weak-model remediation uplift.
 
 2. Strengthen verification.
    - Status: first fixture matrix implemented in Phase 21.
    - Added disposable fixtures for passing tests, failing tests, missing test suite, typecheck failure, lint failure, malformed patches, path escapes, and blocked commands.
    - Matrix report persists at `.forge/verification-fixture-matrix.json` and is callable from the extension command surface and Proof tab.
    - Status update: unsolvable step-cap fixture implemented in Phase 23.
-   - Remaining: richer behavioral no-progress loop fixture, remediation fixtures, build-specific oracle coverage, and stronger evidence lifecycle checks.
+   - Status update: Phase 70 adds typed Node/Python/Rust/Go/unknown project adapters, an independent build oracle, exact command provenance, and composite all-required-oracles truth.
+   - Status update: Phase 71 adds durable typed failure capsules, duplicate failure folding, category-specific retry guidance, and green-only resolution; five scripted causal remediation lanes pass.
+   - Remaining: live weak-model remediation uplift, framework-specific missing-test synthesis, monorepo validation graphs, and stronger cross-run evidence lifecycle checks.
 
 3. Add bounded reflection.
    - Status: first slice implemented in Phase 19.
@@ -403,6 +406,70 @@ Status: **Implemented and visually validated**.
 Forge now closes a major autonomy/safety gap between blind assumption and manual pause. The proposal schema carries confidence and material uncertainty, and exposes `ask_user` as a non-mutating structured tool. Deterministic code rejects any ordinary proposal when the model reports material uncertainty, persists focused questions under `.forge/clarifications.json`, and holds the run in `awaiting_input` without additional provider calls. The normal bottom chat composer records the answer and resumes the same run with the answer in required prompt context.
 
 Boundaries remain deliberate: the agent must investigate repository facts itself; questions are for user-owned intent, scope, authorization, behavior, cost, and acceptance decisions. Requests are capped at three and duplicate questions terminate rather than loop. This is not proof that every model calibrates uncertainty well; it is proof that self-reported uncertainty cannot silently mutate the workspace.
+
+## Phase 70 - Typed Project Adapters and Composite Build Oracle
+
+Status: **Implemented, extension-host validated, visually inspected, packaged, and installed in Antigravity**.
+
+Reconciled defect: oracle command selection is spread across `oracles.ts`, is not represented as typed durable state, and terminal `lastOraclePass` currently mirrors only `runTest()`. A workspace can therefore have passing tests plus failing lint/typecheck and still acquire green test evidence. Build is also conflated with typecheck and has no independent status.
+
+Bounded implementation:
+
+- Add a deterministic project-adapter registry for Node, Python, Rust, Go, and unknown workspaces. Adapters record ecosystem, manifest, package manager, detection evidence, and exact test/lint/typecheck/build commands with required/skipped semantics.
+- Persist the selected contract at `.forge/project-adapter.json`, include it in required model context, and expose it through native artifact access. Models cannot author adapter commands.
+- Refactor verification oracles to execute the adapter contract and return command/provenance/skipped metadata.
+- Add a distinct build oracle and define composite green as every required detected oracle passing, with tests always required. Evidence must record the composite command/result details, not a test-only claim.
+- Add disposable Node, Python, Rust/Go detection, unknown/no-test, failing-build, and green-test/red-typecheck cases. Prove a red required oracle cannot yield `lastOraclePass`, green evidence, or success.
+
+Non-goals: arbitrary plugin execution, framework-specific test generation, downloading missing toolchains, user-authored shell templates, monorepo package graph scheduling, or claiming support beyond deterministic root-level detection.
+
+Implemented result: `projectAdapters.ts` deterministically selects Node, Python, Rust, Go, or unknown contracts and records manifest, package manager, evidence, fingerprint, and exact required/skipped oracle commands. `.forge/project-adapter.json` persists at initialization and opens through the native artifact command. `VerificationOracles.runAll()` executes separate lint/typecheck/build/test results and computes composite green only when every required result passes; `lastOraclePass` and green evidence use only that composite. Read/search/plan proposals no longer trigger wasteful full builds.
+
+Proof: Node lockfile selection, Python Ruff/Mypy, Rust Cargo, Go module, and unknown/no-test detection pass in the extension host. An explicit passing-test/failing-build harness state remains red and writes no green evidence. The verification matrix now has 11 passing cases, including build failure and composite typecheck failure. `npm run compile`, `npm run test`, `npm run test:workers` (100/100), `npm run test:e2e` (102.7s), and `npm run test:visual` pass. Inspected `artifacts/visual-smoke-run.png` visibly shows `tests pass · build fail · proj node/npm`. `forge-agent-0.70.0.vsix` packages 36 files/212.5 KB; Antigravity lists `kennyg.forge-agent@0.70.0`, and installed runtime inspection confirms adapter and composite-oracle code.
+
+## Phase 71 - Typed Oracle Failure Remediation Capsules
+
+Status: **Implemented, causally extension-host tested, visually inspected, packaged, and installed in Antigravity**.
+
+Reconciled gap: composite oracle truth is now correct, but red-oracle retries receive a generic blocker plus raw log text. The harness does not preserve a typed history of which command failed, whether the same failure repeated unchanged, what repair policy applies, or when the failure was resolved. This weakens cheap-model convergence and evidence auditing.
+
+Bounded implementation:
+
+- Convert each failed required adapter result into a deterministic capsule containing kind, command, source, normalized signature, bounded output, occurrence count, task/role ownership, and category-specific remediation guidance.
+- Persist `.forge/oracle-failures.json`; resolve open capsules only after the complete adapter oracle turns green.
+- Inject the latest open capsules as required retry context. Models may consume but cannot author/resolve them.
+- Count captures, repeated identical failures, guidance injections, and resolutions in run statistics and compact telemetry.
+- Causally prove scripted weak workers repair build, typecheck, lint, test, and missing-test-contract failures only after the typed guidance is present. Repeated identical failures must increment one capsule rather than create unbounded duplicates.
+
+Non-goals: model-generated truth classification, changing oracle commands, weakening tests/configuration to manufacture green, framework-specific test synthesis, or guaranteeing that arbitrary live models follow the guidance.
+
+Implemented result: every failed required adapter oracle becomes a deterministic capsule with kind/category, exact command and source, normalized SHA-256 signature, bounded output, task/role ownership, occurrence count, and a fixed anti-cheating remediation policy. Repeated unchanged failures fold into the open capsule. `.forge/oracle-failures.json` persists the lifecycle and opens natively. Required model context always includes open capsules; only a fully green composite adapter run resolves them. Run statistics and the compact footer expose captured/repeated/resolved counts as `fix C/R/X`.
+
+Causal proof: five scripted weak workers were constructed for test, lint, typecheck, build, and missing-test-contract failures. Each provider refused to repair unless its typed category and `Guidance:` appeared in the actual `AgentHarnessLoop` system prompt. After one validated `write_file`, every lane reached composite green and its capsule resolved. The build lane executed the same red oracle twice first and preserved one capsule with `occurrences: 2`. This proves guidance delivery and lifecycle causality, not live-model uplift.
+
+Validation: final `npm run compile`, `npm run test`, `npm run test:workers` (100/100), `npm run test:e2e` (final combined gate 157.3s; host briefly recovered from unresponsive), `npm run test:visual`, and `git diff --check` pass. Inspected `artifacts/visual-smoke-run.png` visibly shows red build state plus `fix 1/1/0`. `forge-agent-0.71.0.vsix` contains 37 files/215.26 KB. Antigravity forced install succeeds, lists `kennyg.forge-agent@0.71.0`, and installed runtime contains occurrence and green-resolution logic.
+
+## Phase 72 - Signature-Based Oracle Stagnation Control
+
+Status: **Implemented, causally extension-host tested, visually inspected, packaged, and installed in Antigravity**.
+
+Reconciled defect: the generic progress signature includes timestamps and growing reflection/blocker records, so repeatedly executing the same red oracle can appear as progress until reflection exhaustion. That path ends `failed`, obscuring that the agent made no causal improvement. Phase 71 now supplies stable failure signatures suitable for a stricter rule.
+
+Bounded implementation:
+
+- Treat three occurrences of the same still-open required-oracle signature as deterministic stagnation.
+- Preserve the existing second-reflection escalation opportunity, but stop before a fourth repeated attempt.
+- Terminal as honest `gave_up`, classify a `no_progress` blocker, preserve the capsule/output/attempt evidence, and never create green evidence or success.
+- A changed failure signature counts as a changed approach and must not trigger the old signature's threshold. Eventual composite green still resolves all capsules normally.
+- Add causal fixtures for unchanged red repetition, changed red output, and red-red-green recovery. Surface the threshold compactly without a new panel.
+
+Non-goals: semantic judgment that two different diagnostics share one root cause, infinite retries, automatic budget extension, or replacing the existing global progress detector.
+
+Implemented result: after any oracle-bearing action, Forge checks the most-repeated open failure capsule before generic tool/red-oracle reflection handling. The second identical result remains retryable and reaches the existing escalation machinery. The third identical signature increments `oracleStagnationHalts`, records a `no_progress` blocker, preserves the capsule and diagnostics, and terminals as `gave_up` before a fourth provider call. Green evidence and success remain absent. Distinct signatures do not share occurrence counts.
+
+Causal proof: an unchanged scripted worker emitted `run_tests` against the same diagnostic exactly three times; Forge stopped at three provider calls with `gave_up`, one capsule occurrence 3, one no-progress blocker, and no green evidence. A second fixture changed the diagnostic twice and retained two independent occurrence-1 capsules without stagnation. A third fixture produced the same red signature twice while changing source state, then reached green on its third edit; the capsule resolved and `oracleStagnationHalts` remained zero. The first host run exposed that failed `run_tests` enters tool-failure handling before the later red-oracle branch; enforcement was moved to the shared post-oracle/pre-tool-failure boundary and the full suite then passed.
+
+Validation: final `npm run compile`, `npm run test`, `npm run test:workers` (100/100), `npm run test:e2e`, `npm run test:visual`, and `git diff --check` pass in the 170.8s combined gate. Inspected `artifacts/visual-smoke-run.png` shows the explicit honest-stop narration, `tests pass · build fail`, `fix 1/2/0`, and `stuck 1`. `forge-agent-0.72.0.vsix` packages 37 files/215.55 KB. Antigravity forced install succeeds and lists `kennyg.forge-agent@0.72.0`; installed runtime contains the threshold and halt logic.
 
 - Do not build or fork a full IDE.
 - Do not recreate editor tabs, terminals, file trees, diff viewers, or browser panes inside Forge.

@@ -28,6 +28,131 @@ async function runSuite(): Promise<void> {
   const { assemblePromptWithinBudget } = await import('../../harness/contextBudget');
   const { bankProceduralSkills, selectProceduralSkills } = await import('../../harness/proceduralSkills');
   const { classifyWorkflowLane, createWorkflowGovernance, enforceWorkflowPlan, finalizeWorkflow, recordWorkflowEvent, validateWorkflowProposal, workflowReadyForSuccess } = await import('../../harness/workflowGovernance');
+  const { detectProjectAdapter } = await import('../../harness/projectAdapters');
+  const adapterNodeRoot = createTempWorkspace('forge-adapter-node-');
+  fs.writeFileSync(path.join(adapterNodeRoot, 'package.json'), JSON.stringify({ scripts: { test: 'node -e "process.exit(0)"', build: 'node -e "process.exit(1)"' } }), 'utf8');
+  fs.writeFileSync(path.join(adapterNodeRoot, 'pnpm-lock.yaml'), 'lockfileVersion: 9\n', 'utf8');
+  const nodeAdapter = detectProjectAdapter(adapterNodeRoot);
+  assert.equal(nodeAdapter.ecosystem, 'node');
+  assert.equal(nodeAdapter.packageManager, 'pnpm');
+  assert.equal(nodeAdapter.commands.test.command, 'pnpm run test');
+  assert.equal(nodeAdapter.commands.build.required, true);
+  const adapterPythonRoot = fs.mkdtempSync(path.join(workspaceRootForTemp(), 'forge-adapter-python-'));
+  fs.writeFileSync(path.join(adapterPythonRoot, 'pyproject.toml'), '[tool.ruff]\n[tool.mypy]\n', 'utf8');
+  const pythonAdapter = detectProjectAdapter(adapterPythonRoot);
+  assert.equal(pythonAdapter.ecosystem, 'python');
+  assert.equal(pythonAdapter.commands.test.command, 'python -m pytest');
+  assert.equal(pythonAdapter.commands.lint.command, 'python -m ruff check .');
+  assert.equal(pythonAdapter.commands.typecheck.required, true);
+  const adapterRustRoot = fs.mkdtempSync(path.join(workspaceRootForTemp(), 'forge-adapter-rust-'));
+  fs.writeFileSync(path.join(adapterRustRoot, 'Cargo.toml'), '[package]\nname="fixture"\nversion="0.1.0"\n', 'utf8');
+  assert.equal(detectProjectAdapter(adapterRustRoot).commands.build.command, 'cargo build');
+  const adapterGoRoot = fs.mkdtempSync(path.join(workspaceRootForTemp(), 'forge-adapter-go-'));
+  fs.writeFileSync(path.join(adapterGoRoot, 'go.mod'), 'module fixture\n', 'utf8');
+  assert.equal(detectProjectAdapter(adapterGoRoot).commands.test.command, 'go test ./...');
+  const adapterUnknownRoot = fs.mkdtempSync(path.join(workspaceRootForTemp(), 'forge-adapter-unknown-'));
+  const unknownAdapter = detectProjectAdapter(adapterUnknownRoot);
+  assert.equal(unknownAdapter.ecosystem, 'unknown');
+  assert.equal(unknownAdapter.commands.test.required, true);
+  assert.equal(unknownAdapter.commands.test.command, undefined);
+  const compositeRoot = createTempWorkspace('forge-adapter-composite-');
+  fs.writeFileSync(path.join(compositeRoot, 'package.json'), JSON.stringify({ scripts: { test: 'node -e "process.exit(0)"', build: 'node -e "process.exit(1)"' } }), 'utf8');
+  const compositeLoop = new AgentHarnessLoop({ id: 'unused', modelId: 'unused', generateChat: async () => { throw new Error('provider should not run'); } } as any, compositeRoot);
+  const compositeState: any = await compositeLoop.initializeHarness('Prove composite oracle truth.');
+  await (compositeLoop as any).runOracles(compositeState);
+  assert.equal(compositeState.oracleStatuses.tests, 'pass');
+  assert.equal(compositeState.oracleStatuses.build, 'fail');
+  assert.equal(compositeState.lastOraclePass, false, 'green tests must not mask a red build.');
+  assert.equal(compositeState.evidenceLedger.some((item: any) => item.testResult?.pass), false, 'red composite oracle must not write green evidence.');
+  assert.equal(fs.existsSync(path.join(compositeRoot, '.forge', 'project-adapter.json')), true, 'adapter contract must persist at initialization.');
+  for (const kind of ['test', 'lint', 'typecheck', 'build', 'missing_test'] as const) {
+    const remediationRoot = createTempWorkspace(`forge-remediation-${kind}-`);
+    const marker = `fixed-${kind}.txt`;
+    const markerCheck = `node -e "process.exit(require('fs').existsSync('${marker}')?0:1)"`;
+    const scripts: Record<string, string> = kind === 'missing_test' ? {} : { test: kind === 'test' ? markerCheck : 'node -e "process.exit(0)"' };
+    if (kind === 'lint') scripts.lint = markerCheck;
+    if (kind === 'typecheck') scripts.typecheck = markerCheck;
+    if (kind === 'build') scripts.build = markerCheck;
+    fs.writeFileSync(path.join(remediationRoot, 'package.json'), JSON.stringify({ scripts }, null, 2), 'utf8');
+    let sawGuidance = false;
+    const category = kind === 'missing_test' ? 'missing_test_contract' : `${kind}_failure`;
+    const remediationProvider = {
+      id: `remediation-${kind}`, modelId: 'weak-scripted-worker',
+      generateChat: async (request: any) => {
+        const prompt = String(request.messages?.[0]?.content || '');
+        sawGuidance = prompt.includes(`${kind === 'missing_test' ? 'test' : kind}/${category}`) && prompt.includes('Guidance:');
+        if (!sawGuidance) throw new Error(`Causal ${kind} worker refuses to repair without typed guidance.`);
+        const proposal = kind === 'missing_test'
+          ? { name: 'write_file', arguments: { path: 'package.json', content: JSON.stringify({ scripts: { test: 'node -e "process.exit(0)"' } }, null, 2) } }
+          : { name: 'write_file', arguments: { path: marker, content: 'repaired\n' } };
+        return { text: JSON.stringify({ explanation: `Apply the bounded ${kind} remediation.`, confidence: 95, materialUncertainty: false, uncertainties: [], proposal }) };
+      }
+    };
+    const remediationLoop = new AgentHarnessLoop(remediationProvider as any, remediationRoot);
+    let remediationState: any = await remediationLoop.initializeHarness(`Repair the ${kind} oracle failure.`);
+    await (remediationLoop as any).runOracles(remediationState);
+    if (kind === 'build') await (remediationLoop as any).runOracles(remediationState);
+    assert.equal(remediationState.oracleFailures.length, 1, `${kind} should create one folded failure capsule.`);
+    assert.equal(remediationState.oracleFailures[0].occurrences, kind === 'build' ? 2 : 1, `${kind} occurrence lifecycle should be deterministic.`);
+    remediationState.taskGraph.tasks = [{ id: 'repair', title: `Repair ${kind}`, status: 'running', dependencies: [], blockers: [], owner: 'Editor' }];
+    for (const stage of remediationState.workflow.stages) {
+      if (['classify', 'plan', 'baseline', 'reconcile', 'document_plan'].includes(stage.id)) stage.status = 'completed';
+    }
+    remediationState.workflow.currentStage = 'implement';
+    remediationState = await remediationLoop.runStep(remediationState, { code: 'weak-scripted-worker' });
+    assert.equal(sawGuidance, true, `${kind} worker must receive typed remediation guidance.`);
+    assert.equal(remediationState.lastOraclePass, true, `${kind} remediation must turn the composite oracle green.`);
+    assert.equal(remediationState.oracleFailures[0].status, 'resolved', `${kind} capsule must resolve only after green composite verification.`);
+  }
+  const prepareEditorState = (state: any, title: string) => {
+    state.taskGraph.tasks = [{ id: 'stagnation', title, status: 'running', dependencies: [], blockers: [], owner: 'Editor' }];
+    for (const stage of state.workflow.stages) {
+      if (['classify', 'plan', 'baseline', 'reconcile', 'document_plan'].includes(stage.id)) stage.status = 'completed';
+    }
+    state.workflow.currentStage = 'implement';
+    return state;
+  };
+  const stagnationRoot = createTempWorkspace('forge-oracle-stagnation-');
+  fs.writeFileSync(path.join(stagnationRoot, 'package.json'), JSON.stringify({ scripts: { test: 'node -e "console.error(\'same-red-diagnostic\');process.exit(1)"' } }), 'utf8');
+  let stagnationCalls = 0;
+  const stagnationProvider = { id: 'stagnation-provider', modelId: 'weak-stuck', generateChat: async () => { stagnationCalls += 1; return { text: JSON.stringify({ explanation: 'Repeat the unchanged test despite guidance.', confidence: 90, materialUncertainty: false, uncertainties: [], proposal: { name: 'run_tests', arguments: {} } }) }; } };
+  const stagnationLoop = new AgentHarnessLoop(stagnationProvider as any, stagnationRoot);
+  let stagnationState: any = prepareEditorState(await stagnationLoop.initializeHarness('Prove unchanged oracle stagnation.'), 'Repeated unchanged oracle');
+  for (let attempt = 0; attempt < 3 && !['gave_up', 'failed', 'success'].includes(stagnationState.status); attempt += 1) stagnationState = await stagnationLoop.runStep(stagnationState, { code: 'weak-stuck' });
+  assert.equal(stagnationState.status, 'gave_up', 'third identical red oracle must halt honestly as gave_up.');
+  assert.equal(stagnationCalls, 3, 'stagnation threshold must stop before a fourth provider call.');
+  assert.equal(stagnationState.oracleFailures[0].occurrences, 3);
+  assert.equal(stagnationState.runStats.oracleStagnationHalts, 1);
+  assert.equal(stagnationState.evidenceLedger.some((item: any) => item.testResult?.pass), false, 'stagnation must never manufacture green evidence.');
+  assert.ok(stagnationState.blockers.some((item: any) => item.category === 'no_progress'), 'stagnation must persist a no_progress blocker.');
+
+  const changingRoot = createTempWorkspace('forge-oracle-changing-');
+  fs.writeFileSync(path.join(changingRoot, 'package.json'), JSON.stringify({ scripts: { test: 'node -e "const fs=require(\'fs\');console.error(fs.readFileSync(\'diagnostic.txt\',\'utf8\'));process.exit(1)"' } }), 'utf8');
+  fs.writeFileSync(path.join(changingRoot, 'diagnostic.txt'), 'zero', 'utf8');
+  let changingAttempt = 0;
+  const changingProvider = { id: 'changing-provider', modelId: 'weak-changing', generateChat: async () => { changingAttempt += 1; return { text: JSON.stringify({ explanation: 'Change the observed diagnostic.', confidence: 90, materialUncertainty: false, uncertainties: [], proposal: { name: 'write_file', arguments: { path: 'diagnostic.txt', content: changingAttempt === 1 ? 'one' : 'two' } } }) }; } };
+  const changingLoop = new AgentHarnessLoop(changingProvider as any, changingRoot);
+  let changingState: any = prepareEditorState(await changingLoop.initializeHarness('Prove changed diagnostics are distinct progress.'), 'Change diagnostic');
+  changingState = await changingLoop.runStep(changingState, { code: 'weak-changing' });
+  changingState = await changingLoop.runStep(changingState, { code: 'weak-changing' });
+  assert.notEqual(changingState.status, 'gave_up', 'different failure signatures must not trip identical-failure stagnation.');
+  assert.equal(changingState.oracleFailures.filter((item: any) => item.status === 'open').length, 2);
+  assert.ok(changingState.oracleFailures.every((item: any) => item.occurrences === 1));
+
+  const eventualRoot = createTempWorkspace('forge-oracle-eventual-green-');
+  fs.writeFileSync(path.join(eventualRoot, 'package.json'), JSON.stringify({ scripts: { test: 'node -e "const fs=require(\'fs\');const n=fs.readFileSync(\'stage.txt\',\'utf8\').trim();if(n===\'3\')process.exit(0);console.error(\'constant-red\');process.exit(1)"' } }), 'utf8');
+  fs.writeFileSync(path.join(eventualRoot, 'stage.txt'), '0', 'utf8');
+  let eventualAttempt = 0;
+  const eventualProvider = { id: 'eventual-provider', modelId: 'weak-converging', generateChat: async () => { eventualAttempt += 1; return { text: JSON.stringify({ explanation: 'Advance the bounded repair stage.', confidence: 90, materialUncertainty: false, uncertainties: [], proposal: { name: 'write_file', arguments: { path: 'stage.txt', content: String(eventualAttempt) } } }) }; } };
+  const eventualLoop = new AgentHarnessLoop(eventualProvider as any, eventualRoot);
+  let eventualState: any = prepareEditorState(await eventualLoop.initializeHarness('Prove red-red-green convergence remains allowed.'), 'Converge in three edits');
+  eventualState = await eventualLoop.runStep(eventualState, { code: 'weak-converging' });
+  eventualState = await eventualLoop.runStep(eventualState, { code: 'weak-converging' });
+  assert.equal(eventualState.oracleFailures[0].occurrences, 2, 'two identical red results should remain retryable.');
+  eventualState = await eventualLoop.runStep(eventualState, { code: 'weak-converging' });
+  assert.equal(eventualState.lastOraclePass, true, 'third changed implementation may still reach green before stagnation halt.');
+  assert.ok(eventualState.oracleFailures.every((item: any) => item.status === 'resolved'));
+  assert.equal(eventualState.runStats.oracleStagnationHalts, 0);
   assert.equal(classifyBlocker('firewall', '[role_capability_blocked] Editor cannot use declare_success.').category, 'role_capability', 'role denials need a distinct blocker category.');
   assert.equal(classifyBlocker('firewall', '[network_intent_blocked] outbound upload denied.').category, 'network_policy', 'network policy needs a distinct blocker category.');
   assert.equal(classifyBlocker('firewall', 'Edit applicability failed: search block not found.').category, 'patch_applicability', 'patch drift needs an applicability category.');
@@ -1135,8 +1260,8 @@ async function runSuite(): Promise<void> {
     reportRoot: workspace
   });
   assert.equal(verificationMatrix.passed, true, 'verification fixture matrix should pass.');
-  assert.equal(verificationMatrix.cases.length, 9, 'verification matrix should cover all required fixture cases.');
-  for (const id of ['passing-tests', 'failing-tests', 'missing-test-suite', 'typecheck-failure', 'lint-failure', 'malformed-patch', 'out-of-workspace-path', 'blocked-command', 'unsolvable-step-cap']) {
+  assert.equal(verificationMatrix.cases.length, 11, 'verification matrix should cover all required fixture cases.');
+  for (const id of ['passing-tests', 'failing-tests', 'missing-test-suite', 'typecheck-failure', 'lint-failure', 'build-failure', 'composite-typecheck-failure', 'malformed-patch', 'out-of-workspace-path', 'blocked-command', 'unsolvable-step-cap']) {
     assert.ok(verificationMatrix.cases.some((item: any) => item.id === id && item.expected === item.actual), `verification matrix should prove ${id}`);
   }
 
@@ -1148,13 +1273,17 @@ async function runSuite(): Promise<void> {
   assert.equal(isolatedCommandReport.sourceMutated, false, 'isolated command report should prove source workspace stayed unchanged.');
   assert.equal(isolatedCommandReport.reportPath, path.join(workspace, '.forge', 'isolated-runs', 'latest-isolated-run.json'), 'isolated command should persist report in workspace.');
 
-  for (const rel of ['.forge/state.json', '.forge/workflow-governance.json', '.forge/workflow-task-record.md', '.forge/context-bundle.json', '.forge/retrieval-index.json', '.forge/semantic-retrieval.json', '.forge/role-handoffs.json', '.forge/worker-contexts.json', '.forge/worker-edit-transactions.json', '.forge/worker-command-transactions.json', '.forge/skill-registry.json', '.forge/blockers.json', '.forge/safety-checkpoints.json', '.forge/command-effects.json', '.forge/budget.json', '.forge/isolated-runs/latest-isolated-run.json', '.forge/isolated-runs/latest-isolated-run.diff', '.forge/goal-contract.json', '.forge/task-graph.json', '.forge/evidence-ledger.json', '.forge/diff-reviews.json', '.forge/reviewer-critiques.json', '.forge/precommit-reviews.json', '.forge/escalations.json', '.forge/latest-proof-report.json', '.forge/evals/latest-weak-model-eval.json', '.forge/verification-fixture-matrix.json', 'PLAN.md', 'todos.json', 'SCRATCHPAD.md', 'evidence_ledger.json']) {
+  for (const rel of ['.forge/state.json', '.forge/workflow-governance.json', '.forge/workflow-task-record.md', '.forge/project-adapter.json', '.forge/oracle-failures.json', '.forge/clarifications.json', '.forge/context-bundle.json', '.forge/retrieval-index.json', '.forge/semantic-retrieval.json', '.forge/role-handoffs.json', '.forge/worker-contexts.json', '.forge/worker-edit-transactions.json', '.forge/worker-command-transactions.json', '.forge/skill-registry.json', '.forge/blockers.json', '.forge/safety-checkpoints.json', '.forge/command-effects.json', '.forge/budget.json', '.forge/isolated-runs/latest-isolated-run.json', '.forge/isolated-runs/latest-isolated-run.diff', '.forge/goal-contract.json', '.forge/task-graph.json', '.forge/evidence-ledger.json', '.forge/diff-reviews.json', '.forge/reviewer-critiques.json', '.forge/precommit-reviews.json', '.forge/escalations.json', '.forge/latest-proof-report.json', '.forge/evals/latest-weak-model-eval.json', '.forge/verification-fixture-matrix.json', 'PLAN.md', 'todos.json', 'SCRATCHPAD.md', 'evidence_ledger.json']) {
     assert.ok(fs.existsSync(path.join(workspace, rel)), `${rel} should exist`);
   }
 
   const openedPlan = await vscode.commands.executeCommand('forge-agent.openArtifact', 'plan');
   assert.equal(openedPlan, path.join(workspace, 'PLAN.md'), 'plan should open through native editor command.');
   assert.equal(vscode.window.activeTextEditor?.document.fileName, path.join(workspace, 'PLAN.md'));
+  const openedProjectAdapter = await vscode.commands.executeCommand('forge-agent.openArtifact', 'projectAdapter');
+  assert.equal(openedProjectAdapter, path.join(workspace, '.forge', 'project-adapter.json'), 'project adapter should open through native editor command.');
+  const openedOracleFailures = await vscode.commands.executeCommand('forge-agent.openArtifact', 'oracleFailures');
+  assert.equal(openedOracleFailures, path.join(workspace, '.forge', 'oracle-failures.json'), 'oracle remediation capsules should open through native editor command.');
 
   const openedProof = await vscode.commands.executeCommand('forge-agent.openArtifact', 'proof');
   assert.equal(openedProof, path.join(workspace, '.forge', 'latest-proof-report.json'), 'proof report should open through native editor command.');

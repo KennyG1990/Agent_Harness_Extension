@@ -80,6 +80,18 @@ export interface RepositoryKnowledge {
   architectureFile: string; // overview
 }
 
+export interface ProjectAdapterState {
+  version: 1;
+  id: string;
+  ecosystem: 'node' | 'python' | 'rust' | 'go' | 'unknown';
+  manifest?: string;
+  packageManager?: string;
+  detectedAt: string;
+  fingerprint: string;
+  evidence: string[];
+  commands: Record<'test' | 'lint' | 'typecheck' | 'build', { kind: 'test' | 'lint' | 'typecheck' | 'build'; command?: string; required: boolean; source: string }>;
+}
+
 export interface SkillItem {
   id: string;
   name: string;
@@ -132,6 +144,27 @@ export interface ReflectionEntry {
   taskTitle: string;
   details: string;
   timestamp: string;
+}
+
+export interface OracleFailureEntry {
+  id: string;
+  signature: string;
+  kind: 'test' | 'lint' | 'typecheck' | 'build';
+  category: 'missing_test_contract' | 'test_failure' | 'lint_failure' | 'typecheck_failure' | 'build_failure';
+  command?: string;
+  source: string;
+  required: boolean;
+  status: 'open' | 'resolved';
+  occurrences: number;
+  taskId: string;
+  taskTitle: string;
+  role: string;
+  outputExcerpt: string;
+  guidance: string;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  resolvedAt?: string;
+  resolution?: string;
 }
 
 export interface DiffReviewEntry {
@@ -524,6 +557,11 @@ export interface RunStats {
   clarificationRequests: number;
   clarificationAnswers: number;
   clarificationGateBlocks: number;
+  oracleFailureCaptures: number;
+  repeatedOracleFailures: number;
+  oracleFailureResolutions: number;
+  remediationGuidanceInjections: number;
+  oracleStagnationHalts: number;
   commandTransactions: number;
   commandTransactionConflicts: number;
   commandTransactionMergedFiles: number;
@@ -547,6 +585,7 @@ export interface HarnessState {
   scratchpadMd: string;
   evidenceLedger: EvidenceLedgerItem[];
   knowledge: RepositoryKnowledge;
+  projectAdapter: ProjectAdapterState;
   skills: SkillItem[];
   files: Record<string, WorkspaceFile>;
   firewall: FirewallAction;
@@ -561,6 +600,7 @@ export interface HarnessState {
   workerEditTransactions: WorkerEditTransaction[];
   workerCommandTransactions: WorkerCommandTransaction[];
   clarifications: ClarificationRequest[];
+  oracleFailures: OracleFailureEntry[];
   workflow: WorkflowGovernance;
   contextBundle: ContextBundle;
   roleHandoffs: Record<string, RoleHandoff>;
@@ -581,8 +621,9 @@ export interface HarnessState {
   activeSubAgent: string;
   activeFilePath: string;
   oracleStatuses: {
-    linter: 'pass' | 'fail' | 'unchecked';
-    compiler: 'pass' | 'fail' | 'unchecked';
+    linter: 'pass' | 'fail' | 'skipped' | 'unchecked';
+    compiler: 'pass' | 'fail' | 'skipped' | 'unchecked';
     tests: 'pass' | 'fail' | 'unchecked';
+    build: 'pass' | 'fail' | 'skipped' | 'unchecked';
   };
 }

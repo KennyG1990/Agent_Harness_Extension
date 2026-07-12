@@ -2,7 +2,7 @@
   "name": "forge-agent",
   "displayName": "Forge Agent",
   "description": "Forge Agent Harness VS Code Extension (Phase 68: enforced universal task workflow)",
-  "version": "0.69.0",
+  "version": "0.72.0",
   "publisher": "kennyg",
   "engines": {
     "vscode": "^1.80.0"

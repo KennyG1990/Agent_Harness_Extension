@@ -9,7 +9,7 @@ export interface GoalContract {
 }
 
 export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed';
-export type HarnessStatus = 'idle' | 'running' | 'paused' | 'success' | 'failed' | 'gave_up';
+export type HarnessStatus = 'idle' | 'running' | 'paused' | 'awaiting_input' | 'success' | 'failed' | 'gave_up';
 
 export interface TaskItem {
   id: string;
@@ -180,6 +180,11 @@ export interface RunStats {
   skillRetrievals?: number;
   skillApplications?: number;
   workflowGateBlocks?: number;
+  oracleFailureCaptures?: number;
+  repeatedOracleFailures?: number;
+  oracleFailureResolutions?: number;
+  remediationGuidanceInjections?: number;
+  oracleStagnationHalts?: number;
   budgetHalts: number;
   noProgressTurns: number;
   lastProgressSignature: string;
@@ -205,6 +210,7 @@ export interface HarnessState {
   scratchpadMd: string;
   evidenceLedger: EvidenceLedgerItem[];
   knowledge: RepositoryKnowledge;
+  projectAdapter?: { ecosystem: string; packageManager?: string; manifest?: string };
   skills: SkillItem[];
   files: Record<string, WorkspaceFile>;
   firewall: FirewallAction;
@@ -231,9 +237,10 @@ export interface HarnessState {
   activeSubAgent: string;
   activeFilePath: string;
   oracleStatuses: {
-    linter: 'pass' | 'fail' | 'unchecked';
-    compiler: 'pass' | 'fail' | 'unchecked';
+    linter: 'pass' | 'fail' | 'skipped' | 'unchecked';
+    compiler: 'pass' | 'fail' | 'skipped' | 'unchecked';
     tests: 'pass' | 'fail' | 'unchecked';
+    build: 'pass' | 'fail' | 'skipped' | 'unchecked';
   };
 }
 

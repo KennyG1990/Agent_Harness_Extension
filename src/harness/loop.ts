@@ -14,10 +14,12 @@ import { TransactionalEditExecutor } from './transactionalEdits';
 import { TransactionalCommandExecutor } from './transactionalCommands';
 import { bankProceduralSkills, renderProceduralSkills, selectProceduralSkills } from './proceduralSkills';
 import { createWorkflowGovernance, enforceWorkflowPlan, finalizeWorkflow, recordWorkflowEvent, renderWorkflowTaskRecord, validateWorkflowProposal, workflowReadyForSuccess } from './workflowGovernance';
+import { renderOpenOracleFailures, updateOracleFailures } from './oracleRemediation';
 
 const MAX_REPAIR_ATTEMPTS = 2;
 const MAX_NO_PROGRESS_TURNS = 4;
 const MAX_REFLECTION_ATTEMPTS = 3;
+const MAX_IDENTICAL_ORACLE_FAILURES = 3;
 const ESCALATE_AFTER_REFLECTIONS = 2;
 const DEFAULT_MAX_WALL_CLOCK_MS = 30 * 60 * 1000;
 export const DEFAULT_PROMPT_CHAR_BUDGET = 96_000;
@@ -175,6 +177,7 @@ export class AgentHarnessLoop {
       scratchpadMd: `# SCRATCHPAD.md\n\n- Session: ${sessionId}\n- Workspace: ${this.tools.getWorkspaceRoot()}\n`,
       evidenceLedger: [],
       knowledge: this.loadRepositoryKnowledge(),
+      projectAdapter: this.oracles.getProjectAdapter(),
       skills: this.loadSkillRegistry(),
       files: {},
       firewall: { stage: 'IDLE', timestamp: new Date().toISOString(), details: 'Harness initialized. Waiting for proposals.' },
@@ -191,6 +194,7 @@ export class AgentHarnessLoop {
       workerEditTransactions: [],
       workerCommandTransactions: [],
       clarifications: [],
+      oracleFailures: [],
       workflow,
       contextBundle: this.createContextBundleSkeleton(goalContract.goal),
       roleHandoffs: {},
@@ -205,7 +209,7 @@ export class AgentHarnessLoop {
       status: 'idle',
       activeSubAgent: 'Orchestrator',
       activeFilePath: '',
-      oracleStatuses: { linter: 'unchecked', compiler: 'unchecked', tests: 'unchecked' },
+      oracleStatuses: { linter: 'unchecked', compiler: 'unchecked', tests: 'unchecked', build: 'unchecked' },
       lastOraclePass: false
     };
 
@@ -275,10 +279,20 @@ export class AgentHarnessLoop {
     };
     state.workerEditTransactions = state.workerEditTransactions || [];
     state.workerCommandTransactions = state.workerCommandTransactions || [];
+    state.projectAdapter = state.projectAdapter || this.oracles.getProjectAdapter();
+    state.oracleStatuses = state.oracleStatuses
+      ? { ...state.oracleStatuses, build: state.oracleStatuses.build || 'unchecked' }
+      : { linter: 'unchecked', compiler: 'unchecked', tests: 'unchecked', build: 'unchecked' };
     state.clarifications = state.clarifications || [];
+    state.oracleFailures = state.oracleFailures || [];
     state.runStats.clarificationRequests = state.runStats.clarificationRequests || 0;
     state.runStats.clarificationAnswers = state.runStats.clarificationAnswers || 0;
     state.runStats.clarificationGateBlocks = state.runStats.clarificationGateBlocks || 0;
+    state.runStats.oracleFailureCaptures = state.runStats.oracleFailureCaptures || 0;
+    state.runStats.repeatedOracleFailures = state.runStats.repeatedOracleFailures || 0;
+    state.runStats.oracleFailureResolutions = state.runStats.oracleFailureResolutions || 0;
+    state.runStats.remediationGuidanceInjections = state.runStats.remediationGuidanceInjections || 0;
+    state.runStats.oracleStagnationHalts = state.runStats.oracleStagnationHalts || 0;
     if (state.clarifications.some(item => item.status === 'pending')) {
       state.status = 'awaiting_input';
       this.persistStateToDisk(state);
@@ -462,7 +476,9 @@ export class AgentHarnessLoop {
     }
 
     const commitResult = await this.commitProposal(state, activeTask, proposal, modelBindings);
-    await this.runOracles(state);
+    if (['apply_patch', 'write_file', 'run_command', 'run_tests'].includes(proposal.name)) {
+      await this.runOracles(state);
+    }
     recordWorkflowEvent(state, proposal, commitResult.success);
     if ((proposal.name === 'apply_patch' || proposal.name === 'write_file') && commitResult.success) {
       // Any successful file mutation clears the malformed streak — matching
@@ -472,6 +488,18 @@ export class AgentHarnessLoop {
 
     state.firewall.stage = 'NARRATE';
     state.logs.push(this.log('narration', `Oracle state: lint=${state.oracleStatuses.linter}, typecheck=${state.oracleStatuses.compiler}, tests=${state.oracleStatuses.tests}`, activeTask.owner));
+
+    if (!state.lastOraclePass && ['run_tests', 'apply_patch', 'write_file', 'run_command'].includes(proposal.name)) {
+      const stagnantFailure = (state.oracleFailures || []).filter(item => item.status === 'open').sort((a, b) => b.occurrences - a.occurrences)[0];
+      if (stagnantFailure && stagnantFailure.occurrences >= MAX_IDENTICAL_ORACLE_FAILURES) {
+        state.runStats.oracleStagnationHalts += 1;
+        state.runStats.noProgressTurns = Math.max(state.runStats.noProgressTurns, stagnantFailure.occurrences);
+        const reason = `Oracle stagnation: ${stagnantFailure.kind}/${stagnantFailure.category} repeated ${stagnantFailure.occurrences} times without changing signature ${stagnantFailure.signature.slice(0, 12)}.`;
+        this.recordBlocker(state, 'progress', reason, activeTask);
+        state.logs.push(this.log('error', `${reason} Giving up honestly before another provider/tool attempt.`, 'Oracle Remediation'));
+        return this.halt(state, 'gave_up', reason);
+      }
+    }
 
     if (!commitResult.success) {
       this.recordBlocker(state, 'tool', `${proposal.name} failed: ${commitResult.output.slice(0, 1000)}`, activeTask);
@@ -622,21 +650,34 @@ export class AgentHarnessLoop {
   }
 
   private async runOracles(state: HarnessState): Promise<void> {
-    const lint = await this.oracles.runLint();
-    const typecheck = await this.oracles.runTypecheck();
-    const tests = await this.oracles.runTest();
+    const composite = await this.oracles.runAll();
+    const { lint, typecheck, test: tests, build } = composite.results;
+    state.projectAdapter = this.oracles.getProjectAdapter();
+    const status = (item: OracleResult): 'pass' | 'fail' | 'skipped' => item.skipped ? 'skipped' : item.pass ? 'pass' : 'fail';
     state.oracleStatuses = {
-      linter: lint.pass ? 'pass' : 'fail',
-      compiler: typecheck.pass ? 'pass' : 'fail',
-      tests: tests.pass ? 'pass' : 'fail'
+      linter: status(lint),
+      compiler: status(typecheck),
+      tests: tests.pass && !tests.skipped ? 'pass' : 'fail',
+      build: status(build)
     };
-    state.lastOraclePass = tests.pass;
-    state.logs.push(this.log(tests.pass ? 'oracle' : 'error', `run_tests pass=${tests.pass}: ${tests.output.slice(0, 700)}`, 'Oracle'));
+    state.lastOraclePass = composite.pass;
+    const activeTask = state.taskGraph.tasks.find(task => task.status === 'running');
+    const failureUpdate = updateOracleFailures(state.oracleFailures || [], composite, activeTask, activeTask?.owner || 'Oracle');
+    state.oracleFailures = failureUpdate.entries;
+    state.runStats.oracleFailureCaptures += failureUpdate.captured;
+    state.runStats.repeatedOracleFailures += failureUpdate.repeated;
+    state.runStats.oracleFailureResolutions += failureUpdate.resolved;
+    if (failureUpdate.captured || failureUpdate.repeated || failureUpdate.resolved) {
+      state.logs.push(this.log(composite.pass ? 'success' : 'warning', `Oracle remediation lifecycle: captured=${failureUpdate.captured}, repeated=${failureUpdate.repeated}, resolved=${failureUpdate.resolved}.`, 'Oracle Remediation'));
+    }
+    state.logs.push(this.log(composite.pass ? 'oracle' : 'error', `composite oracle pass=${composite.pass}: ${composite.summary}\n${Object.values(composite.results).filter(item => !item.pass).map(item => `${item.kind}: ${item.output.slice(0, 350)}`).join('\n')}`, 'Oracle'));
 
-    if (tests.pass) {
-      const activeTask = state.taskGraph.tasks.find(task => task.status === 'running');
-      this.resolveBlockers(state, activeTask, ['oracle'], 'The verification oracle passed.');
-      state.evidenceLedger.push(this.makeEvidence('Verification oracle', 'run_tests oracle passed.', state, tests));
+    if (composite.pass) {
+      this.resolveBlockers(state, activeTask, ['oracle'], 'Every required adapter oracle passed.');
+      state.evidenceLedger.push(this.makeEvidence('Composite verification oracle', composite.summary, state, {
+        ...tests,
+        output: `${composite.summary}\n${Object.values(composite.results).map(item => `${item.kind} [${item.command || 'skipped'}]: ${item.output}`).join('\n')}`
+      }));
     }
   }
 
@@ -867,6 +908,9 @@ export class AgentHarnessLoop {
     const toolGuidance = this.toolGuidanceForTask(activeTask);
     const architectExecutionSections = this.architectExecutionSections(state, activeTask);
     const workflowSummary = `Lane: ${state.workflow.lane}\nCurrent stage: ${state.workflow.currentStage}\nStages: ${state.workflow.stages.map(stage => `${stage.id}=${stage.status}`).join(', ')}\nAcceptance: ${state.workflow.acceptance.acceptanceCriteria.join('; ')}\nRequired validation: ${state.workflow.acceptance.requiredValidation.join('; ')}`;
+    const adapterSummary = `${state.projectAdapter.ecosystem}/${state.projectAdapter.packageManager || 'none'} manifest=${state.projectAdapter.manifest || 'none'}\n${Object.values(state.projectAdapter.commands).map(item => `- ${item.kind}: ${item.command || 'not detected'} required=${item.required} source=${item.source}`).join('\n')}`;
+    const oracleRemediation = renderOpenOracleFailures(state.oracleFailures || []);
+    if (oracleRemediation !== '- none') state.runStats.remediationGuidanceInjections += 1;
     const clarificationHistory = (state.clarifications || []).map(item => `- Q: ${item.question}\n  A: ${item.answer || '(pending)'}`).join('\n') || '- none';
     const skillSelection = selectProceduralSkills(
       state.skills || [],
@@ -888,6 +932,8 @@ export class AgentHarnessLoop {
       },
       { id: 'goal-contract', required: true, priority: 100, content: `Goal: ${state.goalContract.goal}` },
       { id: 'workflow-governance', required: true, priority: 100, content: `Universal workflow governance:\n${workflowSummary}` },
+      { id: 'project-adapter', required: true, priority: 100, content: `Deterministically selected project adapter (models cannot change these commands):\n${adapterSummary}` },
+      { id: 'oracle-remediation', required: true, priority: 100, content: `Open deterministic oracle remediation capsules (fix these causes; never weaken verification):\n${oracleRemediation}` },
       { id: 'clarification-history', required: true, priority: 100, content: `User-owned clarification history (answers are authoritative):\n${clarificationHistory}` },
       { id: 'active-task', required: true, priority: 100, content: `Active task: ${activeTask.title}` },
       ...architectExecutionSections,
@@ -1032,6 +1078,11 @@ export class AgentHarnessLoop {
       clarificationRequests: 0,
       clarificationAnswers: 0,
       clarificationGateBlocks: 0,
+      oracleFailureCaptures: 0,
+      repeatedOracleFailures: 0,
+      oracleFailureResolutions: 0,
+      remediationGuidanceInjections: 0,
+      oracleStagnationHalts: 0,
       budgetHalts: 0,
       noProgressTurns: 0,
       lastProgressSignature: '',
@@ -1086,6 +1137,7 @@ export class AgentHarnessLoop {
       commandEffects: (state.commandEffects || []).length,
       files: Object.keys(state.files).sort(),
       oracle: state.oracleStatuses,
+      oracleFailures: (state.oracleFailures || []).map(item => `${item.signature}:${item.status}:${item.occurrences}`).join('|'),
       lastOraclePass: state.lastOraclePass,
       status: state.status,
       haltReason: state.haltReason || ''
@@ -1940,7 +1992,7 @@ export class AgentHarnessLoop {
     return {
       id: `ledger-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       stepTitle,
-      command: 'npm run test',
+      command: testResult?.command || Object.values(state.projectAdapter?.commands || {}).filter(item => item.command).map(item => item.command).join(' && ') || 'adapter composite oracle',
       observation,
       diff: latestReview?.diffExcerpt,
       testResult: testResult ? { pass: testResult.pass, summary: testResult.output.slice(0, 500), details: testResult.output } : { pass: state.lastOraclePass === true, summary: 'Green oracle already recorded.' },
@@ -1994,6 +2046,8 @@ export class AgentHarnessLoop {
     fs.writeFileSync(path.join(forgeDir, 'command-effects.json'), JSON.stringify(state.commandEffects || [], null, 2), 'utf8');
     fs.writeFileSync(path.join(forgeDir, 'budget.json'), JSON.stringify(state.runBudget || this.createRunBudget(state.goalContract), null, 2), 'utf8');
     fs.writeFileSync(path.join(forgeDir, 'repository-knowledge.json'), JSON.stringify(state.knowledge, null, 2), 'utf8');
+    fs.writeFileSync(path.join(forgeDir, 'project-adapter.json'), JSON.stringify(state.projectAdapter, null, 2), 'utf8');
+    fs.writeFileSync(path.join(forgeDir, 'oracle-failures.json'), JSON.stringify(state.oracleFailures || [], null, 2), 'utf8');
     fs.writeFileSync(path.join(forgeDir, 'skill-registry.json'), JSON.stringify(state.skills, null, 2), 'utf8');
     fs.writeFileSync(path.join(forgeDir, 'state.json'), JSON.stringify(state, null, 2), 'utf8');
     this.persistSession(state, forgeDir);

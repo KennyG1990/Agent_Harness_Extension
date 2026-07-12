@@ -31,6 +31,8 @@ export async function runVerificationFixtureMatrix(reportRoot: string = process.
   cases.push(await oracleCase('missing-test-suite', 'Missing test suite cannot be treated as success.', false, {}, 'test'));
   cases.push(await oracleCase('typecheck-failure', 'Failing typecheck/build oracle is detected.', false, { typecheck: 'node -e "process.exit(1)"', test: 'node -e "process.exit(0)"' }, 'typecheck'));
   cases.push(await oracleCase('lint-failure', 'Failing lint oracle is detected.', false, { lint: 'node -e "process.exit(1)"', test: 'node -e "process.exit(0)"' }, 'lint'));
+  cases.push(await oracleCase('build-failure', 'Passing tests cannot mask a failing required build oracle.', false, { build: 'node -e "process.exit(1)"', test: 'node -e "process.exit(0)"' }, 'all'));
+  cases.push(await oracleCase('composite-typecheck-failure', 'Passing tests cannot mask a failing required typecheck oracle.', false, { typecheck: 'node -e "process.exit(1)"', test: 'node -e "process.exit(0)"' }, 'all'));
 
   const firewallRoot = createFixtureRoot('firewall');
   fs.mkdirSync(path.join(firewallRoot, 'src'), { recursive: true });
@@ -84,11 +86,13 @@ async function unsolvableCase(): Promise<VerificationFixtureCase> {
   };
 }
 
-async function oracleCase(id: string, description: string, expected: boolean, scripts: Record<string, string>, oracle: 'test' | 'typecheck' | 'lint'): Promise<VerificationFixtureCase> {
+async function oracleCase(id: string, description: string, expected: boolean, scripts: Record<string, string>, oracle: 'test' | 'typecheck' | 'lint' | 'all'): Promise<VerificationFixtureCase> {
   const fixtureRoot = createFixtureRoot(id);
   fs.writeFileSync(path.join(fixtureRoot, 'package.json'), JSON.stringify({ scripts }, null, 2), 'utf8');
   const oracles = new VerificationOracles(fixtureRoot);
-  const result = oracle === 'test'
+  const result = oracle === 'all'
+    ? await oracles.runAll()
+    : oracle === 'test'
     ? await oracles.runTest()
     : oracle === 'typecheck'
       ? await oracles.runTypecheck()
@@ -98,7 +102,7 @@ async function oracleCase(id: string, description: string, expected: boolean, sc
     description,
     expected,
     actual: result.pass,
-    output: result.output.slice(0, 2000),
+    output: ('output' in result ? result.output : result.summary).slice(0, 2000),
     fixtureRoot
   };
 }

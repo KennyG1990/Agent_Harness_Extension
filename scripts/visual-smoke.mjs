@@ -62,6 +62,15 @@ try {
         scratchpadMd: '',
         evidenceLedger: [],
         knowledge: { ruleFile: '', commandsFile: '', architectureFile: '' },
+        projectAdapter: {
+          version: 1, id: 'node-visual', ecosystem: 'node', manifest: 'package.json', packageManager: 'npm', detectedAt: new Date().toISOString(), fingerprint: 'visual', evidence: ['package.json detected.'],
+          commands: {
+            test: { kind: 'test', command: 'npm run test', required: true, source: 'package.json#scripts.test' },
+            lint: { kind: 'lint', command: 'npm run lint', required: true, source: 'package.json#scripts.lint' },
+            typecheck: { kind: 'typecheck', command: 'npm run typecheck', required: true, source: 'package.json#scripts.typecheck' },
+            build: { kind: 'build', command: 'npm run build', required: true, source: 'package.json#scripts.build' }
+          }
+        },
         skills: [{ id: 'skill-visual', name: 'Use red-oracle output as repair context', description: 'Verified recovery.', workflow: ['Read oracle output.', 'Apply bounded fix.', 'Rerun tests.'], category: 'oracle_recovery', triggerTokens: ['oracle', 'reflection'], confidence: 0.82, occurrences: 2, successfulRuns: 2, useCount: 1, sourceSessionIds: ['prior-session'], appliedSessionIds: ['visual-reflection-smoke'] }],
         files: {},
         firewall: { stage: 'NARRATE', timestamp: new Date().toISOString(), details: 'Reflection queued after failed oracle.' },
@@ -157,14 +166,8 @@ try {
             id: 'command-visual', role: 'Reviewer', command: 'node scripts/write-fixture.js', mode: 'git-worktree', baseCommit: 'abc123', changedFiles: ['generated/output.txt'], created: ['generated/output.txt'], modified: [], deleted: [], mergedFileCount: 1, mergedBytes: 32, committed: true, conflict: false, rollbackAttempted: false, rollbackSucceeded: false, cleanupSucceeded: true, workerPid: 4243, startedAt: new Date().toISOString(), completedAt: new Date().toISOString(), durationMs: 90
           }
         ],
-        clarifications: [{
-          id: 'clarification-visual',
-          question: 'Must legacy callers remain supported?',
-          uncertainty: 'This decides whether the public API may change.',
-          options: ['Yes, preserve compatibility', 'No, breaking change is allowed'],
-          recommendedAnswer: 'Yes, preserve compatibility',
-          status: 'pending', role: 'Editor', taskId: '3', askedAt: new Date().toISOString()
-        }],
+        clarifications: [],
+        oracleFailures: [{ id: 'oracle-failure-visual', signature: 'build-signature', kind: 'build', category: 'build_failure', command: 'npm run build', source: 'package.json#scripts.build', required: true, status: 'open', occurrences: 3, taskId: '3', taskTitle: 'Repair build', role: 'Editor', outputExcerpt: 'Module not found: src/runtime.ts', guidance: 'Reproduce the exact build command and repair the first module failure.', firstSeenAt: new Date().toISOString(), lastSeenAt: new Date().toISOString() }],
         workflow: {
           version: 1,
           lane: 'full',
@@ -275,9 +278,14 @@ try {
           skillRetrievals: 2,
           skillApplications: 1,
           workflowGateBlocks: 0,
-          clarificationRequests: 1,
+          clarificationRequests: 0,
           clarificationAnswers: 0,
           clarificationGateBlocks: 0,
+          oracleFailureCaptures: 1,
+          repeatedOracleFailures: 2,
+          oracleFailureResolutions: 0,
+          remediationGuidanceInjections: 1,
+          oracleStagnationHalts: 1,
           budgetHalts: 0,
           noProgressTurns: 0,
           lastProgressSignature: '',
@@ -285,14 +293,15 @@ try {
         },
         currentStepIndex: 4,
         maxSteps: 30,
-        status: 'awaiting_input',
-        haltReason: 'Awaiting user clarification: Must legacy callers remain supported?',
+        status: 'gave_up',
+        haltReason: 'Oracle stagnation: build/build_failure repeated 3 times without changing signature build-signat.',
         activeSubAgent: 'Reviewer',
         activeFilePath: '',
-        oracleStatuses: { linter: 'pass', compiler: 'pass', tests: 'fail' },
+        oracleStatuses: { linter: 'pass', compiler: 'pass', tests: 'pass', build: 'fail' },
         lastOraclePass: false
       }
     }, '*');
+    window.postMessage({ command: 'chat-response', text: 'Forge stopped honestly: the same build failure repeated three times without a changed diagnostic. No success or green evidence was recorded.' }, '*');
   });
   const runScreenshot = path.join(artifacts, 'visual-smoke-run.png');
   await page.screenshot({ path: runScreenshot, fullPage: true });
