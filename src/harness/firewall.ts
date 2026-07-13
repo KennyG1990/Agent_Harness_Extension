@@ -3,6 +3,7 @@ import * as path from 'path';
 import { ToolName, ToolProposal } from './types';
 import { findLenientMatch, parseSearchReplaceHunks, WorkspaceTools } from './tools';
 import { classifyCommandNetworkIntent } from './commandNetwork';
+import { validateBrowserUrl } from './browserValidation';
 
 export interface ValidationResult {
   valid: boolean;
@@ -18,6 +19,8 @@ export interface CheckpointRecord {
   timestamp: string;
 }
 
+const CHECKPOINT_EXCLUDED_DIRS = new Set(['node_modules', 'out', 'dist', '.forge', '.git', '.vscode-test', '.tmp', '.next', '.cache', 'coverage', 'target', 'vendor', 'artifacts']);
+
 const MUTATING_TOOLS = new Set<ToolName>(['write_file', 'apply_patch', 'run_command', 'run_tests', 'update_tasks', 'update_plan', 'record_evidence', 'declare_success']);
 const TOOL_NAMES: ToolName[] = [
   'repo_search',
@@ -28,6 +31,11 @@ const TOOL_NAMES: ToolName[] = [
   'apply_patch',
   'run_command',
   'run_tests',
+  'browser_validate',
+  'browser_inspect',
+  'browser_action',
+  'computer_inspect',
+  'computer_action',
   'get_diff',
   'update_tasks',
   'update_plan',
@@ -61,6 +69,42 @@ export class Firewall {
       if (!commandPolicy.valid) {
         return commandPolicy;
       }
+    }
+
+    if (typed.name === 'browser_validate' || typed.name === 'browser_inspect') {
+      const browserPolicy = validateBrowserUrl(String(typed.arguments.url || ''));
+      if (!browserPolicy.valid) return { valid: false, reason: browserPolicy.reason };
+      if (typed.arguments.expectedText !== undefined && typeof typed.arguments.expectedText !== 'string') {
+        return { valid: false, reason: 'browser_validate expectedText must be a string when provided.' };
+      }
+      if (typed.arguments.timeoutMs !== undefined && (!Number.isFinite(typed.arguments.timeoutMs) || typed.arguments.timeoutMs < 1000 || typed.arguments.timeoutMs > 30000)) {
+        return { valid: false, reason: `${typed.name} timeoutMs must be between 1000 and 30000.` };
+      }
+    }
+
+    if (typed.name === 'browser_action') {
+      const args = typed.arguments;
+      if (!/^browser-state-[a-zA-Z0-9-]{8,100}$/.test(String(args.stateId || ''))) return { valid: false, reason: 'browser_action requires a valid inspected stateId.' };
+      if (!['click', 'fill', 'press', 'select', 'wait'].includes(String(args.action || ''))) return { valid: false, reason: 'browser_action action must be click, fill, press, select, or wait.' };
+      if (args.action !== 'wait' && !/^bt-[a-f0-9]{16}$/.test(String(args.targetId || ''))) return { valid: false, reason: 'browser_action requires a targetId from the inspected state.' };
+      if (args.action === 'fill' || args.action === 'select') {
+        if (typeof args.value !== 'string' || args.value.length > 2000) return { valid: false, reason: `browser_action ${args.action} requires a string value of at most 2000 characters.` };
+      }
+      if (args.action === 'press' && (typeof args.key !== 'string' || !/^[a-zA-Z0-9+_-]{1,60}$/.test(args.key))) return { valid: false, reason: 'browser_action press requires a bounded key chord.' };
+      if (args.action === 'wait' && args.value !== undefined && (!Number.isFinite(Number(args.value)) || Number(args.value) < 100 || Number(args.value) > 5000)) return { valid: false, reason: 'browser_action wait value must be between 100 and 5000 milliseconds.' };
+      if (args.timeoutMs !== undefined && (!Number.isFinite(args.timeoutMs) || args.timeoutMs < 1000 || args.timeoutMs > 30000)) return { valid: false, reason: 'browser_action timeoutMs must be between 1000 and 30000.' };
+    }
+
+    if (typed.name === 'computer_inspect') {
+      if (typeof typed.arguments.windowTitle !== 'string' || !typed.arguments.windowTitle.trim() || typed.arguments.windowTitle.length > 200) return { valid: false, reason: 'computer_inspect requires a windowTitle of at most 200 characters.' };
+    }
+
+    if (typed.name === 'computer_action') {
+      const args = typed.arguments;
+      if (!/^computer-state-[a-zA-Z0-9-]{8,100}$/.test(String(args.stateId || ''))) return { valid: false, reason: 'computer_action requires a valid inspected stateId.' };
+      if (!['invoke', 'set_value', 'focus'].includes(String(args.action || ''))) return { valid: false, reason: 'computer_action action must be invoke, set_value, or focus.' };
+      if (!/^ct-[a-f0-9]{16}$/.test(String(args.targetId || ''))) return { valid: false, reason: 'computer_action requires a targetId from the inspected state.' };
+      if (args.action === 'set_value' && (typeof args.value !== 'string' || args.value.length > 2000)) return { valid: false, reason: 'computer_action set_value requires a string value of at most 2000 characters.' };
     }
 
     if (typed.name === 'apply_patch') {
@@ -180,23 +224,24 @@ export class Firewall {
     }
   }
 
-  public async createCheckpoint(stepIndex: number, proposal: ToolProposal): Promise<CheckpointRecord> {
+  public async createCheckpoint(stepIndex: number, proposal: ToolProposal, strategyOverride?: 'targeted-files' | 'workspace-snapshot'): Promise<CheckpointRecord> {
     const root = this.tools.getWorkspaceRoot();
     const id = `step-${stepIndex}-${Date.now()}`;
     const checkpointDir = path.join(root, '.forge', 'checkpoints', id);
     fs.mkdirSync(checkpointDir, { recursive: true });
     const timestamp = new Date().toISOString();
     const maybePath = typeof proposal.arguments.path === 'string' ? proposal.arguments.path : '';
+    const strategy = strategyOverride || (maybePath ? 'targeted-files' : 'workspace-snapshot');
     const record: CheckpointRecord = {
       id,
-      strategy: maybePath ? 'targeted-files' : 'workspace-snapshot',
+      strategy,
       proposalName: proposal.name,
-      protectedPaths: maybePath ? [maybePath.replace(/\\/g, '/')] : ['.'],
+      protectedPaths: strategy === 'targeted-files' && maybePath ? [maybePath.replace(/\\/g, '/')] : ['.'],
       manifestPath: path.join('.forge', 'checkpoints', id, 'manifest.json').replace(/\\/g, '/'),
       timestamp
     };
 
-    if (maybePath) {
+    if (record.strategy === 'targeted-files' && maybePath) {
       await copyTargetSnapshot(root, checkpointDir, this.tools.resolveWorkspacePath(maybePath), maybePath);
     } else {
       await copyWorkspaceSnapshot(root, checkpointDir);
@@ -228,18 +273,18 @@ export class Firewall {
 
 async function copyWorkspaceSnapshot(root: string, checkpointDir: string): Promise<void> {
   for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
-    if (['node_modules', 'out', 'dist', '.forge', '.git'].includes(entry.name)) {
+    if (CHECKPOINT_EXCLUDED_DIRS.has(entry.name)) {
       continue;
     }
     const from = path.join(root, entry.name);
     const to = path.join(checkpointDir, entry.name);
-    fs.cpSync(from, to, { recursive: true });
+    fs.cpSync(from, to, { recursive: true, mode: fs.constants.COPYFILE_FICLONE });
   }
 }
 
 async function restoreWorkspaceSnapshot(root: string, checkpointDir: string): Promise<void> {
   for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
-    if (['node_modules', 'out', 'dist', '.forge', '.git'].includes(entry.name)) {
+    if (CHECKPOINT_EXCLUDED_DIRS.has(entry.name)) {
       continue;
     }
     fs.rmSync(path.join(root, entry.name), { recursive: true, force: true });
@@ -250,7 +295,7 @@ async function restoreWorkspaceSnapshot(root: string, checkpointDir: string): Pr
     }
     const from = path.join(checkpointDir, entry.name);
     const to = path.join(root, entry.name);
-    fs.cpSync(from, to, { recursive: true });
+    fs.cpSync(from, to, { recursive: true, mode: fs.constants.COPYFILE_FICLONE });
   }
 }
 
@@ -266,7 +311,7 @@ async function copyTargetSnapshot(root: string, checkpointDir: string, fullPath:
   }
   const snapshotPath = path.join(checkpointDir, 'files', normalized);
   fs.mkdirSync(path.dirname(snapshotPath), { recursive: true });
-  fs.cpSync(fullPath, snapshotPath, { recursive: true });
+  fs.cpSync(fullPath, snapshotPath, { recursive: true, mode: fs.constants.COPYFILE_FICLONE });
 }
 
 async function restoreTargetSnapshot(root: string, checkpointDir: string, protectedPaths: string[]): Promise<void> {
@@ -285,5 +330,5 @@ async function restoreTargetSnapshot(root: string, checkpointDir: string, protec
   }
   fs.rmSync(workspacePath, { recursive: true, force: true });
   fs.mkdirSync(path.dirname(workspacePath), { recursive: true });
-  fs.cpSync(snapshotPath, workspacePath, { recursive: true });
+  fs.cpSync(snapshotPath, workspacePath, { recursive: true, mode: fs.constants.COPYFILE_FICLONE });
 }

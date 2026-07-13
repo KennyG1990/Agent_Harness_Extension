@@ -40,8 +40,21 @@ const browserErrors = [];
 page.on('console', msg => browserErrors.push(`console:${msg.type()}: ${msg.text()}`));
 page.on('pageerror', err => browserErrors.push(`pageerror: ${err.message}`));
 await page.addInitScript(() => {
+  window.__forgePosted = [];
   window.acquireVsCodeApi = () => ({
-    postMessage: () => undefined,
+    postMessage: (message) => {
+      window.__forgePosted.push(message);
+      if (message?.command === 'search-context-mentions') {
+        setTimeout(() => window.postMessage({
+          command: 'context-mention-results', requestId: message.requestId, provenance: 'ready', truncated: false,
+          candidates: [
+            { kind: 'folder', path: 'src', label: 'src/', detail: 'src/ · folder' },
+            { kind: 'file', path: 'src/auth/session.ts', label: 'session.ts', detail: 'src/auth/session.ts · ts' },
+            { kind: 'file', path: 'src/auth/token.ts', label: 'token.ts', detail: 'src/auth/token.ts · ts' }
+          ]
+        }, '*'), 0);
+      }
+    },
     getState: () => undefined,
     setState: () => undefined
   });
@@ -55,9 +68,17 @@ try {
     window.postMessage({
       command: 'state-update',
       state: {
-        sessionId: 'visual-reflection-smoke',
+        sessionId: 'forge-1783900000000-visual',
+        humanApprovalPolicy: 'ask',
+        pendingHumanApproval: {
+          id: 'approval-visual-01', sessionId: 'forge-1783900000000-visual', taskId: '3', taskTitle: 'Apply scoped code changes through the firewall', role: 'Editor',
+          proposal: { name: 'apply_patch', arguments: { path: 'src/auth/session.ts', patchContent: 'bounded patch content' } }, proposalDigest: '0a1b2c3d4e5f',
+          summary: 'src/auth/session.ts · validated patch', status: 'pending', requestedAt: new Date().toISOString()
+        },
+        humanApprovals: [],
+        modePolicy: { id: 'custom-no-shell', name: 'No Shell Code', intent: 'code', instructions: 'Use file tools and tests.', allowedTools: ['update_plan', 'run_tests', 'get_diff', 'record_evidence', 'ask_user', 'declare_success', 'read_file', 'apply_patch', 'write_file'] },
         goalContract: { goal: 'Validate reflection UI counters.', context: '', constraints: [], doneWhen: [], nonGoals: [], budget: 2, spent: 0 },
-        taskGraph: { tasks: [{ id: '4', title: 'Retry after red oracle reflection', status: 'running', dependencies: [], blockers: [], owner: 'Reviewer' }] },
+        taskGraph: { tasks: [{ id: '3', title: 'Repair the failing build', status: 'running', dependencies: [], blockers: [], owner: 'Editor' }] },
         planMd: '',
         scratchpadMd: '',
         evidenceLedger: [],
@@ -181,12 +202,37 @@ try {
         safetyCheckpoints: [
           {
             id: 'step-3-demo',
-            strategy: 'targeted-files',
+            strategy: 'workspace-snapshot',
             proposalName: 'apply_patch',
-            protectedPaths: ['src/example.ts'],
+            protectedPaths: ['.'],
             manifestPath: '.forge/checkpoints/step-3-demo/manifest.json',
             timestamp: new Date().toISOString()
           }
+        ],
+        checkpointRestores: [],
+        browserValidations: [
+          {
+            id: 'browser-demo',
+            status: 'pass',
+            requestedUrl: 'http://127.0.0.1:3000/',
+            finalUrl: 'http://127.0.0.1:3000/',
+            title: 'Forge fixture application',
+            expectedText: 'Run task',
+            expectedTextFound: true,
+            screenshotPath: '.forge/browser-runs/latest-browser-validation.png',
+            reportPath: '.forge/browser-runs/latest-browser-validation.json',
+            completedAt: new Date().toISOString()
+          }
+        ],
+        progressEvents: [
+          { id: 'demo:progress:1', sequence: 1, sessionId: 'demo', stepIndex: 4, kind: 'tool_finished', status: 'pass', summary: 'run_tests completed.', detail: 'Tests passed but the required build remained red.', role: 'Reviewer', taskId: '4', taskTitle: 'Verify the implementation', phase: 'COMMIT', toolName: 'run_tests', timestamp: new Date().toISOString() },
+          { id: 'demo:progress:2', sequence: 2, sessionId: 'demo', stepIndex: 4, kind: 'oracle', status: 'fail', summary: 'Required project checks are still red.', detail: 'lint=pass, typecheck=pass, tests=pass, build=fail', role: 'Oracle', taskId: '4', taskTitle: 'Verify the implementation', phase: 'NARRATE', toolName: 'run_tests', timestamp: new Date().toISOString() },
+          { id: 'demo:progress:3', sequence: 3, sessionId: 'demo', stepIndex: 4, kind: 'reflection', status: 'warning', summary: 'Build failure queued for bounded repair.', detail: 'Use the typed build remediation capsule.', role: 'Reviewer', taskId: '4', taskTitle: 'Verify the implementation', phase: 'NARRATE', timestamp: new Date().toISOString() },
+          { id: 'demo:progress:4', sequence: 4, sessionId: 'demo', stepIndex: 5, kind: 'step_started', status: 'running', summary: 'Step 5: Repair the failing build', role: 'Editor', taskId: '3', taskTitle: 'Repair the failing build', phase: 'IDLE', timestamp: new Date().toISOString() },
+          { id: 'demo:progress:5', sequence: 5, sessionId: 'demo', stepIndex: 5, kind: 'provider_wait', status: 'running', summary: 'Editor is preparing the next action.', detail: 'Task: Repair the failing build', role: 'Editor', taskId: '3', taskTitle: 'Repair the failing build', phase: 'IDLE', timestamp: new Date().toISOString() },
+          { id: 'demo:progress:6', sequence: 6, sessionId: 'demo', stepIndex: 5, kind: 'proposal', status: 'pending', summary: 'Editor proposed apply_patch.', detail: 'Patch the validated session implementation.', role: 'Editor', taskId: '3', taskTitle: 'Repair the failing build', phase: 'PROPOSE', toolName: 'apply_patch', timestamp: new Date().toISOString() },
+          { id: 'demo:progress:7', sequence: 7, sessionId: 'demo', stepIndex: 5, kind: 'validation', status: 'pass', summary: 'Validated apply_patch.', detail: 'Proposal accepted by deterministic validator and pre-commit review.', role: 'Firewall', taskId: '3', taskTitle: 'Repair the failing build', phase: 'VALIDATE', toolName: 'apply_patch', timestamp: new Date().toISOString() },
+          { id: 'demo:progress:8', sequence: 8, sessionId: 'demo', stepIndex: 5, kind: 'awaiting_approval', status: 'warning', summary: 'Approve apply_patch before Forge changes the workspace.', detail: 'src/auth/session.ts · validated patch', role: 'Editor', taskId: '3', taskTitle: 'Repair the failing build', phase: 'VALIDATE', toolName: 'apply_patch', timestamp: new Date().toISOString() }
         ],
         commandEffects: [
           {
@@ -285,24 +331,65 @@ try {
           repeatedOracleFailures: 2,
           oracleFailureResolutions: 0,
           remediationGuidanceInjections: 1,
-          oracleStagnationHalts: 1,
+          oracleStagnationHalts: 0,
+          humanApprovalRequests: 1,
+          humanApprovalApprovals: 0,
+          humanApprovalRejections: 0,
+          checkpointRestores: 0,
+          checkpointRestoreFailures: 0,
+          browserValidations: 1,
+          browserValidationFailures: 0,
+          progressEventsEmitted: 8,
           budgetHalts: 0,
           noProgressTurns: 0,
           lastProgressSignature: '',
           actuallyModelDriven: true
         },
-        currentStepIndex: 4,
+        currentStepIndex: 5,
         maxSteps: 30,
-        status: 'gave_up',
-        haltReason: 'Oracle stagnation: build/build_failure repeated 3 times without changing signature build-signat.',
-        activeSubAgent: 'Reviewer',
+        status: 'awaiting_approval',
+        haltReason: 'Awaiting approval for apply_patch.',
+        activeSubAgent: 'Editor',
         activeFilePath: '',
         oracleStatuses: { linter: 'pass', compiler: 'pass', tests: 'pass', build: 'fail' },
         lastOraclePass: false
       }
     }, '*');
-    window.postMessage({ command: 'chat-response', text: 'Forge stopped honestly: the same build failure repeated three times without a changed diagnostic. No success or green evidence was recorded.' }, '*');
+    window.postMessage({ command: 'chat-response', text: 'I found the build failure and prepared a validated patch. Review the pending action below; nothing has changed yet.' }, '*');
+    window.postMessage({ command: 'provider-readiness', readiness: {
+      provider: 'openrouter', ready: true, workspaceOpen: true,
+      credential: { required: true, configured: true, source: 'secret-storage', valid: true },
+      authentication: { status: 'pass', latencyMs: 92 }, catalog: { status: 'live', modelCount: 340 },
+      blockers: [], checkedAt: new Date().toISOString()
+    } }, '*');
+    window.postMessage({ command: 'workspace-index-status', status: {
+      status: 'ready', fileCount: 1842, symbolCount: 6391, ignoredCount: 217, truncated: false,
+      generatedAt: new Date().toISOString(), fingerprint: 'visual-index-fingerprint'
+    } }, '*');
+    window.postMessage({ command: 'composer-context', sessionId: 'forge-1783900000000-visual', attachments: [
+      { id: 'ctx-visual-file', kind: 'file', label: 'session.ts', path: 'src/auth/session.ts', byteCount: 1834, capturedAt: new Date().toISOString() },
+      { id: 'ctx-visual-diagnostics', kind: 'diagnostics', label: 'Diagnostics (3)', diagnosticCount: 3, byteCount: 326, capturedAt: new Date().toISOString() }
+    ] }, '*');
+    window.postMessage({ command: 'modes-list', modes: [
+      { id: 'code', name: 'Code', description: 'Default governed coding agent.', instructions: 'Implement through Forge.', intent: 'code', modelRole: 'code', inference: 'Instant', allowedTools: [], builtIn: true },
+      { id: 'architect', name: 'Architect', description: 'Architecture guidance without mutation.', instructions: 'Analyze and plan.', intent: 'architect', modelRole: 'plan', inference: 'Thinking', allowedTools: [], builtIn: true },
+      { id: 'ask', name: 'Ask', description: 'Answer without changing files.', instructions: 'Explain clearly.', intent: 'ask', modelRole: 'plan', inference: 'Instant', allowedTools: [], builtIn: true },
+      { id: 'custom-no-shell', name: 'No Shell Code', description: 'Governed coding without shell commands.', instructions: 'Use file tools and tests.', intent: 'code', modelRole: 'code', inference: 'Thinking', allowedTools: ['update_plan', 'run_tests', 'get_diff', 'record_evidence', 'ask_user', 'declare_success', 'read_file', 'apply_patch', 'write_file'], builtIn: false }
+    ] }, '*');
+    window.postMessage({ command: 'sessions-list', corruptCount: 1, sessions: [
+      { sessionId: 'forge-1783900000001-paused', title: 'Repair authentication race', pinned: true, createdAt: '2026-07-12T17:00:00.000Z', updatedAt: new Date().toISOString(), status: 'paused', steps: 7, costUsd: 0.0432, resumable: true },
+      { sessionId: 'forge-1783900000000-visual', title: 'Validate reflection UI counters', pinned: false, createdAt: '2026-07-12T16:00:00.000Z', updatedAt: new Date(Date.now() - 3600000).toISOString(), status: 'gave_up', steps: 4, costUsd: 0, resumable: false },
+      { sessionId: 'forge-1783900000002-question', title: 'Choose database migration policy', pinned: false, createdAt: '2026-07-12T15:00:00.000Z', updatedAt: new Date(Date.now() - 7200000).toISOString(), status: 'awaiting_input', steps: 2, costUsd: 0.011, resumable: false },
+      { sessionId: 'forge-chat-1783900000003-explain', title: 'Explain repository architecture', pinned: false, createdAt: '2026-07-12T14:00:00.000Z', updatedAt: new Date(Date.now() - 10800000).toISOString(), status: 'chat', steps: 0, costUsd: 0, resumable: false }
+    ] }, '*');
   });
+  await page.click('[data-testid="checkpoint-history-toggle"]');
+  await page.waitForSelector('[data-testid="checkpoint-history"]');
+  await page.waitForSelector('[data-testid="run-activity"]');
+  const progressRows = await page.locator('[data-testid^="progress-"]').count();
+  if (progressRows < 6) throw new Error(`Expected streamed progress rows, found ${progressRows}.`);
+  await page.click('[data-testid="restore-checkpoint-step-3-demo"]');
+  await page.waitForFunction(() => document.querySelector('[data-testid="restore-checkpoint-step-3-demo"]')?.textContent?.includes('Confirm'));
   const runScreenshot = path.join(artifacts, 'visual-smoke-run.png');
   await page.screenshot({ path: runScreenshot, fullPage: true });
   await page.evaluate(() => {
@@ -374,11 +461,104 @@ try {
   await page.waitForSelector('[data-testid="isolated-run-summary"]', { timeout: 5000 });
   const proofScreenshot = path.join(artifacts, 'visual-smoke-proof.png');
   await page.screenshot({ path: proofScreenshot, fullPage: true });
+  await page.evaluate(() => {
+    window.postMessage({ command: 'difficult-proof-report', report: {
+      runId: 'tier4-live-visual', modelId: 'qwen/qwen-2.5-7b-instruct', live: true, tier: 4,
+      outcome: 'model_capability_without_uplift', capabilityGatePassed: false,
+      taskCount: 4, completedTaskCount: 4, bareSolved: 1, harnessSolved: 1,
+      harnessModelDrivenSolved: 1, fallbackSolved: 0, providerCalls: 36, providerFailures: 0, costUsd: 0.0072
+    } }, '*');
+  });
+  await page.click('[data-testid="difficult-live-proof"] summary');
+  await page.waitForSelector('[data-testid="difficult-proof-summary"]');
+  await page.click('[data-testid="confirm-live-spend"]');
+  if (await page.locator('[data-testid="run-difficult-live-proof"]').isDisabled()) throw new Error('Live proof should enable only after explicit spend confirmation.');
+  const difficultProofScreenshot = path.join(artifacts, 'visual-smoke-difficult-proof.png');
+  await page.screenshot({ path: difficultProofScreenshot, fullPage: true });
+  await page.locator('[data-testid="difficult-proof-summary"]').scrollIntoViewIfNeeded();
+  const difficultProofResultScreenshot = path.join(artifacts, 'visual-smoke-difficult-proof-result.png');
+  await page.screenshot({ path: difficultProofResultScreenshot, fullPage: true });
   await page.click('[data-testid="view-settings"]');
   await page.waitForSelector('[data-testid="settings-panel"]', { timeout: 5000 });
   const screenshot = path.join(artifacts, 'visual-smoke.png');
   await page.screenshot({ path: screenshot, fullPage: true });
-  console.log(`visual smoke: PASS ${runScreenshot} ${proofScreenshot} ${screenshot}`);
+  await page.click('[data-testid="custom-modes-settings"] summary');
+  await page.waitForSelector('[data-testid="mode-name"]');
+  const modesScreenshot = path.join(artifacts, 'visual-smoke-modes.png');
+  await page.screenshot({ path: modesScreenshot, fullPage: true });
+  await page.click('[data-testid="view-run"]');
+  if (await page.locator('[data-testid="checkpoint-history"]').count()) await page.click('[data-testid="checkpoint-history-toggle"]');
+  await page.click('[data-testid="sessions-toggle"]');
+  await page.waitForSelector('[data-testid="sessions-menu"]');
+  await page.waitForSelector('[data-testid="resume-session-forge-1783900000001-paused"]');
+  const sessionsScreenshot = path.join(artifacts, 'visual-smoke-sessions.png');
+  await page.screenshot({ path: sessionsScreenshot, fullPage: true });
+  await page.setViewportSize({ width: 520, height: 920 });
+  const sessionsSidebarScreenshot = path.join(artifacts, 'visual-smoke-sessions-sidebar.png');
+  await page.screenshot({ path: sessionsSidebarScreenshot, fullPage: true });
+  await page.setViewportSize({ width: 1440, height: 920 });
+  await page.click('[data-testid="sessions-toggle"]');
+  await page.waitForSelector('[data-testid="human-approval-card"]');
+  await page.waitForSelector('[data-testid="approve-human-approval"]');
+  const approvalScreenshot = path.join(artifacts, 'visual-smoke-human-approval.png');
+  await page.screenshot({ path: approvalScreenshot, fullPage: true });
+  await page.setViewportSize({ width: 520, height: 920 });
+  const approvalSidebarScreenshot = path.join(artifacts, 'visual-smoke-human-approval-sidebar.png');
+  await page.screenshot({ path: approvalSidebarScreenshot, fullPage: true });
+  await page.setViewportSize({ width: 1440, height: 920 });
+  await page.click('[data-testid="workspace-index-toggle"]');
+  await page.waitForSelector('[data-testid="workspace-index-popover"]');
+  if ((await page.locator('[data-testid="workspace-index-state"]').textContent())?.trim() !== 'ready') throw new Error('Workspace index popover did not render ready status.');
+  const indexScreenshot = path.join(artifacts, 'visual-smoke-workspace-index.png');
+  await page.screenshot({ path: indexScreenshot, fullPage: true });
+  await page.setViewportSize({ width: 520, height: 920 });
+  const indexSidebarScreenshot = path.join(artifacts, 'visual-smoke-workspace-index-sidebar.png');
+  await page.screenshot({ path: indexSidebarScreenshot, fullPage: true });
+  await page.setViewportSize({ width: 1440, height: 920 });
+  await page.click('[data-testid="workspace-index-toggle"]');
+  await page.click('[data-testid="composer-context-toggle"]');
+  await page.waitForSelector('[data-testid="composer-context-menu"]');
+  await page.waitForSelector('[data-testid="composer-context-chips"]');
+  const contextScreenshot = path.join(artifacts, 'visual-smoke-composer-context.png');
+  await page.screenshot({ path: contextScreenshot, fullPage: true });
+  const contextSidebarScreenshot = path.join(artifacts, 'visual-smoke-composer-context-sidebar.png');
+  await page.setViewportSize({ width: 520, height: 920 });
+  await page.screenshot({ path: contextSidebarScreenshot, fullPage: true });
+  await page.setViewportSize({ width: 1440, height: 920 });
+  await page.click('[data-testid="composer-context-toggle"]');
+  await page.fill('[data-testid="chat-input"]', '@src');
+  await page.waitForSelector('[data-testid="context-mention-menu"]');
+  await page.waitForSelector('[data-testid="mention-option-folder-0"]');
+  const mentionScreenshot = path.join(artifacts, 'visual-smoke-context-mentions.png');
+  await page.screenshot({ path: mentionScreenshot, fullPage: true });
+  const mentionSidebarScreenshot = path.join(artifacts, 'visual-smoke-context-mentions-sidebar.png');
+  await page.setViewportSize({ width: 520, height: 920 });
+  await page.screenshot({ path: mentionSidebarScreenshot, fullPage: true });
+  await page.setViewportSize({ width: 1440, height: 920 });
+  await page.press('[data-testid="chat-input"]', 'ArrowDown');
+  await page.waitForTimeout(50);
+  await page.press('[data-testid="chat-input"]', 'Enter');
+  const mentionAttach = await page.evaluate(() => window.__forgePosted.filter(message => message.command === 'attach-context-mention').at(-1));
+  if (mentionAttach?.kind !== 'file' || mentionAttach?.path !== 'src/auth/session.ts') throw new Error(`Keyboard @ mention selection did not attach the highlighted file: ${JSON.stringify(mentionAttach)}`);
+  if (await page.inputValue('[data-testid="chat-input"]')) throw new Error('Selected @ mention token was not removed from the composer.');
+  await page.waitForSelector('[data-testid="report-problem"]');
+  await page.hover('[data-testid="report-problem"]');
+  const supportScreenshot = path.join(artifacts, 'visual-smoke-support.png');
+  await page.screenshot({ path: supportScreenshot, fullPage: true });
+  await page.evaluate(() => {
+    window.postMessage({ command: 'provider-readiness', readiness: {
+      provider: 'openrouter', ready: false, workspaceOpen: true,
+      credential: { required: true, configured: false, source: 'none', valid: null },
+      authentication: { status: 'skipped', latencyMs: 0 }, catalog: { status: 'live', modelCount: 340 },
+      blockers: [{ code: 'credential_missing', message: 'Add an OpenRouter API key to continue.' }], checkedAt: new Date().toISOString()
+    } }, '*');
+  });
+  await page.waitForSelector('[data-testid="first-run-onboarding"]');
+  if (await page.locator('[data-testid="onboarding-api-key"]').getAttribute('type') !== 'password') throw new Error('Onboarding key field is not password-protected.');
+  if (await page.locator('[data-testid="onboarding-api-key"]').inputValue()) throw new Error('Onboarding rendered a credential value.');
+  const onboardingScreenshot = path.join(artifacts, 'visual-smoke-onboarding.png');
+  await page.screenshot({ path: onboardingScreenshot, fullPage: true });
+  console.log(`visual smoke: PASS ${runScreenshot} ${proofScreenshot} ${difficultProofScreenshot} ${difficultProofResultScreenshot} ${screenshot} ${modesScreenshot} ${sessionsScreenshot} ${sessionsSidebarScreenshot} ${approvalScreenshot} ${approvalSidebarScreenshot} ${indexScreenshot} ${indexSidebarScreenshot} ${contextScreenshot} ${contextSidebarScreenshot} ${mentionScreenshot} ${mentionSidebarScreenshot} ${supportScreenshot} ${onboardingScreenshot}`);
 } catch (err) {
   console.error(browserErrors.join('\n') || 'No browser errors captured.');
   throw err;

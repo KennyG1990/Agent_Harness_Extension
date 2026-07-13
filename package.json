@@ -1,8 +1,8 @@
 {
   "name": "forge-agent",
   "displayName": "Forge Agent",
-  "description": "Forge Agent Harness VS Code Extension (Phase 68: enforced universal task workflow)",
-  "version": "0.72.0",
+  "description": "Success-driven AI coding agent with deterministic validation, native IDE workflows, and reversible checkpoints.",
+  "version": "0.85.0",
   "publisher": "kennyg",
   "engines": {
     "vscode": "^1.80.0"
@@ -34,7 +34,26 @@
     "onCommand:forge-agent.resumeGoal",
     "onCommand:forge-agent.steerGoal",
     "onCommand:forge-agent.resumeAgentGoal",
-    "onCommand:forge-agent.answerClarification"
+    "onCommand:forge-agent.answerClarification",
+    "onCommand:forge-agent.restoreCheckpoint",
+    "onCommand:forge-agent.runBrowserValidation",
+    "onCommand:forge-agent.getProviderReadiness",
+    "onCommand:forge-agent.setOpenRouterApiKey",
+    "onCommand:forge-agent.clearOpenRouterApiKey",
+    "onCommand:forge-agent.listModes",
+    "onCommand:forge-agent.upsertMode",
+    "onCommand:forge-agent.deleteMode",
+    "onCommand:forge-agent.reportProblem",
+    "onCommand:forge-agent.listSessions",
+    "onCommand:forge-agent.openSession",
+    "onCommand:forge-agent.resumeSession",
+    "onCommand:forge-agent.deleteSession",
+    "onCommand:forge-agent.runDifficultWeakModelProof",
+    "onCommand:forge-agent.setHumanApprovalPolicy",
+    "onCommand:forge-agent.resolveHumanApproval",
+    "onCommand:forge-agent.buildWorkspaceIndex",
+    "onCommand:forge-agent.getWorkspaceIndexStatus",
+    "onCommand:forge-agent.openWorkspaceIndex"
   ],
   "contributes": {
     "commands": [
@@ -125,6 +144,82 @@
       {
         "command": "forge-agent.answerClarification",
         "title": "Forge Agent: Answer Pending Clarification"
+      },
+      {
+        "command": "forge-agent.restoreCheckpoint",
+        "title": "Forge Agent: Restore Checkpoint"
+      },
+      {
+        "command": "forge-agent.runBrowserValidation",
+        "title": "Forge Agent: Validate Local App in Browser"
+      },
+      {
+        "command": "forge-agent.getProviderReadiness",
+        "title": "Forge Agent: Check Provider Readiness"
+      },
+      {
+        "command": "forge-agent.setOpenRouterApiKey",
+        "title": "Forge Agent: Set OpenRouter API Key"
+      },
+      {
+        "command": "forge-agent.clearOpenRouterApiKey",
+        "title": "Forge Agent: Clear OpenRouter API Key"
+      },
+      {
+        "command": "forge-agent.listModes",
+        "title": "Forge Agent: List Modes"
+      },
+      {
+        "command": "forge-agent.upsertMode",
+        "title": "Forge Agent: Create or Update Custom Mode"
+      },
+      {
+        "command": "forge-agent.deleteMode",
+        "title": "Forge Agent: Delete Custom Mode"
+      },
+      {
+        "command": "forge-agent.reportProblem",
+        "title": "Forge Agent: Report a Problem"
+      },
+      {
+        "command": "forge-agent.listSessions",
+        "title": "Forge Agent: List Sessions"
+      },
+      {
+        "command": "forge-agent.openSession",
+        "title": "Forge Agent: Open Session"
+      },
+      {
+        "command": "forge-agent.resumeSession",
+        "title": "Forge Agent: Resume Session"
+      },
+      {
+        "command": "forge-agent.deleteSession",
+        "title": "Forge Agent: Delete Session"
+      },
+      {
+        "command": "forge-agent.runDifficultWeakModelProof",
+        "title": "Forge Agent: Run Difficult Live Weak-Model Proof"
+      },
+      {
+        "command": "forge-agent.setHumanApprovalPolicy",
+        "title": "Forge Agent: Set Human Approval Policy"
+      },
+      {
+        "command": "forge-agent.resolveHumanApproval",
+        "title": "Forge Agent: Resolve Pending Human Approval"
+      },
+      {
+        "command": "forge-agent.buildWorkspaceIndex",
+        "title": "Forge Agent: Build Workspace Index"
+      },
+      {
+        "command": "forge-agent.getWorkspaceIndexStatus",
+        "title": "Forge Agent: Get Workspace Index Status"
+      },
+      {
+        "command": "forge-agent.openWorkspaceIndex",
+        "title": "Forge Agent: Open Workspace Index"
       }
     ],
     "viewsContainers": {
@@ -148,11 +243,6 @@
     "configuration": {
       "title": "Forge Agent Settings",
       "properties": {
-        "forge.openRouterApiKey": {
-          "type": "string",
-          "default": "",
-          "description": "API Key for OpenRouter"
-        },
         "forge.providerDefault": {
           "type": "string",
           "default": "openrouter",
@@ -207,6 +297,32 @@
           "default": false,
           "description": "Opt in to sending bounded repository text to the configured embedding provider for hybrid semantic retrieval. Disabled by default for source privacy."
         },
+        "forge.humanApprovalPolicy": {
+          "type": "string",
+          "default": "ask",
+          "enum": [
+            "ask",
+            "auto"
+          ],
+          "enumDescriptions": [
+            "Pause before validated file changes and commands so the user can approve or reject them.",
+            "Commit validated actions automatically; deterministic firewall, review, checkpoint, and oracle gates remain enforced."
+          ],
+          "description": "Human approval policy for consequential workspace actions."
+        },
+        "forge.computerUseEnabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable governed Windows UI Automation inspection. Computer actions still always require explicit approval."
+        },
+        "forge.computerUseAllowedWindows": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "description": "Exact top-level window titles Forge may inspect and interact with."
+        },
         "forge.embeddingModel": {
           "type": "string",
           "default": "openai/text-embedding-3-small",
@@ -223,13 +339,25 @@
     "test": "node scripts/smoke-tests.mjs",
     "test:e2e": "node scripts/e2e-smoke.mjs",
     "test:visual": "node scripts/visual-smoke.mjs",
+    "test:browser": "npm run compile && node scripts/browser-validation-smoke.mjs",
+    "test:browser-use": "npm run compile && node scripts/browser-use-smoke.mjs",
+    "test:computer-use": "npm run compile && node scripts/computer-use-smoke.mjs",
+    "test:progress": "npm run compile && node scripts/progress-stream-smoke.mjs",
+    "test:readiness": "npm run compile && node scripts/provider-readiness-smoke.mjs",
+    "test:modes": "npm run compile && node scripts/mode-registry-smoke.mjs",
+    "test:support": "npm run compile && node scripts/support-report-smoke.mjs",
+    "test:sessions": "npm run compile && node scripts/session-store-smoke.mjs",
+    "test:difficult-proof": "npm run compile && node scripts/difficult-live-proof-smoke.mjs",
+    "test:approvals": "npm run compile && node scripts/human-approval-smoke.mjs",
+    "test:index": "npm run compile && node scripts/workspace-index-smoke.mjs",
+    "test:context": "npm run compile && node scripts/composer-context-smoke.mjs",
     "test:workers": "npm run compile && node scripts/worker-process-stress.mjs 100",
     "eval": "npm run compile && node scripts/weak-model-eval.mjs",
     "eval:reflection": "npm run compile && node scripts/reflection-ab-eval.mjs",
     "eval:tier2": "npm run compile && node scripts/weak-model-eval-tier2.mjs",
     "eval:tier3": "npm run compile && node scripts/weak-model-eval-tier3.mjs",
     "eval:tier4": "npm run compile && node scripts/weak-model-eval-tier4.mjs",
-    "package": "vsce package --no-dependencies --allow-missing-repository"
+    "package": "vsce package --allow-missing-repository"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.14",
@@ -241,17 +369,16 @@
     "@vitejs/plugin-react": "^5.0.4",
     "@vscode/test-electron": "^3.0.0",
     "@vscode/vsce": "^3.9.2",
+    "lucide-react": "^0.546.0",
+    "motion": "^12.23.24",
     "playwright": "^1.61.0",
+    "react": "^19.0.1",
+    "react-dom": "^19.0.1",
     "tailwindcss": "^4.1.14",
     "typescript": "^5.1.3",
     "vite": "^6.2.3"
   },
   "dependencies": {
-    "@google/genai": "^2.4.0",
-    "dotenv": "^17.2.3",
-    "lucide-react": "^0.546.0",
-    "motion": "^12.23.24",
-    "react": "^19.0.1",
-    "react-dom": "^19.0.1"
+    "playwright-core": "^1.61.0"
   }
 }

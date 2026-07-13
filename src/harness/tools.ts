@@ -3,18 +3,28 @@ import * as path from 'path';
 import { exec } from 'child_process';
 import { CommandExecutionMetadata, ToolName, ToolProposal } from './types';
 import { classifyCommandNetworkIntent } from './commandNetwork';
+import { BrowserValidationEvidence, BrowserValidationRunner } from './browserValidation';
+import { BrowserUseRunner, BrowserUseState } from './browserUse';
+import { ComputerUsePolicy, ComputerUseRunner, ComputerUseState } from './computerUse';
+import { WorkspaceIndexService } from './workspaceIndex';
+
+const MAX_INDEXED_SEARCH_BYTES = 64 * 1024 * 1024;
+const MAX_SEARCH_RESULTS = 200;
 
 export interface ToolResult {
   success: boolean;
   output: string;
   diff?: string;
   commandMetadata?: CommandExecutionMetadata;
+  browserValidation?: BrowserValidationEvidence;
+  browserInteraction?: BrowserUseState;
+  computerInteraction?: ComputerUseState;
 }
 
 export type ToolHandler = (args: Record<string, any>) => Promise<ToolResult>;
 
 export class WorkspaceTools {
-  constructor(private readonly workspaceRootOverride?: string) {}
+  constructor(private readonly workspaceRootOverride?: string, private readonly computerUsePolicyOverride?: ComputerUsePolicy) {}
 
   public registry(): Record<ToolName, ToolHandler> {
     return {
@@ -26,6 +36,41 @@ export class WorkspaceTools {
       apply_patch: args => this.applyPatch(String(args.path || ''), String(args.patchContent || '')),
       run_command: args => this.runCommand(String(args.command || '')),
       run_tests: () => this.runCommand('npm run test'),
+      browser_validate: async args => {
+        const result = await new BrowserValidationRunner(this.getWorkspaceRoot()).run({
+          url: String(args.url || ''),
+          expectedText: String(args.expectedText || ''),
+          timeoutMs: Number(args.timeoutMs || 0) || undefined
+        });
+        return { success: result.success, output: result.output, browserValidation: result.evidence };
+      },
+      browser_inspect: async args => {
+        const result = await new BrowserUseRunner(this.getWorkspaceRoot()).inspect({
+          url: String(args.url || ''),
+          sessionId: String(args.sessionId || 'unknown'),
+          timeoutMs: Number(args.timeoutMs || 0) || undefined
+        });
+        return { success: result.success, output: result.output, browserInteraction: result.state };
+      },
+      browser_action: async args => {
+        const result = await new BrowserUseRunner(this.getWorkspaceRoot()).act({
+          stateId: String(args.stateId || ''),
+          action: String(args.action || '') as any,
+          targetId: args.targetId === undefined ? undefined : String(args.targetId),
+          value: args.value === undefined ? undefined : String(args.value),
+          key: args.key === undefined ? undefined : String(args.key),
+          timeoutMs: Number(args.timeoutMs || 0) || undefined
+        });
+        return { success: result.success, output: result.output, browserInteraction: result.state };
+      },
+      computer_inspect: async args => {
+        const result = await new ComputerUseRunner(this.getWorkspaceRoot(), this.computerUsePolicy()).inspect({ windowTitle: String(args.windowTitle || ''), sessionId: String(args.sessionId || 'unknown') });
+        return { success: result.success, output: result.output, computerInteraction: result.state };
+      },
+      computer_action: async args => {
+        const result = await new ComputerUseRunner(this.getWorkspaceRoot(), this.computerUsePolicy()).act({ stateId: String(args.stateId || ''), action: String(args.action || '') as any, targetId: String(args.targetId || ''), value: args.value === undefined ? undefined : String(args.value) });
+        return { success: result.success, output: result.output, computerInteraction: result.state };
+      },
       get_diff: () => this.getDiff(),
       update_tasks: async () => ({ success: true, output: 'Task graph update handled by harness state.' }),
       update_plan: async () => ({ success: true, output: 'Plan update handled by harness state.' }),
@@ -56,6 +101,14 @@ export class WorkspaceTools {
       throw new Error('No active workspace folder open in VS Code.');
     }
     return fs.realpathSync(folders[0].uri.fsPath);
+  }
+
+  private computerUsePolicy(): ComputerUsePolicy {
+    if (this.computerUsePolicyOverride) return this.computerUsePolicyOverride;
+    const vscode = getVscode();
+    if (!vscode) return { enabled: false, allowedWindows: [] };
+    const config = vscode.workspace.getConfiguration('forge');
+    return { enabled: config.get<boolean>('computerUseEnabled', false), allowedWindows: config.get<string[]>('computerUseAllowedWindows', []) };
   }
 
   public resolveWorkspacePath(relativePath: string): string {
@@ -139,22 +192,35 @@ export class WorkspaceTools {
       return { success: false, output: 'Search query is empty.' };
     }
     const root = this.getWorkspaceRoot();
+    const indexed = new WorkspaceIndexService(root).load();
     const vscode = getVscode();
-    const files = vscode
-      ? await vscode.workspace.findFiles('**/*', '**/{node_modules,out,dist,.git}/**', 250)
-      : listWorkspaceFiles(root, () => true, 250).map(fsPath => ({ fsPath }));
+    const files = indexed
+      ? indexed.files.map(file => ({ fsPath: path.join(root, ...file.path.split('/')) }))
+      : vscode
+        ? await vscode.workspace.findFiles('**/*', '**/{node_modules,out,dist,.git,.forge}/**', 250)
+        : listWorkspaceFiles(root, () => true, 250).map(fsPath => ({ fsPath }));
     const matches: string[] = [];
+    let examined = 0;
+    let bytesRead = 0;
     for (const file of files) {
       try {
+        const stat = fs.statSync(file.fsPath);
+        if (bytesRead + stat.size > MAX_INDEXED_SEARCH_BYTES) break;
         const content = fs.readFileSync(file.fsPath, 'utf8');
+        examined += 1;
+        bytesRead += stat.size;
         if (content.toLowerCase().includes(query.toLowerCase())) {
           matches.push(path.relative(root, file.fsPath));
+          if (matches.length >= MAX_SEARCH_RESULTS) break;
         }
       } catch {
         // Skip binary/unreadable files.
       }
     }
-    return { success: true, output: matches.length ? matches.join('\n') : 'No matches.' };
+    const provenance = indexed
+      ? `[workspace-index ${examined}/${indexed.fileCount} files, ${bytesRead} bytes${indexed.truncated ? ', index truncated' : ''}]`
+      : `[direct-scan ${examined}/${files.length} files]`;
+    return { success: true, output: `${matches.length ? matches.join('\n') : 'No matches.'}\n${provenance}` };
   }
 
   public async symbolSearch(query: string): Promise<ToolResult> {
@@ -162,6 +228,15 @@ export class WorkspaceTools {
       return { success: false, output: 'Symbol query is empty.' };
     }
     const root = this.getWorkspaceRoot();
+    const indexed = new WorkspaceIndexService(root).load();
+    if (indexed) {
+      const needle = query.trim().toLowerCase();
+      const matches = indexed.files.flatMap(file => file.symbols
+        .filter(symbol => symbol.name.toLowerCase() === needle || symbol.name.toLowerCase().includes(needle))
+        .map(symbol => `${file.path}:${symbol.line}: ${symbol.declaration}`))
+        .slice(0, MAX_SEARCH_RESULTS);
+      return { success: true, output: `${matches.length ? matches.join('\n') : 'No symbols found.'}\n[workspace-index ${indexed.fileCount} files, ${indexed.symbolCount} symbols]` };
+    }
     const vscode = getVscode();
     const files = vscode
       ? await vscode.workspace.findFiles('**/*.{ts,tsx,js,jsx}', '**/{node_modules,out,dist,.git}/**', 250)
@@ -176,7 +251,7 @@ export class WorkspaceTools {
         }
       });
     }
-    return { success: true, output: matches.length ? matches.join('\n') : 'No symbols found.' };
+    return { success: true, output: `${matches.length ? matches.join('\n') : 'No symbols found.'}\n[direct-scan ${files.length} files]` };
   }
 
   public async applyPatch(relativePath: string, patchContent: string): Promise<ToolResult> {

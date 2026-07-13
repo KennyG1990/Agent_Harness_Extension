@@ -471,9 +471,303 @@ Causal proof: an unchanged scripted worker emitted `run_tests` against the same 
 
 Validation: final `npm run compile`, `npm run test`, `npm run test:workers` (100/100), `npm run test:e2e`, `npm run test:visual`, and `git diff --check` pass in the 170.8s combined gate. Inspected `artifacts/visual-smoke-run.png` shows the explicit honest-stop narration, `tests pass · build fail`, `fix 1/2/0`, and `stuck 1`. `forge-agent-0.72.0.vsix` packages 37 files/215.55 KB. Antigravity forced install succeeds and lists `kennyg.forge-agent@0.72.0`; installed runtime contains the threshold and halt logic.
 
+## Kilo Parity Roadmap
+
+Forge should preserve its deterministic harness advantage while closing the product gaps demonstrated by Kilo Code. Priority order:
+
+1. **Checkpoint history and user restore — IMPLEMENTED (Phase 73):** compact timeline, full pre-mutation product snapshots, native diff, two-click restore, bounded history, and mandatory downstream-proof invalidation.
+2. **Browser validation tool — IMPLEMENTED (Phase 74):** Reviewer/Escalation can validate loopback applications in detected host Edge/Chrome, with machine-readable diagnostics and screenshots opened through native IDE surfaces.
+3. **Streaming progress — IMPLEMENTED (Phase 75):** stream ordered harness-authored transitions into one compact chat activity group while deterministic state remains authoritative.
+4. **First-run onboarding/provider readiness — IMPLEMENTED (Phase 76):** two-step workspace/provider setup, secret-vault credentials, no-spend readiness probes, and explicit live/fallback catalog provenance.
+5. **Custom user modes — IMPLEMENTED (Phase 77):** host-owned immutable built-ins and validated custom modes enforce bounded role presets through tool-permission intersection rather than prompt-only personas.
+6. **Feedback/support entrypoint — IMPLEMENTED (Phase 78):** one compact global Help action generates a privacy-minimized diagnostic artifact, opens it natively, and hands off to GitHub without adding a permanent panel.
+
+Kilo features are accepted only when they map onto native IDE surfaces and preserve `PROPOSE -> VALIDATE -> COMMIT -> NARRATE`, composite oracle truth, transaction safety, and evidence invalidation.
+
+## Phase 73 - User-Facing Checkpoint History and Safe Restore
+
+Status: **Implemented, causally extension-host tested, visually inspected, packaged, and installed in Antigravity**.
+
+Reconciled gap: Forge creates manifest-backed checkpoints but the installed extension exposes only a raw artifact. Product-loop edit checkpoints are targeted snapshots, so they are not equivalent to Kilo's “return to a previous step” behavior. No public restore API reconciles state, and restoring bytes without invalidating later evidence would permit stale success claims.
+
+Bounded implementation:
+
+- Product-loop mutations create full workspace snapshots while retaining targeted checkpoints as the lower-level/default API for narrow safety tests.
+- Add an authenticated-by-state restore method and extension command/bridge. A checkpoint ID must exist in the current persisted run; arbitrary paths are rejected.
+- Restore workspace bytes, then invalidate all evidence, diff reviews, terminal/AAR state, oracle/remediation truth, and workflow stages at or after implementation. Reopen Editor/Reviewer tasks and require fresh verification.
+- Persist a checkpoint-restore ledger recording checkpoint, protected scope, invalidated proof counts, result, and timestamp.
+- Add a compact history popover next to the composer with step/tool/scope/time, native diff inspection, and two-click restore confirmation. No permanent panel or cloned source-control UI.
+- Prove complete workspace rollback across multiple files, deletion of files created after the checkpoint, missing/forged-ID rejection, stale-proof invalidation, and successful fresh verification after restore.
+
+Non-goals: Git commit creation, arbitrary branch switching, restoring excluded dependency/build directories, retaining post-checkpoint evidence, or presenting targeted snapshots as full timeline restores.
+
+Implemented result: product-loop mutations now call the existing firewall checkpoint API with `workspace-snapshot`, while direct/default checkpoint calls retain targeted semantics for narrow recovery. Snapshots exclude dependency/build/cache/runtime artifact directories, request filesystem clone-on-write where supported, and retain the latest 20 entries. `restoreCheckpoint` accepts only an ID present in current persisted state, restores bytes, removes post-checkpoint files, clears evidence/diff/reviewer/precommit/oracle/AAR truth, resolves open blockers as invalidated, reopens Editor/Reviewer tasks, resets workflow from implementation onward, and requires fresh composite verification. `.forge/checkpoint-restores.json` records successful and failed attempts.
+
+Product UX: the bottom composer now has a standard history icon. Its compact popover shows up to eight recent action checkpoints with tool, step, snapshot strategy, scope, and time. Each entry offers native Diff and a two-click Restore → Confirm action; the confirmation copy states that workspace bytes return to the saved step and review/verification rerun. This adds no permanent panel and uses host-native diff surfaces.
+
+Causal proof: a full snapshot restored two independently changed files and deleted a third file created later. A forged ID was rejected before filesystem access; a current-state ID with a missing manifest recorded one failed restore. Successful restore invalidated one green evidence entry, one approved diff, oracle lifecycle state, terminal success/AAR, and completed implementation-through-close workflow stages. A direct fresh composite oracle run then reacquired green evidence. Product-loop checkpoints are asserted to be full workspace snapshots; direct firewall checkpoints remain targeted and still restore correctly.
+
+Validation: final post-bounding `npm run compile`, `npm run test`, `npm run test:workers` (100/100), `npm run test:e2e`, `npm run test:visual`, and `git diff --check` pass; final release gate took 182.7s. Inspected `artifacts/visual-smoke-run.png` visibly shows the checkpoint popover, `workspace-snapshot`, native Diff, red Confirm state, and fresh-verification warning. `forge-agent-0.73.0.vsix` packages 37 files/217.7 KB. Antigravity forced install succeeds and lists `kennyg.forge-agent@0.73.0`; installed runtime contains restore invalidation, retention 20, and copy-on-write snapshot logic.
+
+## Phase 74 - Agent Browser Validation Tool
+
+Status: **Implemented, causally agent-loop and extension-host tested, visually inspected, packaged, and installed in Antigravity**.
+
+Reconciled gap: Forge can run deterministic build/test oracles and its own test harness can take webview screenshots, but an installed agent cannot inspect the application it builds. Kilo's demonstrated workflow treats rendered application behavior as evidence. A test-only Playwright script does not close this product gap.
+
+Contract:
+
+- Add `browser_validate` as a structured, firewall-validated Reviewer/Escalation tool. The model supplies a URL and optional expected visible text; it never receives direct browser or filesystem authority.
+- Default policy permits only `http`/`https` loopback targets (`localhost`, `127.0.0.1`, and `::1`), rejects credentials and unsafe schemes, and bounds timeout/output sizes. Remote browsing requires a future explicit permission design.
+- The installed extension packages `playwright-core` but no browser binary. It launches a detected host Edge/Chrome executable, preserving a practical VSIX size and avoiding an embedded cloned browser.
+- Persist each result as `.forge/browser-runs/<id>.json` plus PNG, and refresh `latest-browser-validation.json` / `.png`. Evidence includes requested/final URL, title, visible-text excerpt, expected-text match, console errors, page errors, failed requests, screenshot path, duration, and browser identity.
+- A navigation failure, missing expected text, page error, or error-level console message is a failed tool result. Failed browser validation cannot create green evidence or terminal success. Passing validation adds a distinct browser evidence entry but does not replace required project oracles, diff review, or success gates.
+- Add compact discoverability near the composer and open JSON/PNG through native editor surfaces. Do not add a permanent browser panel, fake browser, or embedded IDE surface.
+
+Required proof:
+
+- Causal fixtures cover a valid local page, expected-text miss, console/page error, unreachable target, forbidden remote URL, and a real agent-loop proposal.
+- Extension-host proof opens the latest JSON and PNG artifacts through native commands.
+- Visual smoke shows compact browser evidence discoverability without expanding the run console into another permanent panel.
+- Compile, static tests, worker stress, extension-host tests, visual tests, package inspection, Antigravity install, and an inspected real browser-captured PNG must pass before this phase is marked implemented.
+
+Non-goals: starting or supervising arbitrary development servers, remote-site browsing, browser form mutation, authenticated browsing, DOM scripting supplied by the model, replacing unit/integration tests, or bundling Chromium in the VSIX.
+
+Implemented result: `browser_validate` is a typed Reviewer/Escalation tool with schema-declared `url`, `expectedText`, and bounded `timeoutMs`. The firewall accepts only credential-free HTTP(S) loopback targets. A short-lived role worker launches detected host Edge/Chrome through packaged `playwright-core`, captures title/final URL/body text, console and page errors, failed requests, and a full-page PNG, then writes immutable run artifacts plus `latest-browser-validation.json/png`. Passes create a distinct non-test evidence entry; failures enter normal tool-failure reflection. Browser evidence cannot set `lastOraclePass`, satisfy diff review, or terminal success.
+
+Product/API surface: `forge-agent.runBrowserValidation` exposes direct deterministic testing; `forge-agent.openArtifact` opens latest JSON and PNG through native IDE surfaces. The composer adds one status-colored globe and the existing compact status line adds `web pass/fail` counts. No persistent browser panel, fake browser, or cloned host surface was added.
+
+Causal proof: `npm run test:browser` served real loopback pages and proved successful text matching, expected-text failure, error-level console failure, unreachable navigation, remote/file/credential URL rejection, and a scripted Reviewer model proposal through the real `AgentHarnessLoop`. The agent-loop case recorded browser evidence and a PNG while preserving `lastOraclePass=false` and refusing terminal success. The final capture used Microsoft Edge at `C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`; the inspected PNG visibly showed `Visible Forge application` and the `Run task` control.
+
+Validation: final combined `npm run compile`, `npm run test`, `npm run test:browser`, `npm run test:workers` (100/100), `npm run test:e2e`, `npm run test:visual`, and `git diff --check` pass in 229.5s. Extension-host E2E ran the registered command against a real local page and opened both report and PNG natively. Inspected `artifacts/visual-smoke-run.png` shows the compact green browser icon and `web 1/0` without a new panel. `forge-agent-0.74.0.vsix` packages 144 files/3 MB, contains `playwright-core` but no browser binary, installs successfully, and Antigravity lists `kennyg.forge-agent@0.74.0`. The installed module resolves, accepts loopback, and rejects a remote URL.
+
+## Phase 75 - Trustworthy Streaming Run Progress
+
+Status: **Implemented, causally timing-tested, extension-host tested, visually inspected, packaged, and installed in Antigravity**.
+
+Reconciled gap: the installed webview receives a complete `state-update` only after `runStep` returns. Provider waits, validation, worker execution, commands, browser checks, and oracles therefore appear as an unexplained pause. Kilo-style UX requires continuous activity, but streaming unvalidated model prose would conflict with Forge's deterministic authority boundary.
+
+Contract:
+
+- Add ordered typed progress events for run start, step start, provider wait, proposal, deterministic validation, tool start/result, oracle result, reflection/retry, clarification wait, pause/resume, and terminal state.
+- Every event carries immutable ID, monotonic session sequence, session ID, step index, role, active task, workflow/firewall phase, status, bounded summary/detail, optional tool name, and timestamp.
+- Emit from the harness at authoritative transition points. Provider narration is shown only as a proposed action after parsing; no token stream may imply that an unvalidated action happened.
+- Persist a bounded per-session event history in state plus `.forge/progress-events.jsonl`; state reload/resume rehydrates the same ordered timeline without duplicating events.
+- Bridge events immediately through the extension host and render one compact `aria-live` activity block inside the existing chat timeline. Auto-scroll while active, retain the latest bounded events, and avoid a permanent activity panel or one large chat card per event.
+- Full state snapshots remain authoritative and continue after each step. Progress events are observability, not mutable commands or success evidence.
+
+Required proof:
+
+- Causal delayed-provider/worker fixture proves events arrive before `runStep` resolves and ordering is monotonic.
+- Rejected proposal, successful tool/oracle, reflection, ask gate, and terminal paths emit honest statuses without false commit/success events.
+- Reload reconciliation deduplicates event IDs and restores ordered persisted history.
+- Visual smoke shows a compact in-chat activity timeline with current role/tool/status and the composer still anchored at the bottom.
+- Full compile, static, worker, extension-host, visual, package, Antigravity install, and screenshot inspection gates pass before implementation status is claimed.
+
+Non-goals: token-by-token chain-of-thought, exposing hidden reasoning, treating progress as evidence, replacing persisted state snapshots, adding a log dashboard, or allowing webview messages to mutate harness event history.
+
+Implemented result: `RunProgressEvent` records immutable ID, monotonic sequence, session/step identity, kind/status, bounded summary/detail, role/task, firewall phase, optional tool, and timestamp. The harness emits at run/step start, provider wait, parsed proposal, deterministic validation, tool start/result, composite oracle, reflection, clarification wait, pause/resume/checkpoint restore, and terminal state. A bounded 300-event history persists in session state and `.forge/progress-events.json`; every event also appends to `.forge/progress-events.jsonl`. Listener and persistence failures are isolated from harness correctness.
+
+Product UX: the extension host forwards each event immediately as `run-progress` while retaining authoritative `state-update` snapshots after steps. The existing chat renders one `aria-live` run-activity group with status dots, role, concise summary, tool/phase, latest detail, and a 12-row viewport. Event IDs deduplicate live delivery against reload hydration. Direct chat-scroller `scrollTop` management keeps the composer anchored without moving the surrounding webview. No log panel or per-event card clutter was added.
+
+Causal proof: `npm run test:progress` held a provider call behind a promise and observed `provider_wait` before `runStep` resolved, then proved strict provider-wait -> proposal -> validation -> tool-start -> tool-result ordering. Separate real-loop fixtures proved a green oracle event, remote-browser validation rejection plus reflection with no false tool-start, and an ask gate producing `awaiting_input`. Persisted event IDs were unique and sequences monotonic. Extension-host tests prove initialization creates persisted progress state/JSONL.
+
+Validation: final full release gate `npm run compile`, `npm run test`, `npm run test:progress`, `npm run test:browser`, `npm run test:workers` (100/100), `npm run test:e2e`, `npm run test:visual`, `npm run package`, and `git diff --check` passed in 223.1s. Screenshot inspection caught whole-webview movement from `scrollIntoView`; it was replaced with chat-local scrolling, then compile/static/visual/package/diff/install gates passed again in 35.9s. The corrected `artifacts/visual-smoke-run.png` visibly shows eight ordered activity rows, explicit red oracle and terminal `gave_up`, usable checkpoint history, and the bottom composer. `forge-agent-0.75.0.vsix` packages 144 files/3.01 MB and Antigravity lists `kennyg.forge-agent@0.75.0`; installed harness/webview markers confirm JSONL, provider-wait, listener, and activity UI code.
+
+## Phase 76 - First-Run Onboarding and Provider Readiness
+
+Status: **Implemented, secret-vault and extension-host tested, visually inspected, packaged, and installed in Antigravity**.
+
+Reconciled gap: the settings copy claims API keys use secret storage, but `forge.openRouterApiKey` is a public string configuration and the provider reads it directly. Model refresh catches every error and silently returns a three-model fallback, so missing credentials, invalid credentials, network failure, and a healthy live catalog are visually ambiguous. A new user can press Run without knowing whether a workspace or usable provider exists.
+
+Contract:
+
+- Store OpenRouter credentials only in `ExtensionContext.secrets`; never send stored key bytes to the webview, logs, state, artifacts, diagnostics, errors, or configuration. Migrate a legacy plaintext setting once, clear it immediately, and report only configured/not-configured plus source category.
+- Add typed provider readiness with provider, workspace status, credential status, authentication/connectivity probe, live catalog count, latency, checked time, sanitized blocker codes/messages, and final `ready` boolean.
+- OpenRouter readiness uses authenticated key metadata plus catalog endpoints without spending completion tokens. OpenAI-compatible readiness probes its configured `/models` endpoint and requires no Forge-managed credential.
+- Replace silent catalog fallback ambiguity with explicit `live`, `fallback`, or `error` provenance. Fallback models remain selectable offline but do not make an unavailable provider look ready.
+- On first run, render one compact centered setup flow in the existing chat area: open workspace, enter/save key, verify provider/catalog, then start. Use a password field, clear it immediately after submission, and provide retry/change-key actions. Do not force advanced model-role or firewall settings into onboarding.
+- Run controls refuse provider-backed work with an actionable readiness message, while native settings/proof artifacts remain available. No Forge account, hosted credits, OAuth proxy, or key escrow is introduced.
+
+Required proof:
+
+- Unit fixtures cover valid/invalid key, network failure, live/fallback catalog provenance, local-provider success/failure, and sanitized errors containing no submitted key.
+- Extension-host tests prove readiness commands expose no secret, legacy configuration migration clears plaintext, and persisted Forge artifacts contain no test credential.
+- Reload retains configured status through secret storage without returning key bytes to the webview.
+- Visual smoke captures missing-key onboarding and ready-state normal chat separately at desktop/sidebar dimensions.
+- Full compile, static, extension-host, visual, package, Antigravity install, and screenshot inspection gates pass before this phase is marked implemented.
+
+Non-goals: Forge-managed billing or credits, storing keys in workspace files/localStorage, displaying masked key fragments, remote account login, automatic paid model calls during readiness, or replacing advanced settings.
+
+Implemented result: `forge.openRouterApiKey` was removed from contributed configuration and `OpenRouterProvider` no longer reads configuration. Activation migrates a legacy global/workspace/workspace-folder value into `ExtensionContext.secrets`, clears every populated plaintext scope, and supplies the provider through an in-memory runtime bridge; environment fallback remains explicit. Save/get/clear commands and webview messages return only configured/source/valid metadata. A 30-second readiness cache coalesces initial UI/catalog probes and invalidates immediately after key changes.
+
+Readiness API: `probeProviderReadiness` reports workspace, provider, credential requirement/source/validity, no-spend authentication latency, live/fallback/error catalog provenance/count, checked time, sanitized blocker codes/messages, and final readiness. OpenRouter uses authenticated `/api/v1/key` plus catalog access; missing/invalid/unreachable states remain distinct and anonymous catalog availability does not imply credential readiness. OpenAI-compatible mode probes configured `/models` and requires no Forge-managed key. The model picker labels live versus fallback provenance instead of silently presenting fallback as success.
+
+Product UX: a red readiness state replaces only the empty chat body with a compact two-step card: workspace and provider. The OpenRouter key field is password-protected, never prefilled, clears immediately after submission, and offers save/check plus change-key. Local providers offer retry. Green readiness automatically returns to normal chat/activity. Advanced routing remains in Settings, which now includes a compact metadata-only readiness card. The UI run action and host bridge both refuse unready provider work with the first actionable blocker.
+
+Causal proof: `npm run test:readiness` proved valid and invalid auth, network failure, anonymous live versus fallback provenance, missing workspace/key, local success/failure, migration without overwriting an existing secret, and serialization containing neither a recognizable submitted key nor authorization metadata. Extension-host E2E saved a disposable key through the real secret vault, read configured status on a later command, received no key bytes, cleared it, and found no key in workspace artifacts. A post-gate repository scan found neither test credential outside its defining test source.
+
+Validation: final `npm run compile`, `npm run test`, `npm run test:readiness`, `npm run test:progress`, `npm run test:browser`, `npm run test:workers` (100/100), `npm run test:e2e`, `npm run test:visual`, `npm run package`, and `git diff --check` pass in 242.4s. Inspected `artifacts/visual-smoke-onboarding.png` shows one centered setup card, green workspace, empty password field, actionable Save & check, and no transient popover. High-detail inspection of `artifacts/visual-smoke-run.png` confirms explicit ready state returns to the complete normal chat/activity/composer UI. `forge-agent-0.76.0.vsix` packages 145 files/3.01 MB; Antigravity lists `kennyg.forge-agent@0.76.0`. Installed manifest lacks the plaintext setting and installed runtime contains secret, migration, readiness, and blocker markers. Existing user configuration migrates when the installed extension next activates; CLI installation alone does not claim that activation occurred.
+
+## Phase 77 - Trusted Built-In and Custom Modes
+
+Status: **Implemented, causally tested, visually inspected, packaged, and installed in Antigravity**.
+
+Reconciled gap: the composer advertises Code, Architect, Ask, Reviewer, Simplifier, Skeptic, Debug, Plan, and Test Engineer, but selection only prefixes the final chat message. The extension host does not resolve a mode, `/goal` always starts the same full harness, and the webview could claim arbitrary mode semantics without changing tool authority. This is cosmetic persona switching, not Kilo-style operational modes.
+
+Implemented result: the extension host owns nine immutable built-ins and at most 20 validated custom modes in `globalState`. The webview sends only a mode ID; the host resolves intent, role/model defaults, instructions, and allowed tools. Advisory modes cannot start mutating runs. Code-mode permissions intersect the existing role ceiling and cannot add authority; required workflow/proof tools remain mandatory. Manual stepping resumes the host-owned state rather than trusting webview-supplied state. Custom-mode editing stays collapsed in Settings and the selected mode remains one composer chip.
+
+Causal proof: `npm run test:modes` creates, persists, and deletes a custom mode; rejects malformed, duplicate, over-limit, and built-in mutation requests; proves a Reviewer custom mode can remove `run_command` while retaining green `run_tests`; and proves an attempted Editor grant cannot cross the Editor role ceiling. Extension-host tests cover persistence across command calls, caller-supplied trust metadata, advisory-run rejection, unknown-mode rejection, and webview-state tampering. `artifacts/visual-smoke-modes.png` shows the bounded editor only after expansion; `artifacts/visual-smoke-run.png` shows the selected custom mode without a new panel. `forge-agent-0.77.0.vsix` was installed and Antigravity reported `kennyg.forge-agent@0.77.0`.
+
+## Phase 78 - Privacy-Minimized Feedback and Support
+
+Status: **Implemented, privacy-tested, extension-host tested, visually inspected, packaged, and installed in Antigravity**.
+
+Reconciled gap: Kilo offers an obvious product feedback route. Forge had no equivalent, leaving users to locate the repository manually and forcing bug reports to omit useful run context or disclose arbitrary workspace state. A large support panel would regress the compact extension UX, while dumping raw state would expose prompts, source, paths, commands, and credentials.
+
+Contract:
+
+- Add one global Help icon beside Settings, not another composer control or permanent panel.
+- Generate host-owned `.forge/support/latest-support-report.json` and `.md` with extension/IDE/runtime versions, workspace basename, provider readiness categories, run phase/status, oracle statuses, and bounded numeric counters.
+- Exclude source code, goal text, prompts, chat, command output, logs, credentials, authorization metadata, and full filesystem paths by construction rather than post-hoc text redaction.
+- Open the Markdown report in the native editor, copy it to the native clipboard, and offer an explicit GitHub issue handoff. No model or provider call is needed beyond the existing no-spend readiness cache/probe.
+- Expose `forge-agent.reportProblem` with side-effect controls for deterministic extension-host testing.
+
+Non-goals: automatic issue submission, account login, telemetry upload, attaching source files, silently opening external URLs, collecting arbitrary logs, or claiming a public support community exists.
+
+Implemented result: `supportBundle.ts` emits schema-versioned JSON and readable Markdown containing only extension/IDE/runtime versions, workspace basename/presence, categorical provider readiness, run status/phase/mode, oracle statuses, and an allowlisted set of numeric counters. Reports use workspace `.forge/support` when a folder is open and extension global storage before a folder opens. `forge-agent.reportProblem` can open the native document, copy it, and offer an explicit GitHub issue action; deterministic test options suppress all three UI effects. The Help icon lives in the global header beside Settings, not in the already-dense composer.
+
+Causal/privacy proof: `npm run test:support` injects an OpenRouter-shaped secret, authorization metadata, private goal, private source, blocker message, and absolute fixture path, then proves none appear in JSON or Markdown. A second no-workspace case proves global-storage output. Extension-host E2E invokes the registered command through VS Code, verifies both artifacts, and rechecks secret-vault non-disclosure. `artifacts/visual-smoke-support.png` was inspected at high detail: the `?` action is visible beside Settings and the composer has no new control or panel.
+
+Validation: extension-host E2E passed in 150.4s. The remaining release gate passed in 116.4s: compile, static invariants, trusted modes, support privacy, readiness, ordered progress, real Edge browser proof, worker stress 100/100, visual smoke, package, and diff checks. The final pre-workspace correction then passed static, support, visual, package, and diff checks in 31.2s. `forge-agent-0.78.0.vsix` contains 147 files, is 3,164,227 bytes, and installs successfully; Antigravity reports `kennyg.forge-agent@0.78.0`. Installed markers confirm the command, support runtime, Help UI, and global-storage fallback.
+
+## Phase 79 - Durable Session Memory and Frictionless Resume
+
+Status: **Implemented, adversarially tested, extension-host tested, visually inspected at desktop/sidebar widths, packaged, and installed in Antigravity**.
+
+Reconciled gap: the harness already snapshots state under `.forge/sessions/<id>`, and the extension contains dormant list/load/pin/save-chat message cases. The webview never calls or renders them, chat is never saved, loading a snapshot does not rehydrate the host harness, and raw webview session IDs are joined directly into filesystem paths. A corrupt index can also erase the whole visible history. This is persistence plumbing, not trustworthy session memory UX.
+
+Contract:
+
+- Add a host-owned `SessionStore` that accepts only canonical Forge session IDs, refuses symlink directories, verifies state/session identity, bounds metadata and chat, reconstructs the index from actual session directories, and skips corrupt entries without hiding healthy sessions.
+- Persist at most 500 bounded user/assistant chat messages per session with no arbitrary webview fields. Keep run state, evidence, progress, model/cost counters, and chat attached to the same session identity.
+- Add one global recent-sessions icon and compact popover. Show title, terminal/resumable status, age, pin, Open/Resume, and two-step Delete without a permanent history page.
+- Opening a session makes its validated snapshot the active compatibility copy and rehydrates the host harness. Resume continues the exact run with existing evidence/cost/mode and the standard bounded additional-step window; terminal sessions open read-only rather than resurrecting.
+- On panel activation, load the active state into both webview and host authority. Refresh session metadata after state/chat changes and show corrupt-entry count without exposing raw parse errors.
+
+Non-goals: cloud sync, cross-workspace session merging, semantic search over conversations, unbounded transcripts, deleting the currently active session, silently resuming provider spend, or treating chat text as verification evidence.
+
+Implemented result: `SessionStore` reconstructs a 200-entry index from real directories, validates canonical Forge IDs, rejects symlink/session-identity mismatches and traversal, bounds state/meta/chat bytes, keeps only 500 schema-reduced user/assistant messages, and atomically writes index/chat/pointer changes. Run sessions retain state/evidence/progress/cost/mode; chat-only Ask/Architect conversations receive distinct `forge-chat-*` identities and never masquerade as resumable runs or evidence. `.forge/active-session.json` restores the last run or conversation on panel activation. Opening a run replaces harness `latestState`; opening chat-only memory clears stale run authority. Resume is explicit and only available for idle/running/paused runs; terminal and clarification-waiting sessions are Open-only. Active deletion is rejected.
+
+Product UX: one global Recent Sessions icon opens a compact 20-row popover with title, status, step, cost, timestamp, active highlight, pin, explicit Open, conditional Resume, and two-step Delete. Corrupt entries are summarized as skipped without raw parse/path details. Chat autosaves after a bounded debounce and session metadata refreshes after state transitions. Screenshot inspection at 520px found an unrelated but user-visible composer overlap; controls now stack below mode/model chips below the `sm` breakpoint while desktop remains one row.
+
+Causal proof: `npm run test:sessions` keeps three valid sessions visible despite a corrupt index and mismatched sibling, rejects traversal and missing-ID path disclosure, reduces arbitrary chat objects to the allowed schema, preserves a chat-only active pointer, distinguishes clarification/terminal/resumable states, proves pin/delete behavior, and blocks active deletion. Extension-host tests invoke list/open/resume/delete commands, prove Open replaces host authority, terminal Resume does not resurrect, chat-only Open clears stale authority, and a fresh loop rehydrates an interrupted run with prior cost/evidence and a bounded five-step extension. E2E passed in 143.7s.
+
+Visual/package proof: `artifacts/visual-smoke-sessions.png` and `artifacts/visual-smoke-sessions-sidebar.png` were inspected. Both show explicit Open/Resume semantics, active/pinned state, skipped corruption, and no permanent panel; the 520px image confirms the repaired composer layout. The remaining release matrix passed in 130.8s: compile, static, sessions, modes, support, readiness, progress, real Edge browser validation, workers 100/100, visual, package, and diff checks. `forge-agent-0.79.0.vsix` contains 148 files and is 3,169,222 bytes. Antigravity reports `kennyg.forge-agent@0.79.0`; installed markers confirm four commands, store runtime, chat memory, and webview UI.
+
+## Phase 80 - Installed Difficult Live Weak-Model Proof
+
+Status: **Implemented, preflight/negative/visual/extension-host tested, packaged, and installed; paid live execution awaiting explicit user confirmation**.
+
+Reconciled gap: Forge has historical live Tier-3/4 console results and strong scripted product-loop proofs, but the current installed product cannot launch a live difficult eval. The Proof button hard-codes `live:false`, the newest live archives were overwritten before immutable archives existed, and the shell cannot access the user’s secret-vault key. Therefore the installed `0.79.0` build still cannot produce the decisive fresh evidence demanded by the project objective.
+
+Contract:
+
+- Add `forge-agent.runDifficultWeakModelProof` and a collapsed Proof-panel control that runs through the extension host and secret storage. Never expose or copy the API key.
+- Initial live model is strictly `qwen/qwen-2.5-7b-instruct`: currently served, 7B, older, inexpensive, and historically weak on symptom-only Tier-4 planning. Reject routers, frontier models, and unapproved substitutions rather than weakening the claim.
+- Use the four Tier-4 leak-law tasks: goals contain no defect symbol/file/string, held-out judges remain immutable, bare and harness lanes see the same task, and call timeout/max-step/task limits remain enforced.
+- Require an explicit provider-credit checkbox. Show model, task count, call/step bounds, current completed count, provider failures, and eventual cost; do not hide a multi-minute operation behind an unexplained spinner.
+- Persist `.forge/evals/latest-difficult-live-proof.json` plus an immutable run archive. Record bare/harness solved counts, per-task model-driven flags, provider calls/failures, cost, archive paths, and `fallbackSolved: 0`; do not classify provider failure or deterministic fallback as model success.
+- Honest outcome is `uplift_observed`, `model_capability_without_uplift`, or `no_uplift_observed`. Passing the measurement loop never implies the weak model passed the difficult capability gate.
+
+Non-goals: silently spending credits, choosing a stronger model to manufacture success, using a frontier architect, weakening held-out tests, running against this repository, claiming industry-level capability from one task, or treating mocked/scripted results as live.
+
+Implemented result: `difficultLiveProof.ts` owns a one-slug weak-model allowlist, request/spend/task/step/timeout validation, current-catalog presence and price guards, Tier-4 leak/solvability assertions, equal bare/harness execution through `Tier2EvalRunner`, and a separate classification wrapper. Capability requires at least two model-driven green harness solves across at least two tasks plus uplift over bare. Fallback solved is structurally zero. The wrapper writes a mutable convenience report only after an immutable `wx` archive succeeds. `forge-agent.runDifficultWeakModelProof` validates before readiness/provider activity and then uses the extension's secret-backed runtime; the webview polls only current-run partial reports by modification time.
+
+Product UX: a collapsed Proof section exposes the approved model, 1-4 task selector, fixed 10-step/90-second bounds, explicit credit checkbox, disabled-until-consent Run action, native report open, partial completed/call/failure/cost line, and final outcome/bare/harness/model-driven/fallback/capability summary. Visual fixtures show both the spend control and an honest `model_capability_without_uplift` / `NOT PASSED` result rather than manufacturing green UI.
+
+Validation: `npm run test:difficult-proof` proves allowlist/consent/bounds, two model-driven green solves classify as uplift, fallback remains zero, and duplicate archive writes reject. Extension-host E2E rejects frontier substitution and missing consent before readiness/provider calls; the full host suite exited 0 in 157.5s (one transient test-host unresponsive/responsive cycle). The remaining release matrix passed in 142.4s: compile, static, difficult proof, sessions, modes, support, readiness, progress, real Edge browser validation, workers 100/100, visual, package, and diff checks. `forge-agent-0.80.0.vsix` contains 149 files and is 3,173,610 bytes; Antigravity reports `kennyg.forge-agent@0.80.0` and installed runtime/command/UI markers pass.
+
+Installed visual preflight: `artifacts/installed-difficult-proof-preflight.jpg` is captured from the actual Antigravity window after reload. It shows the installed panel, approved Qwen slug, four tasks, call/step bounds, unchecked consent, and disabled live action. Antigravity readiness reported OpenRouter ready with 345 live models. The paid run was deliberately not started because no explicit action-time credit-spend confirmation was received; therefore no fresh live capability/uplift claim is made yet.
+
+Contract:
+
+- Add a host-owned mode registry persisted in extension `globalState`: immutable built-ins plus at most 20 validated custom modes. Mode fields are ID, name, bounded description/instructions, base intent (`code`, `architect`, `ask`, `review`), model role, inference default, built-in flag, and explicit tool allowlist.
+- The webview sends only a mode ID. The extension host resolves the trusted registry entry and ignores client-supplied descriptions/tools. IDs/names/instructions/tool arrays are schema-validated, unknown tools rejected, duplicates refused, and built-ins cannot be overwritten/deleted.
+- Advisory architect/ask/review modes route through non-mutating chat. Their UI Run action is disabled with a clear “use Send” explanation. Code modes may start `/goal` and pass a host-resolved `ModePolicy` into persisted harness state.
+- Harness role tools remain the upper capability ceiling. A code-mode allowlist can only intersect each role's existing deterministic permissions; it can never add authority. Required workflow/proof tools (`update_plan`, `run_tests`, `get_diff`, `record_evidence`, `declare_success`, `ask_user`) are mandatory for agentic custom modes so customization cannot silently make success structurally impossible.
+- Built-in Code preserves current full behavior. Built-in advisory modes express their actual non-mutating contract. Custom settings live behind a collapsed Settings section with create/delete and concise permission checkboxes; no separate mode-management page.
+- Chat system context is assembled by the host from the resolved mode. The mode ID/name is recorded in chat/run state for session rehydration, but mode instructions cannot replace the blueprint, firewall, workflow, oracle, or evidence contracts.
+
+Required proof:
+
+- Unit fixtures cover valid custom mode, unknown tool, missing required proof tool, overlong/duplicate/built-in mutation, max-count, persistence, and deletion.
+- Causal harness fixture proves a mode can remove `run_command` from Reviewer while retained tools still work, and cannot grant Editor `run_command` or any role a tool outside its base ceiling.
+- Extension-host tests prove webview/command callers cannot spoof tool arrays by mode ID and saved modes survive a later list call.
+- Visual smoke shows built-ins/custom mode in the composer and the collapsed Settings editor without restoring a cluttered permanent panel.
+- Full compile, static, worker, extension-host, visual, package, Antigravity install, and screenshot inspection gates pass before implementation status is claimed.
+
+Non-goals: arbitrary system-prompt replacement, custom JavaScript/tools, weakening oracle success gates, making advisory modes claim coding success, cloud mode sync, marketplace sharing, or more than 20 custom modes.
+
 - Do not build or fork a full IDE.
 - Do not recreate editor tabs, terminals, file trees, diff viewers, or browser panes inside Forge.
 - Do not treat visual agent personas as sub-agents unless they have isolated context and constrained tools.
 - Do not claim full blueprint compliance from package/install success.
 - Do not count deterministic fallback success as model-driven success.
 - Do not expand UI complexity until the harness loop, verification, reflection, and evals are stronger.
+# Phase 81 - Host-Owned Human Approval Gate (implemented; causal/host/visual/package/install gates PASS)
+
+Reconciled gap: the composer shield claims to control auto-approval but is only React-local state. It sends no host message and cannot pause or authorize a harness action. This is misleading Kilo-style chrome without Kilo-style behavior.
+
+Selected contract: native host-owned `ask` / `auto` policy; only `write_file`, `apply_patch`, and `run_command` require human approval; the pause occurs after deterministic validation and pre-commit review but before checkpoint or COMMIT. A pending record contains the exact structured proposal and digest. Approval commits only that persisted action without another model call; rejection mutates nothing and becomes durable context. Auto mode bypasses only the human pause and never bypasses workflow, role, firewall, review, checkpoint, transaction, oracle, or evidence gates.
+
+Validation contract: causal no-mutation pause, exact-action approval, rejection/replay/forged-ID negatives, automatic-mode firewall rejection, extension-host anti-spoof proof, narrow visual screenshots, full release gate, package, and installed Antigravity marker check.
+
+Implemented result: `ask` persists the exact validated `write_file`, `apply_patch`, or `run_command` plus SHA-256 digest, session/task/role identity, bounded summary, and timestamps, then enters `awaiting_approval` before checkpoint or COMMIT. Host-only approval validates ID, digest, session, task, and role, then executes the same proposal through the normal checkpoint/transaction/oracle continuation without another provider call. Rejection performs no mutation, cannot be replayed, and records bounded guidance. `auto` skips only this pause. Native configuration owns policy; the webview sends decision intent only.
+
+Proof: `npm run test:approvals` proves unchanged pre-approval workspace, zero checkpoint/worker execution, exact one-call commit, rejection, replay, forged ID, tamper rejection, and automatic-mode path firewall. Extension-host E2E persisted policy and rejected forged authority in 192.1s. Full no-spend release matrix passed in 72s. Desktop/sidebar visual QA found and fixed both an impossible synthetic state and resize-hidden card; final screenshots keep the pending decision and bottom composer visible. `forge-agent-0.81.0.vsix` contains 149 files / 3,176,094 bytes; Antigravity lists `kennyg.forge-agent@0.81.0`. Installed screenshot `artifacts/installed-human-approval-081.jpg` visibly shows the compact extension and the accessibility tree confirms the real ask-policy shield.
+
+Remaining boundary: this is per-action approval, not remembered per-path/per-command grants. Forge deliberately does not prompt for reads, planning, tests, evidence, or local browser validation. The paid difficult weak-model proof remains pending separate explicit spend confirmation.
+# Phase 82 - Deterministic Workspace Index and Real Composer Control (implemented; causal/host/visual/package/install gates PASS)
+
+Reconciled gap: the composer database icon is cosmetic and only changes local status text. Forge persists ten task-specific retrieval candidates, not a repository index. `repo_search` and `symbol_search` inspect at most 250 files, creating silent large-repository blindness that directly harms weak models.
+
+Selected contract: host-owned, no-symlink, 5,000-file bounded text/source metadata index under `.forge/workspace-index.json`; source bodies are not serialized. Indexed paths drive bounded repository search and declaration metadata drives symbol search. Native watcher events mark stale; the existing icon opens one compact status/Refresh/Open popover. Search and UI disclose coverage, truncation, stale state, and fallback provenance.
+
+Validation contract: >250-file causal find, exclusions/symlink/binary/path/cross-workspace/corruption negatives, indexed symbol search, host stale/refresh commands, desktop/sidebar screenshots, full release gates, package, and installed Antigravity proof.
+
+Implemented result: a short-lived sanitized child builds an atomic workspace-bound index over at most 5,000 contained text/source files. Records contain path, stat, language, and normalized declaration identity only. Dependencies, build/cache/Git/Forge/artifact directories, binaries, oversized files, and symlinks are excluded. Load validation rejects schema/workspace/count/path/symbol mismatches and current junction escapes. `repo_search` consumes indexed paths under a 64 MB current-source read budget and reports coverage; `symbol_search` consumes declaration metadata. Native file events mark ready indexes stale; users explicitly Refresh/Open from the existing composer icon.
+
+Proof: the causal fixture contains 320 decoys plus a target beyond the old cap and passes only through indexed search. It proves source-body non-serialization, exclusions, cross-workspace/corrupt rejection, junction and post-build pivot rejection, indexed symbol lookup, and stale/rebuild lifecycle. Extension-host E2E proves registered commands, child execution, native open, watcher stale event, and ready rebuild in 172.5s. Full release matrix passed in 68.6s. Desktop/sidebar screenshots were inspected. `forge-agent-0.82.0.vsix` contains 151 files / 3,182,659 bytes and Antigravity lists `0.82.0`.
+
+Installed visual proof: a fresh actual Antigravity window was required because the pre-existing window retained old webview code across Reload Webviews and Restart Extension Host. The registered `0.82.0` window showed MISSING, Refresh, disabled Open, then built to READY with 276 files / 2,087 symbols / 824 ignored and enabled Open. Evidence: `artifacts/installed-workspace-index-082.jpg`.
+
+Remaining boundary: this is deterministic metadata indexing, not semantic source embedding. It does not index more than 5,000 files, persist source contents, follow symlinks, or guarantee hot-reloaded webviews update inside an already-open Antigravity window.
+
+## Phase 83 - Explicit Host-Owned Task Context
+
+Status: **Implemented, adversarially tested, extension-host tested, visually inspected, packaged, installed, and interactively proven in Antigravity**.
+
+Reconciled gap: context engineering existed inside the autonomous loop, but the user could not state “this file, this selection, these diagnostics” through the composer. Chat and `/goal` carried only text, while `/research` attachments were internal and unrelated to active editor context. This made task entry path-dependent and ambiguous despite the underlying retrieval machinery.
+
+Implemented result: one compact Paperclip control delegates all capture to the extension host. Active files/selections, native-picked workspace files, and VS Code diagnostics become validated snapshots under `.forge/sessions/<id>/context.json`. Realpath containment, regular-file/no-symlink checks, binary and size rejection, attachment/total caps, and persisted-record revalidation are deterministic. Webview messages contain metadata only. Chat receives bounded system context; new runs snapshot the same context into `HarnessState.userContext`, persist it, and include it as a required named section under the existing prompt budget.
+
+Proof: the focused causal test covers valid capture plus traversal, outside-workspace, binary, oversized, empty-selection, foreign-diagnostic, total-budget, and tampered-persistence negatives. It proves session reload and exact source/path appearance in the harness prompt while summaries exclude source. Extension-host E2E exercises the registered command API and native session reopen. Desktop and 520px screenshots prove temporary context controls do not restore a file tree or permanent panel. The full no-spend release matrix passes. The 152-file `0.83.0` VSIX installs in Antigravity; after reloading the window, the real installed panel exposed all three context actions and captured the active `server.ts` into a removable chip (`artifacts/installed-composer-context-083.jpg`).
+
+Useful takeaway: context engineering must begin at task entry, not only after the first model call. Explicit host-owned snapshots reduce weak-model search burden without trusting webview-supplied paths or silently transmitting an entire workspace.
+
+Remaining boundary: there is no inline `@symbol` parser, automatic active-editor attachment, image attachment, remote URI support, or semantic expansion from an attached symbol. Snapshots do not update after capture; users refresh intentionally. Live weak-model uplift attributable specifically to attachments remains unmeasured.
+
+## Phase 84 - Indexed @File And @Folder Mentions
+
+Status: **Implemented, causally tested, extension-host tested, visually inspected, packaged, installed, and corrected from installed-product evidence**.
+
+Reconciled gap: the earlier research explicitly identified `@file / @folder` mentions as the direct task-entry route into bounded context. Phase 83 established the trusted attachment substrate but required leaving the text flow for a Paperclip menu and native picker.
+
+Implemented result: token-boundary `@` queries call the host, which searches validated workspace-index metadata and returns at most 20 file/folder summaries. The webview owns only transient query/navigation state. Selection returns kind/path intent; the host proves membership in the current validated index and recaptures through `ComposerContextService`. Files snapshot bounded source. Folders snapshot at most 500 contained indexed paths without source bodies. The result persists as the same removable session context and feeds chat and run prompts through Phase 83.
+
+UX result: the composer now says `Ask anything, @ to attach context, / for actions`. The compact picker supports mouse plus ArrowUp/ArrowDown/Enter/Tab/Escape, labels ready/stale/missing provenance, distinguishes files/folders, and removes the incomplete token after selection. `/` and `@` menus do not compete.
+
+Proof: causal tests cover ranking, folders, caps, source exclusion, containment, tampering, persistence, and prompt delivery. Extension-host E2E proves registered APIs, exact live index selection, metadata-only results, and forged-path rejection. Visual automation proves keyboard selection and inspects desktop/sidebar screenshots. The full no-spend release matrix passes. Installed `@src` inspection exposed `.tmp` proof-workspace pollution; `.tmp` became an enforced index exclusion with a regression sentinel. The corrected installed index reports 140 files/2,105 symbols/zero `.tmp` paths, and Antigravity lists `0.84.0`.
+
+Remaining boundary: no `@symbol`, diagnostics mention, image attachment, remote URI, or semantic-neighbor expansion. A missing index must be built first. Stale index results are labeled and filesystem-revalidated, but not silently rebuilt. Live weak-model uplift attributable specifically to mention-scoped context is not yet measured.

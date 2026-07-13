@@ -1,5 +1,7 @@
 Forge-agent-harness/**
-node_modules/**
+node_modules/*
+!node_modules/playwright-core/
+!node_modules/playwright-core/**
 src/**
 scripts/**
 docs/**

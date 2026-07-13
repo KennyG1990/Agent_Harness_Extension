@@ -3,17 +3,165 @@ import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import * as http from 'http';
 
 async function runSuite(): Promise<void> {
   const extension = vscode.extensions.getExtension('kennyg.forge-agent');
   assert.ok(extension, 'Forge Agent extension should be discoverable.');
   await extension.activate();
+  assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.restoreCheckpoint'), 'checkpoint restore command should be registered in the extension host.');
+  assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.runBrowserValidation'), 'browser validation command should be registered in the extension host.');
+  assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.getProviderReadiness'), 'provider readiness command should be registered in the extension host.');
+  assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.setOpenRouterApiKey'), 'secret save command should be registered in the extension host.');
+  assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.listModes'), 'trusted mode list command should be registered in the extension host.');
+  assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.reportProblem'), 'privacy-minimized support command should be registered in the extension host.');
+  assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.listSessions'), 'session list command should be registered in the extension host.');
+  assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.openSession'), 'session open command should be registered in the extension host.');
+  assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.resumeSession'), 'session resume command should be registered in the extension host.');
+  assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.deleteSession'), 'session delete command should be registered in the extension host.');
+  assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.runDifficultWeakModelProof'), 'difficult live proof command should be registered in the extension host.');
+  assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.setHumanApprovalPolicy'), 'human approval policy command should be registered in the extension host.');
+  assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.resolveHumanApproval'), 'human approval decision command should be registered in the extension host.');
+  assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.buildWorkspaceIndex'), 'workspace index build command should be registered in the extension host.');
+  assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.getWorkspaceIndexStatus'), 'workspace index status command should be registered in the extension host.');
+  assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.openWorkspaceIndex'), 'workspace index open command should be registered in the extension host.');
+  assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.attachContextFile'), 'composer context attachment command should be registered in the extension host.');
+  assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.getComposerContext'), 'composer context query command should be registered in the extension host.');
+  assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.searchContextMentions'), '@ mention search command should be registered in the extension host.');
+  assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.attachContextMention'), '@ mention attach command should be registered in the extension host.');
+  assert.equal(await vscode.commands.executeCommand('forge-agent.setHumanApprovalPolicy', 'auto'), 'auto');
+  assert.equal(vscode.workspace.getConfiguration('forge').get('humanApprovalPolicy'), 'auto', 'approval policy must persist in native configuration.');
+  assert.equal(await vscode.commands.executeCommand('forge-agent.setHumanApprovalPolicy', 'ask'), 'ask');
+  await assert.rejects(async () => vscode.commands.executeCommand('forge-agent.resolveHumanApproval', 'approve', 'forged-webview-id'), /No pending human approval|No persisted Forge run/, 'webview intent cannot manufacture host approval authority.');
+  await assert.rejects(async () => vscode.commands.executeCommand('forge-agent.runDifficultWeakModelProof', { model: 'anthropic/claude-opus-latest', reportRoot: process.cwd(), confirmLiveSpend: true }), /not approved/, 'frontier substitutions must reject before readiness or provider calls.');
+  await assert.rejects(async () => vscode.commands.executeCommand('forge-agent.runDifficultWeakModelProof', { model: 'qwen/qwen-2.5-7b-instruct', reportRoot: process.cwd(), confirmLiveSpend: false }), /confirmation/, 'live proof must reject missing spend consent before readiness or provider calls.');
 
   await vscode.commands.executeCommand('forge-agent.openStudio');
   const initialDiagnostics: any = await vscode.commands.executeCommand('forge-agent.diagnostics');
   assert.ok(initialDiagnostics, 'diagnostics command should return an object.');
   const workspace = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   assert.ok(workspace, 'fixture workspace should be open.');
+  const contextProbe = path.join(workspace, 'composer-context-e2e.ts');
+  fs.writeFileSync(contextProbe, 'export const composerContextProbe = "host-owned";\n', 'utf8');
+  const attachedContext: any[] = await vscode.commands.executeCommand('forge-agent.attachContextFile', contextProbe);
+  assert.equal(attachedContext.length, 1);
+  assert.equal(attachedContext[0].path, 'composer-context-e2e.ts');
+  assert.equal(Object.prototype.hasOwnProperty.call(attachedContext[0], 'content'), false, 'extension command must return metadata only.');
+  const contextSessions: any = await vscode.commands.executeCommand('forge-agent.listSessions');
+  const contextSession = contextSessions.sessions.find((item: any) => item.kind === 'chat' && item.title === 'Workspace context');
+  assert.ok(contextSession, 'attaching context before chat must create a durable conversation session.');
+  const loadedContextSession: any = await vscode.commands.executeCommand('forge-agent.openSession', contextSession.sessionId);
+  assert.equal(loadedContextSession.context.length, 1, 'opening a session must restore its attached context.');
+  await vscode.commands.executeCommand('forge-agent.clearComposerContext');
+  assert.equal((await vscode.commands.executeCommand('forge-agent.getComposerContext') as any[]).length, 0);
+  fs.rmSync(contextProbe, { force: true });
+  const mentionProbeDir = path.join(workspace, 'mention-e2e');
+  fs.mkdirSync(mentionProbeDir, { recursive: true });
+  fs.writeFileSync(path.join(mentionProbeDir, 'focused-context.ts'), 'export const mentionProbe = true;\n', 'utf8');
+  const builtIndex: any = await vscode.commands.executeCommand('forge-agent.buildWorkspaceIndex');
+  assert.equal(builtIndex.status, 'ready', builtIndex.error || 'workspace index command should complete ready.');
+  assert.ok(builtIndex.fileCount > 0, 'workspace index should contain fixture files.');
+  const mentionResults: any = await vscode.commands.executeCommand('forge-agent.searchContextMentions', 'focused-context');
+  assert.equal(mentionResults.provenance, 'ready');
+  assert.equal(mentionResults.candidates[0].path, 'mention-e2e/focused-context.ts');
+  const folderMention: any[] = await vscode.commands.executeCommand('forge-agent.attachContextMention', 'folder', 'mention-e2e');
+  assert.equal(folderMention.at(-1).kind, 'folder');
+  assert.equal(Object.prototype.hasOwnProperty.call(folderMention.at(-1), 'content'), false, '@ mention command must return metadata only.');
+  await assert.rejects(async () => vscode.commands.executeCommand('forge-agent.attachContextMention', 'file', '../outside.ts'), /not present in the validated workspace index/);
+  await vscode.commands.executeCommand('forge-agent.clearComposerContext');
+  fs.rmSync(mentionProbeDir, { recursive: true, force: true });
+  const openedIndex: any = await vscode.commands.executeCommand('forge-agent.openWorkspaceIndex');
+  assert.match(String(openedIndex), /workspace-index\.json$/);
+  const indexProbe = path.join(workspace, 'workspace-index-e2e-probe.ts');
+  fs.writeFileSync(indexProbe, 'export const workspaceIndexProbe = true;\n', 'utf8');
+  await new Promise(resolve => setTimeout(resolve, 700));
+  const staleIndex: any = await vscode.commands.executeCommand('forge-agent.getWorkspaceIndexStatus');
+  assert.equal(staleIndex.status, 'stale', 'workspace file watcher should mark a ready index stale.');
+  fs.rmSync(indexProbe, { force: true });
+  const rebuiltIndex: any = await vscode.commands.executeCommand('forge-agent.buildWorkspaceIndex');
+  assert.equal(rebuiltIndex.status, 'ready');
+
+  const sessionOne = 'forge-1783900100000-e2eone';
+  const sessionTwo = 'forge-1783900100001-e2etwo';
+  const chatSession = 'forge-chat-1783900100002-e2echat';
+  for (const [sessionId, title] of [[sessionOne, 'First terminal session'], [sessionTwo, 'Second terminal session']] as const) {
+    const dir = path.join(workspace, '.forge', 'sessions', sessionId);
+    fs.mkdirSync(dir, { recursive: true });
+    const persisted = { sessionId, status: 'success', currentStepIndex: 3, maxSteps: 10, goalContract: { goal: title, spent: 0.1 }, taskGraph: { tasks: [] }, progressEvents: [], modePolicy: { id: 'code' } };
+    fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify(persisted), 'utf8');
+    fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify({ sessionId, title, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }), 'utf8');
+  }
+  const sessionList: any = await vscode.commands.executeCommand('forge-agent.listSessions');
+  assert.ok(sessionList.sessions.some((item: any) => item.sessionId === sessionOne));
+  await assert.rejects(async () => vscode.commands.executeCommand('forge-agent.openSession', '../outside'), /Invalid Forge session ID/);
+  const openedSession: any = await vscode.commands.executeCommand('forge-agent.openSession', sessionOne);
+  assert.equal(openedSession.state.sessionId, sessionOne);
+  assert.equal((await vscode.commands.executeCommand<any>('forge-agent.diagnostics')).state.sessionId, sessionOne, 'opening a session must rehydrate host-authoritative latestState.');
+  const terminalResume: any = await vscode.commands.executeCommand('forge-agent.resumeSession', sessionOne);
+  assert.equal(terminalResume.state.status, 'success', 'terminal session resume must open without resurrecting work.');
+  await assert.rejects(async () => vscode.commands.executeCommand('forge-agent.deleteSession', sessionOne), /active session/);
+  await vscode.commands.executeCommand('forge-agent.openSession', sessionTwo);
+  const afterDelete: any = await vscode.commands.executeCommand('forge-agent.deleteSession', sessionOne);
+  assert.equal(afterDelete.sessions.some((item: any) => item.sessionId === sessionOne), false);
+  const chatDir = path.join(workspace, '.forge', 'sessions', chatSession);
+  fs.mkdirSync(chatDir, { recursive: true });
+  fs.writeFileSync(path.join(chatDir, 'meta.json'), JSON.stringify({ sessionId: chatSession, kind: 'chat', title: 'Persistent advisory chat', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }), 'utf8');
+  fs.writeFileSync(path.join(chatDir, 'chat.json'), JSON.stringify([{ role: 'user', content: 'Explain this workspace.' }]), 'utf8');
+  const openedChat: any = await vscode.commands.executeCommand('forge-agent.openSession', chatSession);
+  assert.equal(openedChat.state, undefined);
+  assert.equal((await vscode.commands.executeCommand<any>('forge-agent.diagnostics')).hasState, false, 'opening chat-only memory must clear stale run authority.');
+  await vscode.commands.executeCommand('forge-agent.openSession', sessionTwo);
+
+  const secretProbe = 'sk-e2e-forge-secret-never-serialize';
+  const savedReadiness: any = await vscode.commands.executeCommand('forge-agent.setOpenRouterApiKey', secretProbe);
+  assert.equal(savedReadiness.credential.configured, true, 'saved secret should update configured readiness.');
+  assert.equal(JSON.stringify(savedReadiness).includes(secretProbe), false, 'save result must never return secret bytes.');
+  const reloadedReadiness: any = await vscode.commands.executeCommand('forge-agent.getProviderReadiness');
+  assert.equal(reloadedReadiness.credential.configured, true, 'secret storage should remain configured on a later command read.');
+  assert.equal(JSON.stringify(reloadedReadiness).includes(secretProbe), false, 'readiness command must never expose stored secret bytes.');
+  await vscode.commands.executeCommand('forge-agent.clearOpenRouterApiKey');
+  const workspaceText = fs.readdirSync(workspace).filter(name => fs.statSync(path.join(workspace, name)).isFile()).map(name => fs.readFileSync(path.join(workspace, name), 'utf8')).join('\n');
+  assert.equal(workspaceText.includes(secretProbe), false, 'workspace artifacts must not contain the secret-storage probe value.');
+  const supportResult: any = await vscode.commands.executeCommand('forge-agent.reportProblem', { copy: false, openReport: false, offerIssue: false });
+  assert.ok(fs.existsSync(supportResult.jsonPath) && fs.existsSync(supportResult.markdownPath), 'support command must persist native JSON and Markdown artifacts.');
+  const supportText = `${fs.readFileSync(supportResult.jsonPath, 'utf8')}\n${fs.readFileSync(supportResult.markdownPath, 'utf8')}`;
+  assert.equal(supportText.includes(secretProbe), false, 'support report must not serialize secret-vault bytes.');
+  assert.equal(supportResult.report.privacy.credentialsIncluded, false);
+  assert.equal(supportResult.report.privacy.sourceIncluded, false);
+
+  const modeTools = ['update_plan', 'run_tests', 'get_diff', 'record_evidence', 'ask_user', 'declare_success', 'repo_search', 'read_file', 'read_range', 'apply_patch', 'write_file'];
+  const savedMode: any = await vscode.commands.executeCommand('forge-agent.upsertMode', {
+    name: 'E2E No Shell Mode', description: 'Persistent extension-host mode without shell access.', instructions: 'Use bounded file tools and required proof.',
+    intent: 'code', modelRole: 'code', inference: 'Thinking', allowedTools: modeTools,
+    builtIn: true, // Caller-supplied trust metadata must be ignored.
+    injectedTool: 'root_shell'
+  });
+  assert.match(savedMode.id, /^custom-/);
+  assert.equal(savedMode.builtIn, false, 'custom mode cannot spoof built-in trust.');
+  assert.equal(savedMode.allowedTools.includes('run_command'), false);
+  const laterModes: any[] = await vscode.commands.executeCommand('forge-agent.listModes');
+  assert.ok(laterModes.some(mode => mode.id === savedMode.id && mode.name === savedMode.name), 'saved custom mode must persist to a later command call.');
+  await assert.rejects(async () => { await vscode.commands.executeCommand('forge-agent.upsertMode', { id: 'code', name: 'Spoof Code', description: 'x', instructions: 'x', intent: 'code', modelRole: 'code', inference: 'Instant', allowedTools: modeTools }); }, /Built-in modes cannot be overwritten/);
+  await assert.rejects(async () => { await vscode.commands.executeCommand('forge-agent.runAgentGoal', { goal: 'Must not run.', modeId: 'ask' }); }, /advisory/);
+  await assert.rejects(async () => { await vscode.commands.executeCommand('forge-agent.runAgentGoal', { goal: 'Must not run.', modeId: 'unknown-mode', allowedTools: ['run_command'] }); }, /Unknown Forge mode/);
+  assert.equal(await vscode.commands.executeCommand('forge-agent.deleteMode', savedMode.id), true);
+
+  const browserFixtureServer = http.createServer((_request, response) => {
+    response.setHeader('content-type', 'text/html; charset=utf-8');
+    response.end('<!doctype html><title>Extension Host Browser Proof</title><main>Forge browser command rendered this page.</main>');
+  });
+  await new Promise<void>(resolve => browserFixtureServer.listen(0, '127.0.0.1', resolve));
+  const browserAddress = browserFixtureServer.address();
+  assert.ok(browserAddress && typeof browserAddress === 'object');
+  const browserCommandResult: any = await vscode.commands.executeCommand('forge-agent.runBrowserValidation', {
+    url: `http://127.0.0.1:${browserAddress.port}`,
+    expectedText: 'Forge browser command rendered this page.'
+  });
+  await new Promise<void>(resolve => browserFixtureServer.close(() => resolve()));
+  assert.equal(browserCommandResult.success, true, browserCommandResult.output);
+  assert.equal(browserCommandResult.evidence.status, 'pass');
+  assert.ok(fs.existsSync(path.join(workspace, '.forge', 'browser-runs', 'latest-browser-validation.json')));
+  assert.ok(fs.existsSync(path.join(workspace, '.forge', 'browser-runs', 'latest-browser-validation.png')));
 
   const { AgentHarnessLoop, extractPlanFocusFiles } = await import('../../harness/loop');
   const { Firewall } = await import('../../harness/firewall');
@@ -29,6 +177,20 @@ async function runSuite(): Promise<void> {
   const { bankProceduralSkills, selectProceduralSkills } = await import('../../harness/proceduralSkills');
   const { classifyWorkflowLane, createWorkflowGovernance, enforceWorkflowPlan, finalizeWorkflow, recordWorkflowEvent, validateWorkflowProposal, workflowReadyForSuccess } = await import('../../harness/workflowGovernance');
   const { detectProjectAdapter } = await import('../../harness/projectAdapters');
+  const sessionResumeRoot = createTempWorkspace('forge-session-resume-');
+  const sessionResumeLoop = new AgentHarnessLoop({ id: 'resume-unused', modelId: 'resume-unused', generateChat: async () => { throw new Error('provider must not run while rehydrating'); } } as any, sessionResumeRoot);
+  const sessionResumeState: any = await sessionResumeLoop.initializeHarness('Preserve state across an interrupted session.');
+  sessionResumeState.status = 'paused';
+  sessionResumeState.goalContract.spent = 0.37;
+  sessionResumeState.evidenceLedger.push({ id: 'prior-evidence', stepTitle: 'prior', observation: 'prior non-green context remains', confidence: 80, timestamp: new Date().toISOString() });
+  (sessionResumeLoop as any).persistStateToDisk(sessionResumeState);
+  const rehydratedLoop = new AgentHarnessLoop({ id: 'resume-unused-2', modelId: 'resume-unused-2', generateChat: async () => { throw new Error('provider must not run while rehydrating'); } } as any, sessionResumeRoot);
+  assert.equal(rehydratedLoop.loadPersistedSession(sessionResumeState.sessionId)?.sessionId, sessionResumeState.sessionId);
+  const resumedState: any = await rehydratedLoop.resumeFromDisk({ additionalSteps: 5 });
+  assert.equal(resumedState.status, 'idle');
+  assert.equal(resumedState.goalContract.spent, 0.37, 'session resume must retain prior provider spend.');
+  assert.ok(resumedState.evidenceLedger.some((item: any) => item.id === 'prior-evidence'), 'session resume must retain prior evidence/context.');
+  assert.equal(resumedState.maxSteps, resumedState.currentStepIndex + 5, 'session resume must remain bounded.');
   const adapterNodeRoot = createTempWorkspace('forge-adapter-node-');
   fs.writeFileSync(path.join(adapterNodeRoot, 'package.json'), JSON.stringify({ scripts: { test: 'node -e "process.exit(0)"', build: 'node -e "process.exit(1)"' } }), 'utf8');
   fs.writeFileSync(path.join(adapterNodeRoot, 'pnpm-lock.yaml'), 'lockfileVersion: 9\n', 'utf8');
@@ -59,6 +221,8 @@ async function runSuite(): Promise<void> {
   fs.writeFileSync(path.join(compositeRoot, 'package.json'), JSON.stringify({ scripts: { test: 'node -e "process.exit(0)"', build: 'node -e "process.exit(1)"' } }), 'utf8');
   const compositeLoop = new AgentHarnessLoop({ id: 'unused', modelId: 'unused', generateChat: async () => { throw new Error('provider should not run'); } } as any, compositeRoot);
   const compositeState: any = await compositeLoop.initializeHarness('Prove composite oracle truth.');
+  assert.ok(compositeState.progressEvents.some((event: any) => event.kind === 'run_started'), 'initialized sessions must persist a run-start progress event.');
+  assert.ok(fs.existsSync(path.join(compositeRoot, '.forge', 'progress-events.jsonl')), 'progress stream must persist independently for reload/reconnect.');
   await (compositeLoop as any).runOracles(compositeState);
   assert.equal(compositeState.oracleStatuses.tests, 'pass');
   assert.equal(compositeState.oracleStatuses.build, 'fail');
@@ -688,6 +852,7 @@ async function runSuite(): Promise<void> {
   assert.ok(state.runStats.safetyCheckpoints > 0, 'mutating proposals should create safety checkpoints.');
   assert.ok(Object.keys(state.roleHandoffs || {}).length > 0, 'role handoffs should be captured during a real run.');
   assert.ok(state.safetyCheckpoints.some((checkpoint: any) => checkpoint.manifestPath && checkpoint.protectedPaths?.length), 'safety checkpoints should include manifest paths and protected path scopes.');
+  assert.ok(state.safetyCheckpoints.every((checkpoint: any) => checkpoint.strategy === 'workspace-snapshot'), 'product-loop mutation checkpoints must support complete return-to-step restore.');
   const persistedContext = JSON.parse(fs.readFileSync(path.join(workspace, '.forge', 'context-bundle.json'), 'utf8'));
   assert.equal(persistedContext.goal, state.goalContract.goal, 'context bundle should rehydrate the goal.');
   assert.ok(Array.isArray(persistedContext.openTasks), 'context bundle should persist open task state.');
@@ -713,6 +878,48 @@ async function runSuite(): Promise<void> {
   fs.writeFileSync(path.join(safetyWorkspace, 'src', 'safe.txt'), 'after', 'utf8');
   assert.equal(await safetyFirewall.revertToCheckpoint(safetyCheckpoint.id), true, 'targeted safety checkpoint should revert.');
   assert.equal(fs.readFileSync(path.join(safetyWorkspace, 'src', 'safe.txt'), 'utf8'), 'before', 'targeted safety checkpoint should restore original file content.');
+
+  const restoreWorkspace = createTempWorkspace('forge-checkpoint-restore-');
+  fs.mkdirSync(path.join(restoreWorkspace, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(restoreWorkspace, 'src', 'one.txt'), 'checkpoint-one', 'utf8');
+  fs.writeFileSync(path.join(restoreWorkspace, 'src', 'two.txt'), 'checkpoint-two', 'utf8');
+  const restoreLoop = new AgentHarnessLoop({ id: 'restore-unused', modelId: 'restore-unused', generateChat: async () => { throw new Error('provider should not run during restore'); } } as any, restoreWorkspace);
+  const restoreState: any = await restoreLoop.initializeHarness('Prove complete checkpoint restore and proof invalidation.');
+  const fullCheckpoint = await (restoreLoop as any).firewall.createCheckpoint(3, { name: 'write_file', arguments: { path: 'src/one.txt', content: 'changed' } }, 'workspace-snapshot');
+  restoreState.safetyCheckpoints.push(fullCheckpoint);
+  restoreState.safetyCheckpoints.push({ id: 'missing-checkpoint', strategy: 'workspace-snapshot', proposalName: 'write_file', protectedPaths: ['.'], manifestPath: '.forge/checkpoints/missing-checkpoint/manifest.json', timestamp: new Date().toISOString() });
+  await assert.rejects(() => restoreLoop.restoreCheckpoint('forged-id'), /does not belong/, 'arbitrary checkpoint IDs must be rejected before filesystem access.');
+  await assert.rejects(() => restoreLoop.restoreCheckpoint('missing-checkpoint'), /missing/, 'state-listed checkpoint with no manifest must fail honestly.');
+  assert.equal(restoreState.runStats.checkpointRestoreFailures, 1);
+  fs.writeFileSync(path.join(restoreWorkspace, 'src', 'one.txt'), 'later-one', 'utf8');
+  fs.writeFileSync(path.join(restoreWorkspace, 'src', 'two.txt'), 'later-two', 'utf8');
+  fs.writeFileSync(path.join(restoreWorkspace, 'src', 'created-later.txt'), 'later', 'utf8');
+  restoreState.evidenceLedger.push({ id: 'stale-evidence', stepTitle: 'stale', observation: 'must be invalidated', confidence: 100, timestamp: new Date().toISOString(), testResult: { pass: true, summary: 'stale green' } });
+  restoreState.diffReviews.push({ id: 'stale-review', reviewer: 'Reviewer', status: 'approved', summary: 'stale', diffExcerpt: 'stale', timestamp: new Date().toISOString() });
+  restoreState.oracleFailures.push({ id: 'stale-failure', signature: 'stale', kind: 'build', category: 'build_failure', source: 'stale', required: true, status: 'resolved', occurrences: 1, taskId: '', taskTitle: '', role: 'Oracle', outputExcerpt: 'stale', guidance: 'stale', firstSeenAt: new Date().toISOString(), lastSeenAt: new Date().toISOString() });
+  restoreState.lastOraclePass = true;
+  restoreState.oracleStatuses = { linter: 'pass', compiler: 'pass', tests: 'pass', build: 'pass' };
+  restoreState.status = 'success';
+  restoreState.aar = { id: 'stale-aar' };
+  for (const stage of restoreState.workflow.stages) stage.status = 'completed';
+  restoreState.workflow.finalStatus = 'VERIFIED';
+  const restoredState: any = await restoreLoop.restoreCheckpoint(fullCheckpoint.id);
+  assert.equal(fs.readFileSync(path.join(restoreWorkspace, 'src', 'one.txt'), 'utf8'), 'checkpoint-one');
+  assert.equal(fs.readFileSync(path.join(restoreWorkspace, 'src', 'two.txt'), 'utf8'), 'checkpoint-two');
+  assert.equal(fs.existsSync(path.join(restoreWorkspace, 'src', 'created-later.txt')), false, 'full restore must delete files created after the checkpoint.');
+  assert.equal(restoredState.status, 'idle');
+  assert.equal(restoredState.lastOraclePass, false);
+  assert.equal(restoredState.evidenceLedger.length, 0, 'restore must invalidate all later green evidence.');
+  assert.equal(restoredState.diffReviews.length, 0, 'restore must invalidate stale diff approvals.');
+  assert.equal(restoredState.oracleFailures.length, 0, 'restore must invalidate stale oracle lifecycle state.');
+  assert.equal(restoredState.aar, undefined, 'restore must invalidate terminal AAR state.');
+  assert.equal(restoredState.workflow.finalStatus, undefined);
+  assert.ok(restoredState.workflow.stages.filter((stage: any) => ['implement', 'validate', 'review', 'document_close', 'aar', 'complete'].includes(stage.id)).every((stage: any) => stage.status === 'pending'));
+  assert.equal(restoredState.runStats.checkpointRestores, 1);
+  assert.ok(restoredState.checkpointRestores.some((entry: any) => entry.checkpointId === fullCheckpoint.id && entry.status === 'restored' && entry.invalidatedEvidence === 1));
+  assert.ok(JSON.parse(fs.readFileSync(path.join(restoreWorkspace, '.forge', 'checkpoint-restores.json'), 'utf8')).some((entry: any) => entry.status === 'restored'));
+  await (restoreLoop as any).runOracles(restoredState);
+  assert.equal(restoredState.lastOraclePass, true, 'restored workspace can acquire fresh composite evidence only by rerunning verification.');
 
   let repairCalls = 0;
   const repairingProvider = {
@@ -1273,7 +1480,7 @@ async function runSuite(): Promise<void> {
   assert.equal(isolatedCommandReport.sourceMutated, false, 'isolated command report should prove source workspace stayed unchanged.');
   assert.equal(isolatedCommandReport.reportPath, path.join(workspace, '.forge', 'isolated-runs', 'latest-isolated-run.json'), 'isolated command should persist report in workspace.');
 
-  for (const rel of ['.forge/state.json', '.forge/workflow-governance.json', '.forge/workflow-task-record.md', '.forge/project-adapter.json', '.forge/oracle-failures.json', '.forge/clarifications.json', '.forge/context-bundle.json', '.forge/retrieval-index.json', '.forge/semantic-retrieval.json', '.forge/role-handoffs.json', '.forge/worker-contexts.json', '.forge/worker-edit-transactions.json', '.forge/worker-command-transactions.json', '.forge/skill-registry.json', '.forge/blockers.json', '.forge/safety-checkpoints.json', '.forge/command-effects.json', '.forge/budget.json', '.forge/isolated-runs/latest-isolated-run.json', '.forge/isolated-runs/latest-isolated-run.diff', '.forge/goal-contract.json', '.forge/task-graph.json', '.forge/evidence-ledger.json', '.forge/diff-reviews.json', '.forge/reviewer-critiques.json', '.forge/precommit-reviews.json', '.forge/escalations.json', '.forge/latest-proof-report.json', '.forge/evals/latest-weak-model-eval.json', '.forge/verification-fixture-matrix.json', 'PLAN.md', 'todos.json', 'SCRATCHPAD.md', 'evidence_ledger.json']) {
+  for (const rel of ['.forge/state.json', '.forge/workflow-governance.json', '.forge/workflow-task-record.md', '.forge/project-adapter.json', '.forge/oracle-failures.json', '.forge/clarifications.json', '.forge/context-bundle.json', '.forge/retrieval-index.json', '.forge/semantic-retrieval.json', '.forge/role-handoffs.json', '.forge/worker-contexts.json', '.forge/worker-edit-transactions.json', '.forge/worker-command-transactions.json', '.forge/skill-registry.json', '.forge/blockers.json', '.forge/safety-checkpoints.json', '.forge/checkpoint-restores.json', '.forge/command-effects.json', '.forge/budget.json', '.forge/isolated-runs/latest-isolated-run.json', '.forge/isolated-runs/latest-isolated-run.diff', '.forge/goal-contract.json', '.forge/task-graph.json', '.forge/evidence-ledger.json', '.forge/diff-reviews.json', '.forge/reviewer-critiques.json', '.forge/precommit-reviews.json', '.forge/escalations.json', '.forge/latest-proof-report.json', '.forge/evals/latest-weak-model-eval.json', '.forge/verification-fixture-matrix.json', 'PLAN.md', 'todos.json', 'SCRATCHPAD.md', 'evidence_ledger.json']) {
     assert.ok(fs.existsSync(path.join(workspace, rel)), `${rel} should exist`);
   }
 
@@ -1324,6 +1531,12 @@ async function runSuite(): Promise<void> {
 
   const openedSafety = await vscode.commands.executeCommand('forge-agent.openArtifact', 'safety');
   assert.equal(openedSafety, path.join(workspace, '.forge', 'safety-checkpoints.json'), 'safety checkpoints should open through native editor command.');
+  const openedCheckpointRestores = await vscode.commands.executeCommand('forge-agent.openArtifact', 'checkpointRestores');
+  assert.equal(openedCheckpointRestores, path.join(workspace, '.forge', 'checkpoint-restores.json'), 'checkpoint restore ledger should open through native editor command.');
+  const openedBrowserValidations = await vscode.commands.executeCommand('forge-agent.openArtifact', 'browserValidations');
+  assert.equal(openedBrowserValidations, path.join(workspace, '.forge', 'browser-runs', 'latest-browser-validation.json'), 'browser report should open through native editor command.');
+  const openedBrowserScreenshot = await vscode.commands.executeCommand('forge-agent.openArtifact', 'browserScreenshot');
+  assert.equal(openedBrowserScreenshot, path.join(workspace, '.forge', 'browser-runs', 'latest-browser-validation.png'), 'browser screenshot should open through the native image editor command.');
 
   const openedCommandEffects = await vscode.commands.executeCommand('forge-agent.openArtifact', 'commandEffects');
   assert.equal(openedCommandEffects, path.join(workspace, '.forge', 'command-effects.json'), 'command effects should open through native editor command.');

@@ -37,6 +37,12 @@ export interface Provider {
   generateChat(options: ChatOptions): Promise<{ text: string; usage?: ChatUsage }>;
 }
 
+let runtimeOpenRouterApiKey = '';
+
+export function setRuntimeOpenRouterApiKey(value: string): void {
+  runtimeOpenRouterApiKey = String(value || '').trim();
+}
+
 function configValue<T>(key: string, fallback: T): T {
   try {
     // Keep provider usable from the extension host and from plain Node eval scripts.
@@ -70,8 +76,7 @@ export class OpenRouterProvider implements Provider {
   }
 
   private getApiKey(): string {
-    const apiKey = configValue('openRouterApiKey', '');
-    return (apiKey || process.env.OPENROUTER_API_KEY || '').trim();
+    return (runtimeOpenRouterApiKey || process.env.OPENROUTER_API_KEY || '').trim();
   }
 
   public capabilities(modelId: string): ProviderCapabilities {
@@ -128,7 +133,7 @@ export class OpenRouterProvider implements Provider {
   public async generateChat(options: ChatOptions): Promise<{ text: string; usage?: ChatUsage }> {
     const apiKey = this.getApiKey();
     if (!apiKey) {
-      throw new Error('OpenRouter API key is missing. Configure forge.openRouterApiKey or OPENROUTER_API_KEY.');
+      throw new Error('OpenRouter API key is missing. Add it through Forge onboarding or set OPENROUTER_API_KEY.');
     }
 
     const body: any = {

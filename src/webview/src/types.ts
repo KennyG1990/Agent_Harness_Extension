@@ -9,7 +9,21 @@ export interface GoalContract {
 }
 
 export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed';
-export type HarnessStatus = 'idle' | 'running' | 'paused' | 'awaiting_input' | 'success' | 'failed' | 'gave_up';
+export type HarnessStatus = 'idle' | 'running' | 'paused' | 'awaiting_input' | 'awaiting_approval' | 'success' | 'failed' | 'gave_up';
+export type HumanApprovalPolicy = 'ask' | 'auto';
+
+export interface HumanApprovalRecord {
+  id: string;
+  taskTitle: string;
+  role: string;
+  proposal: { name: string; arguments: Record<string, unknown> };
+  proposalDigest: string;
+  summary: string;
+  status: 'pending' | 'approved' | 'rejected';
+  requestedAt: string;
+  decidedAt?: string;
+  decisionReason?: string;
+}
 
 export interface TaskItem {
   id: string;
@@ -77,6 +91,89 @@ export interface StepLog {
   message: string;
   timestamp: string;
   subAgent?: string;
+}
+
+export interface RunProgressEvent {
+  id: string;
+  sequence: number;
+  sessionId: string;
+  stepIndex: number;
+  kind: 'run_started' | 'step_started' | 'provider_wait' | 'proposal' | 'validation' | 'tool_started' | 'tool_finished' | 'oracle' | 'reflection' | 'awaiting_input' | 'awaiting_approval' | 'paused' | 'resumed' | 'terminal';
+  status: 'pending' | 'running' | 'pass' | 'fail' | 'warning' | 'info';
+  summary: string;
+  detail?: string;
+  role: string;
+  taskId?: string;
+  taskTitle?: string;
+  phase: FirewallAction['stage'];
+  toolName?: string;
+  timestamp: string;
+}
+
+export interface ProviderReadiness {
+  provider: 'openrouter' | 'openai-compatible';
+  ready: boolean;
+  workspaceOpen: boolean;
+  credential: { required: boolean; configured: boolean; source: 'secret-storage' | 'environment' | 'not-required' | 'none'; valid: boolean | null };
+  authentication: { status: 'pass' | 'fail' | 'skipped'; latencyMs: number };
+  catalog: { status: 'live' | 'fallback' | 'error'; modelCount: number };
+  blockers: Array<{ code: string; message: string }>;
+  checkedAt: string;
+}
+
+export interface WorkspaceIndexStatus {
+  status: 'missing' | 'building' | 'ready' | 'stale' | 'error';
+  fileCount: number;
+  symbolCount: number;
+  ignoredCount: number;
+  truncated: boolean;
+  generatedAt?: string;
+  fingerprint?: string;
+  error?: string;
+}
+
+export interface ComposerContextSummary {
+  id: string;
+  kind: 'file' | 'folder' | 'selection' | 'diagnostics';
+  label: string;
+  path?: string;
+  lineStart?: number;
+  lineEnd?: number;
+  diagnosticCount?: number;
+  byteCount: number;
+  capturedAt: string;
+}
+
+export interface WorkspaceMentionCandidate {
+  kind: 'file' | 'folder';
+  path: string;
+  label: string;
+  detail: string;
+}
+
+export interface AgentMode {
+  id: string;
+  name: string;
+  description: string;
+  instructions: string;
+  intent: 'code' | 'architect' | 'ask' | 'review';
+  modelRole: 'code' | 'plan' | 'review';
+  inference: 'Instant' | 'Thinking';
+  allowedTools: string[];
+  builtIn: boolean;
+}
+
+export interface SessionSummary {
+  sessionId: string;
+  kind: 'run' | 'chat';
+  title: string;
+  pinned: boolean;
+  createdAt: string;
+  updatedAt: string;
+  status: string;
+  steps: number;
+  costUsd: number;
+  resumable: boolean;
 }
 
 export interface ReflectionEntry {
@@ -185,6 +282,20 @@ export interface RunStats {
   oracleFailureResolutions?: number;
   remediationGuidanceInjections?: number;
   oracleStagnationHalts?: number;
+  checkpointRestores?: number;
+  checkpointRestoreFailures?: number;
+  humanApprovalRequests?: number;
+  humanApprovalApprovals?: number;
+  humanApprovalRejections?: number;
+  browserValidations?: number;
+  browserValidationFailures?: number;
+  browserInspections?: number;
+  browserActions?: number;
+  browserInteractionFailures?: number;
+  computerInspections?: number;
+  computerActions?: number;
+  computerInteractionFailures?: number;
+  progressEventsEmitted?: number;
   budgetHalts: number;
   noProgressTurns: number;
   lastProgressSignature: string;
@@ -199,6 +310,29 @@ export interface ArchitectHandoff {
   focusFiles: string[];
   premiseChecks: string[];
   orderedSteps: string[];
+}
+
+export interface SafetyCheckpoint {
+  id: string;
+  strategy: 'targeted-files' | 'workspace-snapshot';
+  proposalName: string;
+  protectedPaths: string[];
+  manifestPath: string;
+  timestamp: string;
+}
+
+export interface BrowserValidationEvidence {
+  id: string;
+  status: 'pass' | 'fail';
+  requestedUrl: string;
+  finalUrl: string;
+  title: string;
+  expectedText?: string;
+  expectedTextFound?: boolean;
+  screenshotPath?: string;
+  reportPath: string;
+  failureReason?: string;
+  completedAt: string;
 }
 
 // Full execution context that represents the overall harness state
@@ -220,6 +354,16 @@ export interface HarnessState {
   escalations?: EscalationEntry[];
   contextBundle?: ContextBundle;
   architectHandoff?: ArchitectHandoff;
+  safetyCheckpoints?: SafetyCheckpoint[];
+  checkpointRestores?: Array<{ checkpointId: string; status: 'restored' | 'failed'; restoredAt: string }>;
+  browserValidations?: BrowserValidationEvidence[];
+  browserInteractions?: Array<{ id: string; status: 'ready' | 'consumed' | 'failed'; screenshotPath: string; failureReason?: string }>;
+  computerInteractions?: Array<{ id: string; status: 'ready' | 'consumed' | 'failed'; screenshotPath: string; failureReason?: string }>;
+  humanApprovalPolicy?: HumanApprovalPolicy;
+  pendingHumanApproval?: HumanApprovalRecord;
+  humanApprovals?: HumanApprovalRecord[];
+  progressEvents?: RunProgressEvent[];
+  modePolicy?: { id: string; name: string; intent: 'code'; instructions: string; allowedTools: string[] };
   workflow?: {
     lane: 'full' | 'light';
     currentStage: string;

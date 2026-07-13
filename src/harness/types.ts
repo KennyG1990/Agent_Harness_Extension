@@ -8,9 +8,18 @@ export interface GoalContract {
   spent: number;  // in USD
 }
 
+export interface ModePolicy {
+  id: string;
+  name: string;
+  intent: 'code';
+  instructions: string;
+  allowedTools: ToolName[];
+}
+
 // Persisted task status
 export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed';
-export type HarnessStatus = 'idle' | 'running' | 'paused' | 'awaiting_input' | 'success' | 'failed' | 'gave_up';
+export type HarnessStatus = 'idle' | 'running' | 'paused' | 'awaiting_input' | 'awaiting_approval' | 'success' | 'failed' | 'gave_up';
+export type HumanApprovalPolicy = 'ask' | 'auto';
 export type ToolName =
   | 'repo_search'
   | 'symbol_search'
@@ -20,6 +29,11 @@ export type ToolName =
   | 'apply_patch'
   | 'run_command'
   | 'run_tests'
+  | 'browser_validate'
+  | 'browser_inspect'
+  | 'browser_action'
+  | 'computer_inspect'
+  | 'computer_action'
   | 'get_diff'
   | 'update_tasks'
   | 'update_plan'
@@ -72,6 +86,21 @@ export interface EvidenceLedgerItem {
 export interface ToolProposal {
   name: ToolName;
   arguments: Record<string, any>;
+}
+
+export interface HumanApprovalRecord {
+  id: string;
+  sessionId: string;
+  taskId: string;
+  taskTitle: string;
+  role: string;
+  proposal: ToolProposal;
+  proposalDigest: string;
+  summary: string;
+  status: 'pending' | 'approved' | 'rejected';
+  requestedAt: string;
+  decidedAt?: string;
+  decisionReason?: string;
 }
 
 export interface RepositoryKnowledge {
@@ -135,6 +164,39 @@ export interface StepLog {
   message: string;
   timestamp: string;
   subAgent?: string;
+}
+
+export type RunProgressKind =
+  | 'run_started'
+  | 'step_started'
+  | 'provider_wait'
+  | 'proposal'
+  | 'validation'
+  | 'tool_started'
+  | 'tool_finished'
+  | 'oracle'
+  | 'reflection'
+  | 'awaiting_input'
+  | 'awaiting_approval'
+  | 'paused'
+  | 'resumed'
+  | 'terminal';
+
+export interface RunProgressEvent {
+  id: string;
+  sequence: number;
+  sessionId: string;
+  stepIndex: number;
+  kind: RunProgressKind;
+  status: 'pending' | 'running' | 'pass' | 'fail' | 'warning' | 'info';
+  summary: string;
+  detail?: string;
+  role: string;
+  taskId?: string;
+  taskTitle?: string;
+  phase: FirewallAction['stage'];
+  toolName?: ToolName;
+  timestamp: string;
 }
 
 export interface ReflectionEntry {
@@ -468,6 +530,75 @@ export interface SafetyCheckpoint {
   timestamp: string;
 }
 
+export interface CheckpointRestoreEntry {
+  id: string;
+  checkpointId: string;
+  strategy: 'targeted-files' | 'workspace-snapshot';
+  protectedPaths: string[];
+  status: 'restored' | 'failed';
+  invalidatedEvidence: number;
+  invalidatedDiffReviews: number;
+  invalidatedOracleFailures: number;
+  invalidatedAar: boolean;
+  restoredAt: string;
+  error?: string;
+}
+
+export interface BrowserValidationEvidence {
+  id: string;
+  status: 'pass' | 'fail';
+  requestedUrl: string;
+  finalUrl: string;
+  title: string;
+  expectedText?: string;
+  expectedTextFound?: boolean;
+  visibleTextExcerpt: string;
+  consoleErrors: string[];
+  pageErrors: string[];
+  failedRequests: string[];
+  screenshotPath?: string;
+  reportPath: string;
+  browserExecutable?: string;
+  durationMs: number;
+  startedAt: string;
+  completedAt: string;
+  failureReason?: string;
+}
+
+export interface BrowserInteractionEvidence {
+  schemaVersion: 1;
+  id: string;
+  sessionId: string;
+  status: 'ready' | 'consumed' | 'failed';
+  url: string;
+  title: string;
+  visibleTextExcerpt: string;
+  targets: Array<{ id: string; role: string; name: string; ordinal: number; tag: string; inputType?: string; disabled: boolean }>;
+  screenshotPath: string;
+  reportPath: string;
+  createdAt: string;
+  consumedAt?: string;
+  action?: { kind: 'click' | 'fill' | 'press' | 'select' | 'wait'; targetId?: string; value?: string; key?: string };
+  previousStateId?: string;
+  failureReason?: string;
+}
+
+export interface ComputerInteractionEvidence {
+  schemaVersion: 1;
+  id: string;
+  sessionId: string;
+  status: 'ready' | 'consumed' | 'failed';
+  windowTitle: string;
+  targets: Array<{ id: string; name: string; controlType: string; automationId: string; className: string; ordinal: number; enabled: boolean; patterns: string[] }>;
+  screenshotPath: string;
+  reportPath: string;
+  createdAt: string;
+  consumedAt?: string;
+  previousStateId?: string;
+  action?: { kind: 'invoke' | 'set_value' | 'focus'; targetId: string; value?: string };
+  failureReason?: string;
+}
+
 export interface CommandSideEffectEntry {
   id: string;
   command: string;
@@ -557,11 +688,25 @@ export interface RunStats {
   clarificationRequests: number;
   clarificationAnswers: number;
   clarificationGateBlocks: number;
+  humanApprovalRequests: number;
+  humanApprovalApprovals: number;
+  humanApprovalRejections: number;
   oracleFailureCaptures: number;
   repeatedOracleFailures: number;
   oracleFailureResolutions: number;
   remediationGuidanceInjections: number;
   oracleStagnationHalts: number;
+  checkpointRestores: number;
+  checkpointRestoreFailures: number;
+  browserValidations: number;
+  browserValidationFailures: number;
+  browserInspections: number;
+  browserActions: number;
+  browserInteractionFailures: number;
+  computerInspections: number;
+  computerActions: number;
+  computerInteractionFailures: number;
+  progressEventsEmitted: number;
   commandTransactions: number;
   commandTransactionConflicts: number;
   commandTransactionMergedFiles: number;
@@ -588,6 +733,7 @@ export interface HarnessState {
   projectAdapter: ProjectAdapterState;
   skills: SkillItem[];
   files: Record<string, WorkspaceFile>;
+  userContext?: import('./composerContext').ComposerContextAttachment[];
   firewall: FirewallAction;
   logs: StepLog[];
   reflections: ReflectionEntry[];
@@ -600,6 +746,9 @@ export interface HarnessState {
   workerEditTransactions: WorkerEditTransaction[];
   workerCommandTransactions: WorkerCommandTransaction[];
   clarifications: ClarificationRequest[];
+  humanApprovalPolicy: HumanApprovalPolicy;
+  pendingHumanApproval?: HumanApprovalRecord;
+  humanApprovals: HumanApprovalRecord[];
   oracleFailures: OracleFailureEntry[];
   workflow: WorkflowGovernance;
   contextBundle: ContextBundle;
@@ -607,6 +756,12 @@ export interface HarnessState {
   workerContexts: Record<string, WorkerContext>;
   architectHandoff?: ArchitectHandoff;
   safetyCheckpoints: SafetyCheckpoint[];
+  checkpointRestores: CheckpointRestoreEntry[];
+  browserValidations: BrowserValidationEvidence[];
+  browserInteractions: BrowserInteractionEvidence[];
+  computerInteractions: ComputerInteractionEvidence[];
+  progressEvents: RunProgressEvent[];
+  modePolicy?: ModePolicy;
   commandEffects: CommandSideEffectEntry[];
   runBudget: RunBudget;
   runStats: RunStats;

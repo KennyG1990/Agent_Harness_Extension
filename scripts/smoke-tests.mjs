@@ -18,6 +18,46 @@ assert.match(provider, /fetchModelCatalog/, 'provider must fetch OpenRouter cata
 assert.match(provider, /mergeModels/, 'provider must merge authenticated and anonymous OpenRouter catalogs');
 
 const firewall = read('src/harness/firewall.ts');
+const browserValidation = read('src/harness/browserValidation.ts');
+const progressLoop = read('src/harness/loop.ts');
+const readiness = read('src/harness/providerReadiness.ts');
+const modeRegistry = read('src/harness/modeRegistry.ts');
+const supportBundle = read('src/harness/supportBundle.ts');
+const sessionStore = read('src/harness/sessionStore.ts');
+const difficultProof = read('src/harness/difficultLiveProof.ts');
+assert.match(modeRegistry, /Built-in modes cannot be overwritten/, 'trusted registry must make built-ins immutable');
+assert.match(modeRegistry, /Custom mode limit reached \(20\)/, 'trusted registry must bound custom mode count');
+assert.match(modeRegistry, /REQUIRED_CODE_MODE_TOOLS/, 'agentic modes must retain workflow/proof tools');
+assert.match(supportBundle, /sourceIncluded: false/, 'support reports must exclude source content');
+assert.match(supportBundle, /credentialsIncluded: false/, 'support reports must exclude credentials');
+assert.match(read('src/extension.ts'), /forge-agent\.reportProblem/, 'extension must register the support command');
+assert.match(sessionStore, /SESSION_ID/, 'session store must validate host-owned session IDs');
+assert.match(sessionStore, /isSymbolicLink/, 'session store must reject symlink session directories');
+assert.match(sessionStore, /MAX_CHAT_BYTES/, 'session chat persistence must be bounded');
+assert.match(read('src/extension.ts'), /forge-agent\.resumeSession/, 'extension must expose explicit session resume');
+assert.match(read('src/webview/src/App.tsx'), /sessions-menu/, 'compact recent-session UX must be present');
+assert.match(difficultProof, /APPROVED_WEAK_LIVE_MODELS/, 'difficult live proof must use an explicit weak-model allowlist');
+assert.match(difficultProof, /fallbackSolved: 0/, 'difficult live proof must make no-fallback accounting explicit');
+assert.match(difficultProof, /assertNoLeak/, 'difficult live proof must enforce the Tier-4 leak law');
+assert.match(difficultProof, /capabilityGatePassed/, 'difficult live proof must separate capability from report completion');
+assert.match(read('src/extension.ts'), /forge-agent\.runDifficultWeakModelProof/, 'extension must expose the live difficult proof command');
+assert.match(progressLoop, /modePolicy\.allowedTools\.includes/, 'harness role capabilities must intersect the trusted mode allowlist');
+assert.match(readiness, /migrateLegacyCredential/, 'legacy plaintext credentials must migrate into secret storage');
+assert.match(readiness, /credential_invalid/, 'readiness must distinguish invalid credentials');
+assert.match(readiness, /catalog_unavailable/, 'readiness must distinguish catalog failure');
+assert.doesNotMatch(read('package.json'), /forge\.openRouterApiKey"\s*:\s*\{/, 'API key must not remain a public configuration property');
+assert.match(read('src/extension.ts'), /context\.secrets\.store/, 'extension must store OpenRouter keys in the IDE secret vault');
+assert.match(read('src/extension.ts'), /context\.secrets\.delete/, 'extension must support removing the stored key');
+assert.doesNotMatch(read('src/extension.ts'), /runStep\(message\.state/, 'webview state must not overwrite trusted host mode policy during manual stepping');
+assert.match(read('src/extension.ts'), /ConfigurationTarget\.WorkspaceFolder/, 'legacy migration must clear folder-scoped plaintext credentials');
+assert.match(read('src/extension.ts'), /ConfigurationTarget\.Workspace/, 'legacy migration must clear workspace-scoped plaintext credentials');
+assert.match(progressLoop, /progress-events\.jsonl/, 'harness must persist append-only progress events');
+assert.match(progressLoop, /setProgressListener/, 'harness must expose a failure-isolated progress observer');
+assert.match(progressLoop, /provider_wait/, 'harness must make provider latency visible');
+assert.match(browserValidation, /playwright-core/, 'installed browser tool must use the packaged browser automation runtime');
+assert.match(browserValidation, /non-loopback/, 'browser policy must reject remote hosts by default');
+assert.match(browserValidation, /latest-browser-validation\.png/, 'browser validation must persist a latest screenshot');
+assert.match(firewall, /validateBrowserUrl/, 'browser proposals must pass deterministic URL policy');
 assert.doesNotMatch(firewall, /execPromise\(['"`]git reset --hard/, 'firewall must not execute git reset --hard');
 assert.match(firewall, /validatePatchApplicability/, 'firewall must validate patch applicability');
 assert.match(firewall, /validateCommand/, 'firewall must validate commands');
@@ -33,6 +73,17 @@ assert.match(commandNetwork, /remote-file-transfer/, 'network classifier must id
 assert.match(commandNetwork, /Allowed read-only network intent with audit capture/, 'network classifier must preserve auditable read-only access');
 
 const tools = read('src/harness/tools.ts');
+assert.match(tools, /browser_validate/, 'workspace tool registry must expose browser validation');
+assert.match(tools, /browser_inspect/, 'workspace tool registry must expose governed browser inspection');
+assert.match(tools, /computer_inspect/, 'workspace tool registry must expose governed computer inspection');
+assert.match(read('src/webview/src/App.tsx'), /testId="browser-evidence"/, 'compact composer must expose latest browser evidence');
+assert.match(read('src/webview/src/App.tsx'), /data-testid="run-activity"/, 'chat must render a compact live run activity group');
+assert.match(read('src/webview/src/App.tsx'), /mergeProgressEvents/, 'reloaded progress must deduplicate by immutable event ID');
+assert.match(read('src/webview/src/App.tsx'), /data-testid="first-run-onboarding"/, 'missing readiness must produce a compact first-run flow');
+assert.match(read('src/webview/src/App.tsx'), /type="password"/, 'onboarding credential field must not expose key text');
+assert.match(read('src/webview/src/App.tsx'), /data-testid="custom-modes-settings"/, 'custom modes must live behind a collapsed settings section');
+assert.doesNotMatch(read('src/webview/src/App.tsx'), /\[\$\{selectedRole\} mode/, 'webview must not invent mode instructions through a text prefix');
+assert.doesNotMatch(read('src/webview/src/App.tsx'), /Browser Preview|embedded browser/i, 'product webview must not clone a browser surface');
 assert.match(tools, /Malformed patch: expected SEARCH\/REPLACE hunk/, 'malformed patches must be rejected');
 assert.match(tools, /findLenientMatch/, 'patch application must support whitespace-lenient matching');
 assert.match(tools, /ambiguous/, 'lenient matching must reject ambiguous windows');
@@ -357,6 +408,28 @@ assert.match(extension, /run-agent-loop/, 'extension webview bridge must expose 
 assert.match(extension, /run-isolated-agent-goal/, 'extension webview bridge must expose isolated run loop');
 assert.match(extension, /workbench\.action\.openSettings/, 'extension must route settings to native settings');
 assert.match(extension, /createTerminal/, 'extension must use native IDE terminals');
+assert.match(extension, /runWorkspaceIndexWorker/, 'workspace index refresh must run outside the extension host');
+assert.match(extension, /createFileSystemWatcher/, 'workspace index must become stale from native file events');
+assert.match(extension, /workspaceIndex: path\.join\('\.forge', 'workspace-index\.json'\)/, 'extension must expose workspace index in the native editor');
+assert.match(extension, /case 'add-active-context'/, 'extension host must own active editor context capture');
+assert.match(extension, /vscode\.languages\.getDiagnostics/, 'extension host must own diagnostic capture');
+assert.match(extension, /showQuickPick/, 'workspace context file selection must use a native picker');
+
+const composerContext = read('src/harness/composerContext.ts');
+assert.match(composerContext, /MAX_ATTACHMENTS = 12/, 'composer context must have an attachment cap');
+assert.match(composerContext, /MAX_TOTAL_BYTES = 192 \* 1024/, 'composer context must have a total byte cap');
+assert.match(composerContext, /isSymbolicLink\(\)/, 'composer context must refuse symlink files');
+assert.match(composerContext, /captureFolder/, 'composer context must support bounded folder manifests');
+assert.match(composerContext, /MAX_FOLDER_PATHS = 500/, 'folder manifests must have a path cap');
+
+const workspaceIndex = read('src/harness/workspaceIndex.ts');
+assert.match(workspaceIndex, /MAX_WORKSPACE_INDEX_FILES = 5_000/, 'workspace index must have a hard file cap');
+assert.match(workspaceIndex, /'\.tmp'/, 'workspace index must exclude generated proof workspaces from user context search');
+assert.match(workspaceIndex, /entry\.isSymbolicLink\(\)/, 'workspace index must refuse symlinks');
+assert.match(workspaceIndex, /workspaceId\(this\.root\)/, 'workspace index must bind artifacts to one workspace');
+assert.doesNotMatch(workspaceIndex, /declaration: line\.trim/, 'workspace index must not serialize declaration source lines');
+assert.match(workspaceIndex, /searchMentions\(query: string, limit = 20\)/, 'workspace index must provide bounded @ mention search');
+assert.match(workspaceIndex, /Math\.min\(20/, '@ mention search must enforce a 20-result host cap');
 
 const webview = read('src/webview/src/App.tsx');
 assert.match(webview, /testId="pause-run"/, 'webview must expose a pause button');
@@ -372,8 +445,9 @@ assert.match(webview, /run-isolated-agent-goal/, 'webview must expose isolated r
 assert.match(webview, /open-isolated-run/, 'webview must expose isolated run report open button');
 assert.match(webview, /command: 'chat'/, 'webview must post chat messages to extension host');
 assert.match(webview, /run-agent-loop/, 'webview run button must start the firewalled agent loop');
-assert.match(webview, /agentRoles/, 'webview must expose role presets');
-assert.match(webview, /selectedRole/, 'webview must track selected composer role');
+assert.match(webview, /modes\.map/, 'webview must render host-provided mode presets');
+assert.match(webview, /selectedModeId/, 'webview must track selected trusted mode ID');
+assert.match(webview, /modeId: selectedMode\.id/, 'webview must send only the selected mode ID to the host');
 assert.match(webview, /inferenceMode/, 'webview must track selected inference mode');
 assert.match(webview, /favoriteModels/, 'webview must support model favorites');
 assert.match(webview, /role="code"/, 'missing code model picker');
@@ -398,10 +472,26 @@ assert.match(webview, /budgetHalts/, 'webview must expose budget halt counter in
 assert.match(webview, /maxCostUsd/, 'webview must expose run budget cost cap in run status');
 assert.match(webview, /reviewerCritiques/, 'webview must expose reviewer critique counter in run status');
 assert.match(webview, /preCommitReviews/, 'webview must expose pre-commit review counter in run status');
+for (const testId of ['workspace-index-toggle', 'workspace-index-popover', 'workspace-index-state', 'refresh-workspace-index', 'open-workspace-index']) {
+  assert.match(webview, new RegExp(`(data-testid|testId)="${testId}"`), `missing workspace index selector ${testId}`);
+}
+for (const testId of ['composer-context-toggle', 'composer-context-menu', 'attach-active-context', 'attach-workspace-file', 'attach-diagnostics', 'composer-context-chips']) {
+  assert.match(webview, new RegExp(`(data-testid|testId)="${testId}"`), `missing composer context selector ${testId}`);
+}
+assert.doesNotMatch(webview, /\{\s*content:\s*_content/, 'the webview must never receive source content that it then has to strip');
+assert.match(extension, /context: this\.contextService\(\)\.summaries\(loaded\.context\)/, 'session loading must reduce attachment snapshots to metadata before posting to the webview');
+assert.match(extension, /case 'search-context-mentions'/, 'extension host must own @ mention search');
+assert.match(extension, /case 'attach-context-mention'/, 'extension host must revalidate @ mention selections');
+assert.match(extension, /not present in the validated workspace index/, 'forged @ mention paths must be rejected against the index');
+assert.match(webview, /function activeMention/, 'composer must parse token-boundary @ mentions');
+assert.match(webview, /data-testid="context-mention-menu"/, 'composer must render inline @ mention results');
+assert.match(webview, /Ask anything, @ to attach context, \/ for actions/, 'composer placeholder must disclose both context and action affordances');
 
 const pkg = JSON.parse(read('package.json'));
 assert.ok(pkg.scripts.eval, 'package must expose npm run eval');
 assert.ok(pkg.scripts['eval:reflection'], 'package must expose npm run eval:reflection');
+assert.ok(pkg.scripts['test:index'], 'package must expose workspace index causal proof');
+assert.ok(pkg.scripts['test:context'], 'package must expose composer context causal proof');
 
 const verificationMatrix = read('src/harness/verificationMatrix.ts');
 for (const fixtureId of ['passing-tests', 'failing-tests', 'missing-test-suite', 'typecheck-failure', 'lint-failure', 'malformed-patch', 'out-of-workspace-path', 'blocked-command', 'unsolvable-step-cap']) {

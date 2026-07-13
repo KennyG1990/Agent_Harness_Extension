@@ -1,7 +1,7 @@
 import * as path from 'path';
 import * as fs from 'fs';
 import * as crypto from 'crypto';
-import { AarReport, AarTriggerCounts, ArchitectHandoff, BlockerCategory, BlockerEntry, BlockerSource, ClarificationRequest, CommandSideEffectEntry, ContextBundle, DiffReviewEntry, EscalationEntry, EvidenceLedgerItem, GoalContract, HarnessState, LessonEntry, PreCommitReviewEntry, ReflectionEntry, RetrievalCandidate, ReviewerCritiqueEntry, RoleHandoff, RunBudget, SafetyCheckpoint, StepLog, TaskItem, ToolName, ToolProposal, WorkerCommandTransaction, WorkerContext, WorkerEditTransaction } from './types';
+import { AarReport, AarTriggerCounts, ArchitectHandoff, BlockerCategory, BlockerEntry, BlockerSource, BrowserInteractionEvidence, BrowserValidationEvidence, CheckpointRestoreEntry, ClarificationRequest, CommandSideEffectEntry, ComputerInteractionEvidence, ContextBundle, DiffReviewEntry, EscalationEntry, EvidenceLedgerItem, GoalContract, HarnessState, HumanApprovalPolicy, HumanApprovalRecord, LessonEntry, ModePolicy, PreCommitReviewEntry, ReflectionEntry, RetrievalCandidate, ReviewerCritiqueEntry, RoleHandoff, RunBudget, RunProgressEvent, RunProgressKind, SafetyCheckpoint, StepLog, TaskItem, ToolName, ToolProposal, WorkerCommandTransaction, WorkerContext, WorkerEditTransaction } from './types';
 import { createConfiguredProvider, OpenRouterProvider, Provider } from './provider';
 import { resolvePatchTargetByContent, WorkspaceTools } from './tools';
 import { Firewall } from './firewall';
@@ -15,11 +15,17 @@ import { TransactionalCommandExecutor } from './transactionalCommands';
 import { bankProceduralSkills, renderProceduralSkills, selectProceduralSkills } from './proceduralSkills';
 import { createWorkflowGovernance, enforceWorkflowPlan, finalizeWorkflow, recordWorkflowEvent, renderWorkflowTaskRecord, validateWorkflowProposal, workflowReadyForSuccess } from './workflowGovernance';
 import { renderOpenOracleFailures, updateOracleFailures } from './oracleRemediation';
+import { SessionStore } from './sessionStore';
+import { ComposerContextAttachment, ComposerContextService } from './composerContext';
 
 const MAX_REPAIR_ATTEMPTS = 2;
 const MAX_NO_PROGRESS_TURNS = 4;
 const MAX_REFLECTION_ATTEMPTS = 3;
 const MAX_IDENTICAL_ORACLE_FAILURES = 3;
+const MAX_CHECKPOINT_HISTORY = 20;
+const MAX_PROGRESS_EVENTS = 300;
+const HUMAN_APPROVAL_TOOLS = new Set<ToolName>(['write_file', 'apply_patch', 'run_command']);
+const ALWAYS_APPROVAL_TOOLS = new Set<ToolName>(['browser_action', 'computer_action']);
 const ESCALATE_AFTER_REFLECTIONS = 2;
 const DEFAULT_MAX_WALL_CLOCK_MS = 30 * 60 * 1000;
 export const DEFAULT_PROMPT_CHAR_BUDGET = 96_000;
@@ -45,7 +51,7 @@ export const TOOL_SCHEMA = {
       properties: {
         name: {
           type: 'string',
-          enum: ['repo_search', 'symbol_search', 'read_file', 'read_range', 'write_file', 'apply_patch', 'run_command', 'run_tests', 'get_diff', 'update_tasks', 'update_plan', 'record_evidence', 'ask_user', 'declare_success']
+          enum: ['repo_search', 'symbol_search', 'read_file', 'read_range', 'write_file', 'apply_patch', 'run_command', 'run_tests', 'browser_validate', 'browser_inspect', 'browser_action', 'computer_inspect', 'computer_action', 'get_diff', 'update_tasks', 'update_plan', 'record_evidence', 'ask_user', 'declare_success']
         },
         // Live constrained decoders emit ONLY schema-declared properties. A bare
         // { type: 'object' } here forces `arguments: {}` under strict grammar
@@ -66,6 +72,16 @@ export const TOOL_SCHEMA = {
             planMd: { type: 'string' },
             tasks: { type: 'array', items: { type: 'object' } },
             observation: { type: 'string' }
+            ,url: { type: 'string' }
+            ,expectedText: { type: 'string' }
+            ,timeoutMs: { type: 'number' }
+            ,sessionId: { type: 'string' }
+            ,stateId: { type: 'string' }
+            ,action: { type: 'string' }
+            ,targetId: { type: 'string' }
+            ,value: { type: 'string' }
+            ,key: { type: 'string' }
+            ,windowTitle: { type: 'string' }
             ,question: { type: 'string' }
             ,uncertainty: { type: 'string' }
             ,options: { type: 'array', items: { type: 'string' } }
@@ -117,6 +133,7 @@ export class AgentHarnessLoop {
   private transactionalEditExecutor = new TransactionalEditExecutor(this.workerExecutor);
   private transactionalCommandExecutor = new TransactionalCommandExecutor(this.workerExecutor);
   private latestState?: HarnessState;
+  private progressListener?: (event: RunProgressEvent) => void;
   private proofStats = { providerCalls: 0, providerFailures: 0, fallbackProposals: 0 };
 
   constructor(provider: Provider = createConfiguredProvider(), private readonly workspaceRootOverride?: string, private readonly embeddingProvider: EmbeddingProvider | undefined = createConfiguredEmbeddingProvider()) {
@@ -124,6 +141,10 @@ export class AgentHarnessLoop {
     this.tools = new WorkspaceTools(workspaceRootOverride);
     this.firewall = new Firewall(this.tools);
     this.oracles = new VerificationOracles(workspaceRootOverride);
+  }
+
+  public setProgressListener(listener?: (event: RunProgressEvent) => void): void {
+    this.progressListener = listener;
   }
 
   public getDiagnostics(): any {
@@ -134,6 +155,114 @@ export class AgentHarnessLoop {
     };
   }
 
+  public loadPersistedSession(sessionId?: string): HarnessState | null {
+    const root = this.tools.getWorkspaceRoot();
+    let resolvedId = sessionId;
+    if (!resolvedId) {
+      try { resolvedId = JSON.parse(fs.readFileSync(path.join(root, '.forge', 'state.json'), 'utf8')).sessionId; } catch { return null; }
+    }
+    const loaded = new SessionStore(root).load(String(resolvedId), Boolean(sessionId));
+    if (!loaded.state) return null;
+    this.latestState = loaded.state;
+    return loaded.state;
+  }
+
+  public clearActiveSession(): void {
+    this.latestState = undefined;
+  }
+
+  public async restoreCheckpoint(checkpointId: string): Promise<HarnessState> {
+    let state = this.latestState;
+    if (!state) {
+      const statePath = path.join(this.tools.getWorkspaceRoot(), '.forge', 'state.json');
+      if (!fs.existsSync(statePath)) throw new Error('No persisted Forge run is available.');
+      state = JSON.parse(fs.readFileSync(statePath, 'utf8')) as HarnessState;
+    }
+    state.safetyCheckpoints = state.safetyCheckpoints || [];
+    state.checkpointRestores = state.checkpointRestores || [];
+    state.runStats = state.runStats || this.createRunStats();
+    const checkpoint = state.safetyCheckpoints.find(item => item.id === String(checkpointId || '').trim());
+    if (!checkpoint) throw new Error('Checkpoint does not belong to the current Forge run.');
+
+    const restoredAt = new Date().toISOString();
+    const entry: CheckpointRestoreEntry = {
+      id: `checkpoint-restore-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      checkpointId: checkpoint.id,
+      strategy: checkpoint.strategy,
+      protectedPaths: [...checkpoint.protectedPaths],
+      status: 'failed',
+      invalidatedEvidence: state.evidenceLedger.length,
+      invalidatedDiffReviews: (state.diffReviews || []).length,
+      invalidatedOracleFailures: (state.oracleFailures || []).length,
+      invalidatedAar: Boolean(state.aar),
+      restoredAt
+    };
+    try {
+      if (!(await this.firewall.revertToCheckpoint(checkpoint.id))) throw new Error('Checkpoint manifest or snapshot is missing.');
+      entry.status = 'restored';
+      state.runStats.checkpointRestores = (state.runStats.checkpointRestores || 0) + 1;
+    } catch (error: any) {
+      entry.error = String(error?.message || error);
+      state.runStats.checkpointRestoreFailures = (state.runStats.checkpointRestoreFailures || 0) + 1;
+      state.checkpointRestores.push(entry);
+      this.persistStateToDisk(state);
+      this.latestState = state;
+      throw error;
+    }
+
+    state.checkpointRestores.push(entry);
+    state.evidenceLedger = [];
+    state.browserValidations = [];
+    state.browserInteractions = [];
+    state.computerInteractions = [];
+    state.diffReviews = [];
+    state.reviewerCritiques = [];
+    state.preCommitReviews = [];
+    state.oracleFailures = [];
+    state.files = {};
+    state.lastOraclePass = false;
+    state.oracleStatuses = { linter: 'unchecked', compiler: 'unchecked', tests: 'unchecked', build: 'unchecked' };
+    state.status = 'idle';
+    state.haltReason = undefined;
+    state.aar = undefined;
+    state.checkpointId = checkpoint.id;
+    for (const blocker of state.blockers || []) {
+      if (blocker.status === 'open') {
+        blocker.status = 'resolved';
+        blocker.resolvedAt = restoredAt;
+        blocker.resolution = `Invalidated by restore to ${checkpoint.id}; fresh verification is required.`;
+      }
+    }
+    let editorReopened = false;
+    for (const task of state.taskGraph.tasks) {
+      if (task.owner === 'Editor' && !editorReopened) {
+        task.status = 'running';
+        editorReopened = true;
+      } else if (task.owner === 'Editor' || task.owner === 'Reviewer' || task.owner === 'Escalation') {
+        task.status = 'pending';
+      }
+    }
+    const resetStages = new Set(['implement', 'validate', 'review', 'document_close', 'aar', 'complete']);
+    for (const stage of state.workflow.stages) {
+      if (resetStages.has(stage.id)) {
+        stage.status = 'pending';
+        stage.completedAt = undefined;
+        stage.evidence = [];
+      }
+    }
+    state.workflow.currentStage = 'implement';
+    state.workflow.finalStatus = undefined;
+    state.workflow.updatedAt = restoredAt;
+    state.firewall = { stage: 'IDLE', timestamp: restoredAt, details: `Workspace restored to ${checkpoint.id}; downstream proof invalidated.` };
+    state.logs.push(this.log('warning', `Restored ${checkpoint.id} (${checkpoint.strategy}); invalidated evidence=${entry.invalidatedEvidence}, diffReviews=${entry.invalidatedDiffReviews}, oracleFailures=${entry.invalidatedOracleFailures}. Fresh verification is mandatory.`, 'Checkpoint'));
+    this.emitProgress(state, 'resumed', 'warning', `Restored checkpoint ${checkpoint.id}.`, 'Later review and verification evidence was invalidated; fresh proof is required.', 'Checkpoint');
+    state.scratchpadMd += `\n## Checkpoint restored - ${restoredAt}\nCheckpoint: ${checkpoint.id}\nStrategy: ${checkpoint.strategy}\nInvalidated evidence: ${entry.invalidatedEvidence}\nInvalidated diff reviews: ${entry.invalidatedDiffReviews}\nFresh implementation review and composite verification are required.\n`;
+    fs.rmSync(path.join(this.tools.getWorkspaceRoot(), '.forge', 'aar.json'), { force: true });
+    this.persistStateToDisk(state);
+    this.latestState = state;
+    return state;
+  }
+
   public getProofStats(): { providerCalls: number; providerFailures: number; fallbackProposals: number } {
     return { ...this.proofStats };
   }
@@ -142,13 +271,13 @@ export class AgentHarnessLoop {
     return this.provider.listModels();
   }
 
-  public async initializeHarness(goal: string, modelBindings: Record<string, string> = {}, budgetOverrides: Partial<RunBudget> = {}, harnessOptions: { reflectionEnabled?: boolean; goalOverrides?: GoalOverrides } = {}): Promise<HarnessState> {
+  public async initializeHarness(goal: string, modelBindings: Record<string, string> = {}, budgetOverrides: Partial<RunBudget> = {}, harnessOptions: { reflectionEnabled?: boolean; goalOverrides?: GoalOverrides; modePolicy?: ModePolicy; humanApprovalPolicy?: HumanApprovalPolicy; userContext?: ComposerContextAttachment[] } = {}): Promise<HarnessState> {
     const sessionId = `forge-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
     const overrides = harnessOptions.goalOverrides || {};
     const goalContract: GoalContract = {
       goal: goal.trim() || 'Run verification and make the workspace green.',
       context: 'VS Code workspace extension host',
-      constraints: mergeUnique(['All mutations must pass deterministic firewall validation.', 'Terminal success requires a green test oracle and ledger evidence.'], overrides.constraints),
+      constraints: mergeUnique(['All mutations must pass deterministic firewall validation.', 'Terminal success requires a green test oracle and ledger evidence.', ...(harnessOptions.modePolicy ? [`Active mode '${harnessOptions.modePolicy.name}' can only use its persisted tool allowlist.`] : [])], overrides.constraints),
       // User doneWhen criteria ADD to the oracle gates, never replace them.
       doneWhen: mergeUnique(overrides.doneWhen || [], ['run_tests oracle passes', 'evidence ledger contains the green oracle result']),
       nonGoals: mergeUnique(['No out-of-workspace writes', 'No destructive shell commands'], overrides.nonGoals),
@@ -180,6 +309,7 @@ export class AgentHarnessLoop {
       projectAdapter: this.oracles.getProjectAdapter(),
       skills: this.loadSkillRegistry(),
       files: {},
+      userContext: new ComposerContextService(this.tools.getWorkspaceRoot()).normalizeList(harnessOptions.userContext || []),
       firewall: { stage: 'IDLE', timestamp: new Date().toISOString(), details: 'Harness initialized. Waiting for proposals.' },
       logs: [this.log('success', 'Forge Agent harness initialized with durable artifacts.', 'Orchestrator')],
       reflections: [],
@@ -194,12 +324,20 @@ export class AgentHarnessLoop {
       workerEditTransactions: [],
       workerCommandTransactions: [],
       clarifications: [],
+      humanApprovalPolicy: harnessOptions.humanApprovalPolicy || 'auto',
+      humanApprovals: [],
       oracleFailures: [],
       workflow,
       contextBundle: this.createContextBundleSkeleton(goalContract.goal),
       roleHandoffs: {},
       workerContexts: {},
       safetyCheckpoints: [],
+      checkpointRestores: [],
+      browserValidations: [],
+      browserInteractions: [],
+      computerInteractions: [],
+      progressEvents: [],
+      modePolicy: harnessOptions.modePolicy,
       commandEffects: [],
       runBudget: this.createRunBudget(goalContract, mergedBudgetOverrides),
       runStats: this.createRunStats(),
@@ -212,6 +350,8 @@ export class AgentHarnessLoop {
       oracleStatuses: { linter: 'unchecked', compiler: 'unchecked', tests: 'unchecked', build: 'unchecked' },
       lastOraclePass: false
     };
+
+    this.emitProgress(state, 'run_started', 'running', 'Forge started the run.', `Goal: ${goalContract.goal}`, 'Orchestrator');
 
     this.persistStateToDisk(state);
     this.latestState = state;
@@ -259,6 +399,8 @@ export class AgentHarnessLoop {
     state.runStats.skillApplications = state.runStats.skillApplications || 0;
     state.runStats.workflowGateBlocks = state.runStats.workflowGateBlocks || 0;
     state.runStats.budgetHalts = state.runStats.budgetHalts || 0;
+    state.runStats.progressEventsEmitted = state.runStats.progressEventsEmitted || 0;
+    state.progressEvents = state.progressEvents || [];
     state.runBudget = state.runBudget || this.createRunBudget(state.goalContract);
     const preStepBudget = this.enforceBudget(state);
     if (preStepBudget) {
@@ -293,6 +435,28 @@ export class AgentHarnessLoop {
     state.runStats.oracleFailureResolutions = state.runStats.oracleFailureResolutions || 0;
     state.runStats.remediationGuidanceInjections = state.runStats.remediationGuidanceInjections || 0;
     state.runStats.oracleStagnationHalts = state.runStats.oracleStagnationHalts || 0;
+    state.runStats.checkpointRestores = state.runStats.checkpointRestores || 0;
+    state.runStats.checkpointRestoreFailures = state.runStats.checkpointRestoreFailures || 0;
+    state.runStats.humanApprovalRequests = state.runStats.humanApprovalRequests || 0;
+    state.runStats.humanApprovalApprovals = state.runStats.humanApprovalApprovals || 0;
+    state.runStats.humanApprovalRejections = state.runStats.humanApprovalRejections || 0;
+    state.humanApprovalPolicy = state.humanApprovalPolicy === 'ask' ? 'ask' : 'auto';
+    state.humanApprovals = state.humanApprovals || [];
+    if (state.pendingHumanApproval?.status === 'approved') {
+      const pending = state.pendingHumanApproval;
+      const activeTask = state.taskGraph.tasks.find(task => task.id === pending.taskId && task.status === 'running');
+      if (!activeTask || pending.sessionId !== state.sessionId || this.proposalDigest(pending.proposal) !== pending.proposalDigest) {
+        throw new Error('Pending approval no longer matches the active validated proposal.');
+      }
+      state.pendingHumanApproval = undefined;
+      return this.continueValidatedCommit(state, activeTask, pending.proposal, modelBindings, this.progressSignature(state));
+    }
+    if (state.pendingHumanApproval?.status === 'pending') {
+      state.status = 'awaiting_approval';
+      this.persistStateToDisk(state);
+      this.latestState = state;
+      return state;
+    }
     if (state.clarifications.some(item => item.status === 'pending')) {
       state.status = 'awaiting_input';
       this.persistStateToDisk(state);
@@ -303,6 +467,7 @@ export class AgentHarnessLoop {
     state.roleHandoffs = state.roleHandoffs || {};
     state.workerContexts = state.workerContexts || {};
     state.safetyCheckpoints = state.safetyCheckpoints || [];
+    state.checkpointRestores = state.checkpointRestores || [];
     state.commandEffects = state.commandEffects || [];
     const progressBefore = this.progressSignature(state);
     state.status = 'running';
@@ -315,6 +480,7 @@ export class AgentHarnessLoop {
 
     const activeTask = state.taskGraph.tasks.find(t => t.status === 'pending' || t.status === 'running');
     state.activeSubAgent = activeTask?.owner || 'Orchestrator';
+    this.emitProgress(state, 'step_started', 'running', activeTask ? `Step ${state.currentStepIndex}: ${activeTask.title}` : `Step ${state.currentStepIndex}: checking terminal gates`, '', state.activeSubAgent, activeTask);
     if (activeTask) {
       await this.refreshSemanticRetrieval(state, activeTask);
     }
@@ -332,12 +498,14 @@ export class AgentHarnessLoop {
         state.status = 'failed';
         state.haltReason = this.hasGreenEvidence(state) ? `Tasks completed with incomplete workflow gates: ${workflowGate.missing.join(', ')}.` : 'Tasks completed without green oracle evidence.';
       }
+      this.emitProgress(state, 'terminal', state.status === 'success' ? 'pass' : 'fail', `Run ${state.status}.`, state.haltReason || '', state.activeSubAgent);
       this.persistStateToDisk(state);
       this.latestState = state;
       return state;
     }
 
     activeTask.status = 'running';
+    this.emitProgress(state, 'provider_wait', 'running', `${activeTask.owner} is preparing the next action.`, `Task: ${activeTask.title}`, activeTask.owner, activeTask);
     const proposalEnvelope = await this.getProposal(state, activeTask, modelBindings);
     const postProposalBudget = this.enforceBudget(state);
     if (postProposalBudget) {
@@ -377,6 +545,7 @@ export class AgentHarnessLoop {
       proposalToolCall: proposal
     };
     state.logs.push(this.log('proposal', `${activeTask.owner} proposed ${proposal.name}: ${proposalEnvelope.explanation}`, activeTask.owner));
+    this.emitProgress(state, 'proposal', 'pending', `${activeTask.owner} proposed ${proposal.name}.`, proposalEnvelope.explanation, activeTask.owner, activeTask, proposal.name);
 
     state.firewall.stage = 'VALIDATE';
     const roleValidation = this.validateRoleCapability(state, activeTask, proposal);
@@ -398,6 +567,7 @@ export class AgentHarnessLoop {
       state.firewall.isValidated = false;
       state.firewall.validationReason = validation.reason;
       state.logs.push(this.log('error', `Firewall rejected ${proposal.name}: ${validation.reason}`, 'Firewall'));
+      this.emitProgress(state, 'validation', 'fail', `Rejected ${proposal.name}.`, String(validation.reason || 'Proposal validation failed.'), 'Firewall', activeTask, proposal.name);
       const isMalformedPatch = /Malformed patch/i.test(String(validation.reason || ''));
       if (isMalformedPatch) {
         state.runStats.malformedPatchStreak = (state.runStats.malformedPatchStreak || 0) + 1;
@@ -422,6 +592,7 @@ export class AgentHarnessLoop {
     this.recordWorkerProposal(state, activeTask, proposal, true);
     state.firewall.isValidated = true;
     state.firewall.validationReason = 'Proposal accepted by deterministic validator.';
+    this.emitProgress(state, 'validation', 'pass', `Validated ${proposal.name}.`, 'Proposal accepted by deterministic validator.', 'Firewall', activeTask, proposal.name);
     if (proposalEnvelope.fallback) {
       state.runStats.fallbackActions += 1;
     }
@@ -431,6 +602,7 @@ export class AgentHarnessLoop {
       state.firewall.stage = 'NARRATE';
       state.firewall.isValidated = true;
       state.firewall.validationReason = 'Clarification request accepted; run paused before any mutation.';
+      this.emitProgress(state, 'awaiting_input', 'warning', 'Forge needs clarification before continuing.', String(proposal.arguments.question || ''), activeTask.owner, activeTask, proposal.name);
       this.persistStateToDisk(state);
       this.latestState = state;
       return state;
@@ -466,18 +638,57 @@ export class AgentHarnessLoop {
       this.resolveBlockers(state, activeTask, ['precommit_review'], 'A subsequent pre-commit review approved the proposal.');
     }
 
+    if (ALWAYS_APPROVAL_TOOLS.has(proposal.name) || (state.humanApprovalPolicy === 'ask' && HUMAN_APPROVAL_TOOLS.has(proposal.name))) {
+      const requestedAt = new Date().toISOString();
+      const approval: HumanApprovalRecord = {
+        id: `approval-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
+        sessionId: state.sessionId,
+        taskId: activeTask.id,
+        taskTitle: activeTask.title,
+        role: activeTask.owner,
+        proposal: JSON.parse(JSON.stringify(proposal)),
+        proposalDigest: this.proposalDigest(proposal),
+        summary: summarizeToolArguments(proposal),
+        status: 'pending',
+        requestedAt
+      };
+      state.pendingHumanApproval = approval;
+      state.humanApprovals.push(approval);
+      state.runStats.humanApprovalRequests += 1;
+      state.status = 'awaiting_approval';
+      state.haltReason = `Awaiting approval for ${proposal.name}.`;
+      state.logs.push(this.log('info', `Human approval required before ${proposal.name}: ${approval.summary}`, 'Permission Gate'));
+      this.emitProgress(state, 'awaiting_approval', 'warning', `Approve ${proposal.name} before Forge performs the action.`, approval.summary, activeTask.owner, activeTask, proposal.name);
+      this.persistStateToDisk(state);
+      this.latestState = state;
+      return state;
+    }
+
+    return this.continueValidatedCommit(state, activeTask, proposal, modelBindings, progressBefore);
+  }
+
+  private async continueValidatedCommit(state: HarnessState, activeTask: TaskItem, proposal: ToolProposal, modelBindings: Record<string, string>, progressBefore: string): Promise<HarnessState> {
+    state.status = 'running';
+    state.haltReason = undefined;
     state.firewall.stage = 'COMMIT';
     if (this.firewall.isMutating(proposal)) {
-      const checkpoint: SafetyCheckpoint = await this.firewall.createCheckpoint(state.currentStepIndex, proposal);
+      const checkpoint: SafetyCheckpoint = await this.firewall.createCheckpoint(state.currentStepIndex, proposal, 'workspace-snapshot');
       state.checkpointId = checkpoint.id;
       state.safetyCheckpoints.push(checkpoint);
+      while (state.safetyCheckpoints.length > MAX_CHECKPOINT_HISTORY) {
+        const removed = state.safetyCheckpoints.shift();
+        if (removed) fs.rmSync(path.join(this.tools.getWorkspaceRoot(), '.forge', 'checkpoints', removed.id), { recursive: true, force: true });
+      }
       state.runStats.safetyCheckpoints += 1;
       state.logs.push(this.log('validation', `Safety checkpoint ${checkpoint.id} created with ${checkpoint.strategy} for ${checkpoint.proposalName}.`, 'Firewall'));
     }
 
+    this.emitProgress(state, 'tool_started', 'running', `Running ${proposal.name}.`, summarizeToolArguments(proposal), activeTask.owner, activeTask, proposal.name);
     const commitResult = await this.commitProposal(state, activeTask, proposal, modelBindings);
+    this.emitProgress(state, 'tool_finished', commitResult.success ? 'pass' : 'fail', `${proposal.name} ${commitResult.success ? 'completed' : 'failed'}.`, commitResult.output, activeTask.owner, activeTask, proposal.name);
     if (['apply_patch', 'write_file', 'run_command', 'run_tests'].includes(proposal.name)) {
       await this.runOracles(state);
+      this.emitProgress(state, 'oracle', state.lastOraclePass ? 'pass' : 'fail', state.lastOraclePass ? 'Required project checks are green.' : 'Required project checks are still red.', `lint=${state.oracleStatuses.linter}, typecheck=${state.oracleStatuses.compiler}, tests=${state.oracleStatuses.tests}, build=${state.oracleStatuses.build}`, 'Oracle', activeTask, proposal.name);
     }
     recordWorkflowEvent(state, proposal, commitResult.success);
     if ((proposal.name === 'apply_patch' || proposal.name === 'write_file') && commitResult.success) {
@@ -582,12 +793,16 @@ export class AgentHarnessLoop {
     }
 
     state.firewall.stage = 'IDLE';
+    if (['success', 'failed', 'gave_up'].includes(state.status)) {
+      this.emitProgress(state, 'terminal', state.status === 'success' ? 'pass' : 'fail', `Run ${state.status}.`, state.haltReason || '', state.activeSubAgent, activeTask);
+    }
     this.persistStateToDisk(state);
     this.latestState = state;
     return state;
   }
 
   private async commitProposal(state: HarnessState, activeTask: TaskItem, proposal: ToolProposal, modelBindings: Record<string, string> = {}): Promise<{ success: boolean; output: string }> {
+    if (proposal.name === 'browser_inspect' || proposal.name === 'computer_inspect') proposal.arguments.sessionId = state.sessionId;
     if (proposal.name === 'update_plan') {
       state.planMd = enforceWorkflowPlan(String(proposal.arguments.planMd || proposal.arguments.patchContent || state.planMd), state.workflow);
       if (activeTask.owner === 'Architect') {
@@ -617,7 +832,9 @@ export class AgentHarnessLoop {
       ? await this.transactionalEditExecutor.dispatch(this.tools.getWorkspaceRoot(), activeTask.owner || 'Orchestrator', proposal)
       : proposal.name === 'run_command'
         ? await this.transactionalCommandExecutor.dispatch(this.tools.getWorkspaceRoot(), activeTask.owner || 'Orchestrator', proposal)
-        : await this.workerExecutor.dispatch(this.tools.getWorkspaceRoot(), activeTask.owner || 'Orchestrator', proposal);
+        : proposal.name === 'computer_inspect' || proposal.name === 'computer_action'
+          ? { ...await this.tools.dispatch(proposal), worker: { role: activeTask.owner || 'Orchestrator', pid: process.pid, durationMs: 0, sanitizedEnv: true, inheritedEnvKeyCount: 0, allowedEnvKeys: [], blockedEnvKeys: [] } }
+          : await this.workerExecutor.dispatch(this.tools.getWorkspaceRoot(), activeTask.owner || 'Orchestrator', proposal);
     if ('transaction' in result) {
       this.recordEditTransaction(state, result.transaction as WorkerEditTransaction);
     }
@@ -640,6 +857,15 @@ export class AgentHarnessLoop {
       this.resolveBlockers(state, activeTask, ['worker_process', 'tool_failure'], 'A corrected tool action completed successfully.');
     }
     this.captureToolResult(state, proposal, result);
+    if (proposal.name === 'browser_validate' && result.browserValidation) {
+      this.recordBrowserValidation(state, activeTask, result.browserValidation as BrowserValidationEvidence);
+    }
+    if ((proposal.name === 'browser_inspect' || proposal.name === 'browser_action') && result.browserInteraction) {
+      this.recordBrowserInteraction(state, activeTask, result.browserInteraction as BrowserInteractionEvidence, proposal.name);
+    }
+    if ((proposal.name === 'computer_inspect' || proposal.name === 'computer_action') && result.computerInteraction) {
+      this.recordComputerInteraction(state, result.computerInteraction as ComputerInteractionEvidence, proposal.name);
+    }
     if (proposal.name === 'run_command' && commandSnapshotBefore) {
       this.recordCommandSideEffects(state, proposal, commandSnapshotBefore, result.output, result.commandMetadata, 'commandTransaction' in result ? result.commandTransaction as WorkerCommandTransaction : undefined);
     }
@@ -810,10 +1036,62 @@ export class AgentHarnessLoop {
     state.runStats.clarificationAnswers = (state.runStats.clarificationAnswers || 0) + 1;
     state.status = 'idle'; state.haltReason = undefined;
     state.logs.push(this.log('info', `Clarification answered: ${value}`, 'User'));
+    this.emitProgress(state, 'resumed', 'info', 'Clarification received; run can continue.', value, 'User', state.taskGraph.tasks.find(task => task.status === 'running'));
     state.scratchpadMd += `- Answer (${pending.answeredAt}): ${value}\n`;
     this.resolveBlockers(state, state.taskGraph.tasks.find(item => item.id === pending.taskId), ['clarification'], 'User supplied the requested clarification.');
     this.persistStateToDisk(state); this.latestState = state;
     return state;
+  }
+
+  public async decideHumanApproval(decision: 'approve' | 'reject', approvalId: string, reason = '', modelBindings: Record<string, string> = {}): Promise<HarnessState> {
+    let state = this.latestState;
+    if (!state) {
+      const statePath = path.join(this.tools.getWorkspaceRoot(), '.forge', 'state.json');
+      if (!fs.existsSync(statePath)) throw new Error('No persisted Forge run is available.');
+      state = JSON.parse(fs.readFileSync(statePath, 'utf8')) as HarnessState;
+    }
+    const pending = state.pendingHumanApproval;
+    if (!pending || pending.status !== 'pending') throw new Error('No pending human approval was found.');
+    if (!approvalId || pending.id !== approvalId) throw new Error('Approval ID does not match the current pending action.');
+    if (pending.sessionId !== state.sessionId || this.proposalDigest(pending.proposal) !== pending.proposalDigest) {
+      throw new Error('Pending approval payload failed host integrity validation.');
+    }
+    const activeTask = state.taskGraph.tasks.find(task => task.id === pending.taskId && task.status === 'running');
+    if (!activeTask || activeTask.owner !== pending.role) throw new Error('Pending approval no longer belongs to the active task.');
+
+    const decidedAt = new Date().toISOString();
+    const status = decision === 'approve' ? 'approved' : 'rejected';
+    pending.status = status;
+    pending.decidedAt = decidedAt;
+    pending.decisionReason = String(reason || '').trim().slice(0, 500) || undefined;
+    const history = (state.humanApprovals || []).find(item => item.id === pending.id);
+    if (history && history !== pending) Object.assign(history, pending);
+    state.runStats = state.runStats || this.createRunStats();
+
+    if (decision === 'approve') {
+      state.runStats.humanApprovalApprovals = (state.runStats.humanApprovalApprovals || 0) + 1;
+      state.logs.push(this.log('validation', `User approved ${pending.proposal.name} (${pending.proposalDigest.slice(0, 12)}).`, 'Permission Gate'));
+      this.emitProgress(state, 'resumed', 'pass', `Approved ${pending.proposal.name}; committing the validated action.`, pending.summary, 'User', activeTask, pending.proposal.name);
+      this.persistStateToDisk(state);
+      this.latestState = state;
+      return this.runStep(state, modelBindings);
+    }
+
+    state.runStats.humanApprovalRejections = (state.runStats.humanApprovalRejections || 0) + 1;
+    state.pendingHumanApproval = undefined;
+    state.status = 'idle';
+    state.haltReason = undefined;
+    const rejection = pending.decisionReason || 'User rejected the proposed action.';
+    state.logs.push(this.log('warning', `User rejected ${pending.proposal.name}: ${rejection}`, 'Permission Gate'));
+    state.scratchpadMd += `\n## Human approval rejected - ${decidedAt}\n- Tool: ${pending.proposal.name}\n- Summary: ${pending.summary}\n- Reason: ${rejection}\n- Do not repeat the rejected action unchanged.\n`;
+    this.emitProgress(state, 'resumed', 'warning', `Rejected ${pending.proposal.name}; Forge will choose another action.`, rejection, 'User', activeTask, pending.proposal.name);
+    this.persistStateToDisk(state);
+    this.latestState = state;
+    return state;
+  }
+
+  private proposalDigest(proposal: ToolProposal): string {
+    return crypto.createHash('sha256').update(JSON.stringify({ name: proposal.name, arguments: proposal.arguments })).digest('hex');
   }
 
   private proposalRequest(repairHint: string): string {
@@ -931,6 +1209,13 @@ export class AgentHarnessLoop {
         content: 'You are a Forge Agent worker. The harness owns correctness.\nAllowed behavior: propose one structured tool call only. The deterministic firewall validates, then commits. Success requires run_tests pass and evidence ledger proof.'
       },
       { id: 'goal-contract', required: true, priority: 100, content: `Goal: ${state.goalContract.goal}` },
+      ...((state.userContext || []).length ? [{
+        id: 'user-attached-context',
+        required: true,
+        priority: 100,
+        content: `User-attached workspace context (captured by the extension host; paths and content are authoritative snapshots):\n${new ComposerContextService(this.tools.getWorkspaceRoot()).renderForPrompt(state.userContext)}`
+      }] : []),
+      ...(state.modePolicy ? [{ id: 'mode-policy', required: true, priority: 100, content: `Trusted mode: ${state.modePolicy.name} (${state.modePolicy.id})\nInstructions: ${state.modePolicy.instructions}\nMode tool ceiling: ${state.modePolicy.allowedTools.join(', ')}` }] : []),
       { id: 'workflow-governance', required: true, priority: 100, content: `Universal workflow governance:\n${workflowSummary}` },
       { id: 'project-adapter', required: true, priority: 100, content: `Deterministically selected project adapter (models cannot change these commands):\n${adapterSummary}` },
       { id: 'oracle-remediation', required: true, priority: 100, content: `Open deterministic oracle remediation capsules (fix these causes; never weaken verification):\n${oracleRemediation}` },
@@ -947,7 +1232,13 @@ export class AgentHarnessLoop {
         id: 'tool-contract',
         required: true,
         priority: 100,
-        content: `Tool contract:\n- repo_search: {"query":"text"}\n- symbol_search: {"query":"symbol"}\n- read_file: {"path":"workspace-relative/path"}\n- read_range: {"path":"workspace-relative/path","startLine":1,"endLine":80}\n- apply_patch: {"path":"workspace-relative/path","patchContent":"<<<<<<< SEARCH\\nold\\n=======\\nnew\\n>>>>>>> REPLACE"}\n- run_command: {"command":"safe non-destructive command"}\n- run_tests: {}\n- get_diff: {}\n- update_plan: {"planMd":"# PLAN.md..."}\n- update_tasks: {"tasks":[...]}\n- record_evidence: {"observation":"what passed"}\n- ask_user: {"question":"one focused question","uncertainty":"why the answer changes the work","options":["choice"],"recommendedAnswer":"best default"}\n- declare_success: {}\n\nUNCERTAINTY GATE: Report confidence (0-100), materialUncertainty, and uncertainties in every response. If material uncertainty about user intent, scope, authorization, behavior, cost, or acceptance could change the implementation, call ask_user before mutation. Do not ask for facts discoverable from the workspace: use read/search tools first. Non-material uncertainty should be handled conservatively without asking.`
+        content: `Tool contract:\n- repo_search: {"query":"text"}\n- symbol_search: {"query":"symbol"}\n- read_file: {"path":"workspace-relative/path"}\n- read_range: {"path":"workspace-relative/path","startLine":1,"endLine":80}\n- apply_patch: {"path":"workspace-relative/path","patchContent":"<<<<<<< SEARCH\\nold\\n=======\\nnew\\n>>>>>>> REPLACE"}\n- run_command: {"command":"safe non-destructive command"}\n- run_tests: {}\n- browser_inspect: {"url":"http://127.0.0.1:3000"} (loopback only; returns state-bound target IDs)\n- browser_action: {"stateId":"browser-state-...","action":"click|fill|press|select|wait","targetId":"bt-...","value":"text","key":"Enter"} (one action; always requires human approval)\n- get_diff: {}\n- update_plan: {"planMd":"# PLAN.md..."}\n- update_tasks: {"tasks":[...]}\n- record_evidence: {"observation":"what passed"}\n- ask_user: {"question":"one focused question","uncertainty":"why the answer changes the work","options":["choice"],"recommendedAnswer":"best default"}\n- declare_success: {}\n\nUNCERTAINTY GATE: Report confidence (0-100), materialUncertainty, and uncertainties in every response. If material uncertainty about user intent, scope, authorization, behavior, cost, or acceptance could change the implementation, call ask_user before mutation. Do not ask for facts discoverable from the workspace: use read/search tools first. Non-material uncertainty should be handled conservatively without asking.`
+      },
+      {
+        id: 'external-interaction-contract',
+        required: true,
+        priority: 100,
+        content: 'External interaction tools:\n- computer_inspect: {"windowTitle":"exact allowlisted title"} (Windows UI Automation; disabled by default)\n- computer_action: {"stateId":"computer-state-...","action":"invoke|set_value|focus","targetId":"ct-...","value":"text"} (one action; always requires human approval)\nNever emit scripts, selectors, coordinates, process IDs, credentials, or non-allowlisted targets.'
       },
       { id: 'task-guidance', required: true, priority: 100, content: `Task guidance: ${toolGuidance}` },
       { id: 'known-files', priority: 90, content: `Known files:\n${fileMemory}` },
@@ -1078,11 +1369,25 @@ export class AgentHarnessLoop {
       clarificationRequests: 0,
       clarificationAnswers: 0,
       clarificationGateBlocks: 0,
+      humanApprovalRequests: 0,
+      humanApprovalApprovals: 0,
+      humanApprovalRejections: 0,
       oracleFailureCaptures: 0,
       repeatedOracleFailures: 0,
       oracleFailureResolutions: 0,
       remediationGuidanceInjections: 0,
       oracleStagnationHalts: 0,
+      checkpointRestores: 0,
+      checkpointRestoreFailures: 0,
+      browserValidations: 0,
+      browserValidationFailures: 0,
+      browserInspections: 0,
+      browserActions: 0,
+      browserInteractionFailures: 0,
+      computerInspections: 0,
+      computerActions: 0,
+      computerInteractionFailures: 0,
+      progressEventsEmitted: 0,
       budgetHalts: 0,
       noProgressTurns: 0,
       lastProgressSignature: '',
@@ -1185,6 +1490,7 @@ export class AgentHarnessLoop {
     activeTask.status = 'running';
     state.haltReason = undefined;
     state.logs.push(this.log('warning', `Reflection ${state.runStats.reflectionAttempts}/${MAX_REFLECTION_ATTEMPTS} queued for ${trigger}: ${details.slice(0, 500)}`, 'Harness'));
+    this.emitProgress(state, 'reflection', 'warning', `Retrying after ${trigger.replace('_', ' ')}.`, details, activeTask.owner, activeTask);
     state.scratchpadMd = `${state.scratchpadMd}\n## Reflection - ${reflection.timestamp}\nTrigger: ${trigger}\nTask: ${activeTask.title}\n\n${details.slice(0, 4000)}\n`;
     return true;
   }
@@ -1275,6 +1581,43 @@ export class AgentHarnessLoop {
       '```'
     ].filter(Boolean).join('\n');
     state.scratchpadMd = `${state.scratchpadMd}\n${scratchEntry}\n`;
+  }
+
+  private recordBrowserValidation(state: HarnessState, activeTask: TaskItem, evidence: BrowserValidationEvidence): void {
+    state.browserValidations = state.browserValidations || [];
+    state.browserValidations.push(evidence);
+    state.runStats.browserValidations = (state.runStats.browserValidations || 0) + 1;
+    if (evidence.status === 'fail') state.runStats.browserValidationFailures = (state.runStats.browserValidationFailures || 0) + 1;
+    if (evidence.status === 'pass') {
+      state.evidenceLedger.push({
+        id: `browser-ledger-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        stepTitle: `Browser validation: ${activeTask.title}`,
+        observation: `Rendered ${evidence.finalUrl}; title=${evidence.title || '(none)'}; expectedTextFound=${String(evidence.expectedTextFound ?? 'not requested')}; screenshot=${evidence.screenshotPath}`,
+        confidence: 90,
+        timestamp: evidence.completedAt
+      });
+    }
+    state.logs.push(this.log(evidence.status === 'pass' ? 'oracle' : 'error', `Browser ${evidence.status}: ${evidence.failureReason || evidence.title || evidence.finalUrl}; screenshot=${evidence.screenshotPath || 'none'}.`, 'Browser'));
+  }
+
+  private recordBrowserInteraction(state: HarnessState, activeTask: TaskItem, evidence: BrowserInteractionEvidence, tool: 'browser_inspect' | 'browser_action'): void {
+    state.browserInteractions = state.browserInteractions || [];
+    state.browserInteractions.push(evidence);
+    if (tool === 'browser_inspect') state.runStats.browserInspections = (state.runStats.browserInspections || 0) + 1;
+    else state.runStats.browserActions = (state.runStats.browserActions || 0) + 1;
+    if (evidence.status === 'failed') state.runStats.browserInteractionFailures = (state.runStats.browserInteractionFailures || 0) + 1;
+    state.logs.push(this.log(evidence.status === 'failed' ? 'error' : 'commit', `${tool}: ${evidence.failureReason || `${evidence.title || evidence.url}; state=${evidence.id}`}; screenshot=${evidence.screenshotPath || 'none'}.`, 'Browser Use'));
+    state.scratchpadMd = `${state.scratchpadMd}\n## Browser use - ${evidence.createdAt}\nTool: ${tool}\nState: ${evidence.id}\nURL: ${evidence.url}\nStatus: ${evidence.status}\nScreenshot: ${evidence.screenshotPath || 'none'}\n`;
+  }
+
+  private recordComputerInteraction(state: HarnessState, evidence: ComputerInteractionEvidence, tool: 'computer_inspect' | 'computer_action'): void {
+    state.computerInteractions = state.computerInteractions || [];
+    state.computerInteractions.push(evidence);
+    if (tool === 'computer_inspect') state.runStats.computerInspections = (state.runStats.computerInspections || 0) + 1;
+    else state.runStats.computerActions = (state.runStats.computerActions || 0) + 1;
+    if (evidence.status === 'failed') state.runStats.computerInteractionFailures = (state.runStats.computerInteractionFailures || 0) + 1;
+    state.logs.push(this.log(evidence.status === 'failed' ? 'error' : 'commit', `${tool}: ${evidence.failureReason || `${evidence.windowTitle}; state=${evidence.id}`}; screenshot=${evidence.screenshotPath || 'none'}.`, 'Computer Use'));
+    state.scratchpadMd = `${state.scratchpadMd}\n## Computer use - ${evidence.createdAt}\nTool: ${tool}\nState: ${evidence.id}\nWindow: ${evidence.windowTitle}\nStatus: ${evidence.status}\nScreenshot: ${evidence.screenshotPath || 'none'}\n`;
   }
 
   private recordCommandSideEffects(
@@ -1755,7 +2098,7 @@ export class AgentHarnessLoop {
     const handoff: RoleHandoff = {
       role,
       generatedAt: new Date().toISOString(),
-      allowedTools: this.allowedToolsForRole(role, activeTask),
+      allowedTools: this.allowedToolsForRole(role, activeTask, state.modePolicy),
       responsibilities: this.responsibilitiesForRole(role, activeTask),
       openTasks: relatedOpenTasks,
       recentContext: context,
@@ -1767,30 +2110,21 @@ export class AgentHarnessLoop {
     return handoff;
   }
 
-  private allowedToolsForRole(role: string, activeTask: TaskItem): ToolName[] {
+  private allowedToolsForRole(role: string, activeTask: TaskItem, modePolicy?: ModePolicy): ToolName[] {
     const withAsk = (tools: ToolName[]): ToolName[] => [...tools, 'ask_user'];
-    if (role === 'Explorer') {
-      return withAsk(['repo_search', 'symbol_search', 'read_file', 'read_range']);
-    }
-    if (role === 'Architect') {
-      return withAsk(['repo_search', 'symbol_search', 'read_file', 'read_range', 'update_plan', 'update_tasks']);
-    }
-    if (role === 'Editor') {
-      return withAsk(['repo_search', 'symbol_search', 'read_file', 'read_range', 'apply_patch', 'write_file', 'run_tests']);
-    }
-    if (role === 'Reviewer' || activeTask.title.toLowerCase().includes('verification')) {
-      return withAsk(['run_tests', 'run_command', 'get_diff', 'record_evidence', 'declare_success']);
-    }
-    if (role === 'Escalation') {
-      return withAsk(['repo_search', 'symbol_search', 'read_file', 'read_range', 'apply_patch', 'run_tests', 'get_diff']);
-    }
-    return withAsk(['repo_search', 'read_file', 'read_range', 'update_plan']);
+    let base: ToolName[];
+    if (role === 'Explorer') base = withAsk(['repo_search', 'symbol_search', 'read_file', 'read_range']);
+    else if (role === 'Architect') base = withAsk(['repo_search', 'symbol_search', 'read_file', 'read_range', 'update_plan', 'update_tasks']);
+    else if (role === 'Editor') base = withAsk(['repo_search', 'symbol_search', 'read_file', 'read_range', 'apply_patch', 'write_file', 'run_tests']);
+    else if (role === 'Reviewer' || activeTask.title.toLowerCase().includes('verification')) base = withAsk(['run_tests', 'run_command', 'browser_validate', 'browser_inspect', 'browser_action', 'computer_inspect', 'computer_action', 'get_diff', 'record_evidence', 'declare_success']);
+    else if (role === 'Escalation') base = withAsk(['repo_search', 'symbol_search', 'read_file', 'read_range', 'apply_patch', 'run_tests', 'browser_validate', 'browser_inspect', 'browser_action', 'computer_inspect', 'computer_action', 'get_diff']);
+    else base = withAsk(['repo_search', 'read_file', 'read_range', 'update_plan']);
+    return modePolicy ? base.filter(tool => modePolicy.allowedTools.includes(tool)) : base;
   }
 
   private validateRoleCapability(state: HarnessState, activeTask: TaskItem, proposal: ToolProposal): { valid: boolean; reason?: string } {
-    void state;
     const role = activeTask.owner || 'Orchestrator';
-    const allowed = this.allowedToolsForRole(role, activeTask);
+    const allowed = this.allowedToolsForRole(role, activeTask, state.modePolicy);
     if (allowed.includes(proposal.name)) {
       return { valid: true };
     }
@@ -1814,7 +2148,7 @@ export class AgentHarnessLoop {
     const existing = state.workerContexts[normalizedRole];
     if (existing) {
       existing.updatedAt = new Date().toISOString();
-      existing.allowedTools = this.allowedToolsForRole(normalizedRole, fallbackTask);
+      existing.allowedTools = this.allowedToolsForRole(normalizedRole, fallbackTask, state.modePolicy);
       if (activeTask) {
         existing.lastTaskId = activeTask.id;
         existing.lastTaskTitle = activeTask.title;
@@ -1825,7 +2159,7 @@ export class AgentHarnessLoop {
     const worker: WorkerContext = {
       role: normalizedRole,
       sessionId: `${state.sessionId}:worker:${normalizedRole.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
-      allowedTools: this.allowedToolsForRole(normalizedRole, fallbackTask),
+      allowedTools: this.allowedToolsForRole(normalizedRole, fallbackTask, state.modePolicy),
       createdAt: now,
       updatedAt: now,
       providerCalls: 0,
@@ -2028,6 +2362,7 @@ export class AgentHarnessLoop {
     fs.writeFileSync(path.join(forgeDir, 'diff-reviews.json'), JSON.stringify(state.diffReviews || [], null, 2), 'utf8');
     fs.writeFileSync(path.join(forgeDir, 'reviewer-critiques.json'), JSON.stringify(state.reviewerCritiques || [], null, 2), 'utf8');
     fs.writeFileSync(path.join(forgeDir, 'precommit-reviews.json'), JSON.stringify(state.preCommitReviews || [], null, 2), 'utf8');
+    fs.writeFileSync(path.join(forgeDir, 'human-approvals.json'), JSON.stringify(state.humanApprovals || [], null, 2), 'utf8');
     fs.writeFileSync(path.join(forgeDir, 'escalations.json'), JSON.stringify(state.escalations || [], null, 2), 'utf8');
     fs.writeFileSync(path.join(forgeDir, 'blockers.json'), JSON.stringify(state.blockers || [], null, 2), 'utf8');
     this.refreshContextBundle(state);
@@ -2043,6 +2378,11 @@ export class AgentHarnessLoop {
     fs.writeFileSync(path.join(forgeDir, 'worker-contexts.json'), JSON.stringify(state.workerContexts || {}, null, 2), 'utf8');
     fs.writeFileSync(path.join(forgeDir, 'architect-handoff.json'), JSON.stringify(state.architectHandoff || null, null, 2), 'utf8');
     fs.writeFileSync(path.join(forgeDir, 'safety-checkpoints.json'), JSON.stringify(state.safetyCheckpoints || [], null, 2), 'utf8');
+    fs.writeFileSync(path.join(forgeDir, 'checkpoint-restores.json'), JSON.stringify(state.checkpointRestores || [], null, 2), 'utf8');
+    fs.writeFileSync(path.join(forgeDir, 'browser-validations.json'), JSON.stringify(state.browserValidations || [], null, 2), 'utf8');
+    fs.writeFileSync(path.join(forgeDir, 'browser-interactions.json'), JSON.stringify(state.browserInteractions || [], null, 2), 'utf8');
+    fs.writeFileSync(path.join(forgeDir, 'computer-interactions.json'), JSON.stringify(state.computerInteractions || [], null, 2), 'utf8');
+    fs.writeFileSync(path.join(forgeDir, 'progress-events.json'), JSON.stringify(state.progressEvents || [], null, 2), 'utf8');
     fs.writeFileSync(path.join(forgeDir, 'command-effects.json'), JSON.stringify(state.commandEffects || [], null, 2), 'utf8');
     fs.writeFileSync(path.join(forgeDir, 'budget.json'), JSON.stringify(state.runBudget || this.createRunBudget(state.goalContract), null, 2), 'utf8');
     fs.writeFileSync(path.join(forgeDir, 'repository-knowledge.json'), JSON.stringify(state.knowledge, null, 2), 'utf8');
@@ -2099,6 +2439,7 @@ export class AgentHarnessLoop {
       }
       index.sort((a, b) => (Number(b.pinned) - Number(a.pinned)) || String(b.updatedAt).localeCompare(String(a.updatedAt)));
       fs.writeFileSync(indexPath, JSON.stringify(index.slice(0, 200), null, 2), 'utf8');
+      fs.writeFileSync(path.join(forgeDir, 'active-session.json'), JSON.stringify({ sessionId: state.sessionId, kind: 'run', updatedAt: meta.updatedAt }, null, 2), 'utf8');
     } catch {
       // Session persistence must never break a run.
     }
@@ -2332,6 +2673,7 @@ export class AgentHarnessLoop {
       if (state.status !== 'paused') {
         state.status = 'paused';
         state.logs.push(this.log('warning', 'Run paused by user control. No provider calls will be made until resume.', 'Harness'));
+        this.emitProgress(state, 'paused', 'warning', 'Run paused.', 'No provider calls will be made until resume.', 'Harness');
         this.persistStateToDisk(state);
         this.latestState = state;
       }
@@ -2340,6 +2682,7 @@ export class AgentHarnessLoop {
     if (state.status === 'paused') {
       state.status = 'idle';
       state.logs.push(this.log('success', 'Run resumed by user control.', 'Harness'));
+      this.emitProgress(state, 'resumed', 'info', 'Run resumed.', 'The next governed step may proceed.', 'Harness');
     }
     return null;
   }
@@ -2379,6 +2722,7 @@ export class AgentHarnessLoop {
     state.runBudget.haltReason = undefined;
     state.maxSteps = state.currentStepIndex + Math.max(1, options.additionalSteps || 30);
     state.logs.push(this.log('success', `Run resumed from disk at step ${state.currentStepIndex} with a fresh wall-clock window and ${Math.max(1, options.additionalSteps || 30)} additional steps. Cost spent so far is retained.`, 'Harness'));
+    this.emitProgress(state, 'resumed', 'info', 'Persisted run resumed.', `Continuing from step ${state.currentStepIndex}; prior cost remains accounted.`, 'Harness');
     this.persistStateToDisk(state);
     this.latestState = state;
     return state;
@@ -2388,14 +2732,71 @@ export class AgentHarnessLoop {
     state.status = status;
     state.haltReason = reason;
     state.logs.push(this.log('error', reason, 'Harness'));
+    this.emitProgress(state, 'terminal', 'fail', `Run ${status}.`, reason, 'Harness');
     this.persistStateToDisk(state);
     this.latestState = state;
     return state;
   }
 
+  private emitProgress(
+    state: HarnessState,
+    kind: RunProgressKind,
+    status: RunProgressEvent['status'],
+    summary: string,
+    detail = '',
+    role = state.activeSubAgent || 'Orchestrator',
+    activeTask?: TaskItem,
+    toolName?: ToolName
+  ): RunProgressEvent {
+    state.progressEvents = state.progressEvents || [];
+    state.runStats = state.runStats || this.createRunStats();
+    const sequence = (state.progressEvents.at(-1)?.sequence || 0) + 1;
+    const event: RunProgressEvent = {
+      id: `${state.sessionId}:progress:${sequence}`,
+      sequence,
+      sessionId: state.sessionId,
+      stepIndex: state.currentStepIndex,
+      kind,
+      status,
+      summary: String(summary || '').slice(0, 500),
+      detail: detail ? String(detail).slice(0, 2_000) : undefined,
+      role,
+      taskId: activeTask?.id,
+      taskTitle: activeTask?.title,
+      phase: state.firewall?.stage || 'IDLE',
+      toolName,
+      timestamp: new Date().toISOString()
+    };
+    state.progressEvents.push(event);
+    if (state.progressEvents.length > MAX_PROGRESS_EVENTS) state.progressEvents.splice(0, state.progressEvents.length - MAX_PROGRESS_EVENTS);
+    state.runStats.progressEventsEmitted = (state.runStats.progressEventsEmitted || 0) + 1;
+    try {
+      const forgeDir = path.join(this.tools.getWorkspaceRoot(), '.forge');
+      fs.mkdirSync(forgeDir, { recursive: true });
+      fs.appendFileSync(path.join(forgeDir, 'progress-events.jsonl'), `${JSON.stringify(event)}\n`, 'utf8');
+    } catch {
+      // Progress persistence must never interrupt the governed run.
+    }
+    try {
+      this.progressListener?.(event);
+    } catch {
+      // UI observers cannot influence harness correctness.
+    }
+    return event;
+  }
+
   private log(type: StepLog['type'], message: string, subAgent: string): StepLog {
     return { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, type, message, subAgent, timestamp: new Date().toISOString() };
   }
+}
+
+function summarizeToolArguments(proposal: ToolProposal): string {
+  const args = proposal.arguments || {};
+  if (typeof args.path === 'string' && args.path) return `Path: ${args.path}`;
+  if (typeof args.command === 'string' && args.command) return `Command: ${args.command.slice(0, 500)}`;
+  if (typeof args.url === 'string' && args.url) return `URL: ${args.url}`;
+  if (typeof args.query === 'string' && args.query) return `Query: ${args.query.slice(0, 500)}`;
+  return 'Structured arguments accepted by the firewall.';
 }
 
 export interface GoalOverrides {
