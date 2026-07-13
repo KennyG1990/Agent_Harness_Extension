@@ -22,9 +22,23 @@ async function runSuite(): Promise<void> {
   assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.runDifficultWeakModelProof'), 'difficult live proof command should be registered in the extension host.');
   assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.setHumanApprovalPolicy'), 'human approval policy command should be registered in the extension host.');
   assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.resolveHumanApproval'), 'human approval decision command should be registered in the extension host.');
+  assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.getAssuranceLevel'), 'assurance query command should be registered in the extension host.');
+  assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.setAssuranceLevel'), 'assurance selection command should be registered in the extension host.');
+  assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.decideExecutionContract'), 'execution contract decision command should be registered in the extension host.');
+  assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.openExecutionContract'), 'execution contract artifact command should be registered in the extension host.');
   assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.buildWorkspaceIndex'), 'workspace index build command should be registered in the extension host.');
   assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.getWorkspaceIndexStatus'), 'workspace index status command should be registered in the extension host.');
   assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.openWorkspaceIndex'), 'workspace index open command should be registered in the extension host.');
+  assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.openSubAgentTopology'), 'sub-agent topology open command should be registered in the extension host.');
+  assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.openSubAgentHandoffs'), 'sub-agent handoffs open command should be registered in the extension host.');
+  assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.openSubAgentMerges'), 'sub-agent merges open command should be registered in the extension host.');
+  assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.openSubAgentMetrics'), 'sub-agent metrics open command should be registered in the extension host.');
+  assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.openContextOptimizationReport'), 'context optimization report command should be registered in the extension host.');
+  assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.openModelRoutingReport'), 'model routing report command should be registered in the extension host.');
+  assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.runPlanBigExecuteSmallEval'), 'plan-big/execute-small eval command should be registered in the extension host.');
+  assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.openPlanBigExecuteSmallReport'), 'plan-big/execute-small report command should be registered in the extension host.');
+  assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.runProductionBenchmark'), 'production benchmark command should be registered in the extension host.');
+  assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.openProductionBenchmarkReport'), 'production benchmark report command should be registered in the extension host.');
   assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.attachContextFile'), 'composer context attachment command should be registered in the extension host.');
   assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.getComposerContext'), 'composer context query command should be registered in the extension host.');
   assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.searchContextMentions'), '@ mention search command should be registered in the extension host.');
@@ -33,8 +47,22 @@ async function runSuite(): Promise<void> {
   assert.equal(vscode.workspace.getConfiguration('forge').get('humanApprovalPolicy'), 'auto', 'approval policy must persist in native configuration.');
   assert.equal(await vscode.commands.executeCommand('forge-agent.setHumanApprovalPolicy', 'ask'), 'ask');
   await assert.rejects(async () => vscode.commands.executeCommand('forge-agent.resolveHumanApproval', 'approve', 'forged-webview-id'), /No pending human approval|No persisted Forge run/, 'webview intent cannot manufacture host approval authority.');
+  assert.equal(await vscode.commands.executeCommand('forge-agent.setAssuranceLevel', 'verified'), 'verified');
+  assert.equal(await vscode.commands.executeCommand('forge-agent.getAssuranceLevel'), 'verified');
+  const contractGateState: any = await vscode.commands.executeCommand('forge-agent.runAgentGoal', { goal: 'Confirm the contract before any provider call.', assuranceLevel: 'verified', humanApprovalPolicy: 'auto' });
+  assert.equal(contractGateState.status, 'awaiting_approval');
+  assert.equal(contractGateState.executionContract.status, 'pending');
+  assert.equal(contractGateState.runStats.providerCalls, 0, 'verified contract gate must stop before provider use.');
+  await assert.rejects(async () => vscode.commands.executeCommand('forge-agent.decideExecutionContract', 'confirm', 'forged-digest'), /digest does not match/, 'forged contract decisions must fail closed.');
+  const rejectedContract: any = await vscode.commands.executeCommand('forge-agent.decideExecutionContract', 'reject', contractGateState.executionContract.digest);
+  assert.equal(rejectedContract.status, 'gave_up');
+  assert.equal(rejectedContract.runStats.providerCalls, 0);
+  assert.equal(await vscode.commands.executeCommand('forge-agent.setAssuranceLevel', 'standard'), 'standard');
   await assert.rejects(async () => vscode.commands.executeCommand('forge-agent.runDifficultWeakModelProof', { model: 'anthropic/claude-opus-latest', reportRoot: process.cwd(), confirmLiveSpend: true }), /not approved/, 'frontier substitutions must reject before readiness or provider calls.');
   await assert.rejects(async () => vscode.commands.executeCommand('forge-agent.runDifficultWeakModelProof', { model: 'qwen/qwen-2.5-7b-instruct', reportRoot: process.cwd(), confirmLiveSpend: false }), /confirmation/, 'live proof must reject missing spend consent before readiness or provider calls.');
+  await assert.rejects(async () => vscode.commands.executeCommand('forge-agent.runProductionBenchmark', { model: 'anthropic/claude-opus-latest', confirmLiveSpend: true }), /not approved/, 'production benchmark must reject frontier substitution before readiness or provider calls.');
+  await assert.rejects(async () => vscode.commands.executeCommand('forge-agent.runProductionBenchmark', { model: 'qwen/qwen-2.5-7b-instruct', confirmLiveSpend: false }), /confirmation/, 'production benchmark must reject missing spend consent before readiness or provider calls.');
+  await assert.rejects(async () => vscode.commands.executeCommand('forge-agent.runProductionBenchmark', { model: 'qwen/qwen-2.5-7b-instruct', confirmLiveSpend: true, taskLimit: 15 }), /exactly 16/, 'production benchmark must reject cherry-picked task subsets before readiness or provider calls.');
 
   await vscode.commands.executeCommand('forge-agent.openStudio');
   const initialDiagnostics: any = await vscode.commands.executeCommand('forge-agent.diagnostics');
@@ -55,6 +83,19 @@ async function runSuite(): Promise<void> {
   await vscode.commands.executeCommand('forge-agent.clearComposerContext');
   assert.equal((await vscode.commands.executeCommand('forge-agent.getComposerContext') as any[]).length, 0);
   fs.rmSync(contextProbe, { force: true });
+  const modeCeilingSubmission: any = await vscode.commands.executeCommand('forge-agent.submitMessage', {
+    message: 'Fix the workspace now.',
+    messages: [{ role: 'user', content: 'Fix the workspace now.' }],
+    modeId: 'ask'
+  });
+  assert.equal(modeCeilingSubmission.decision.route, 'clarify_intent');
+  assert.equal(modeCeilingSubmission.decision.requiresModeChange, true);
+  const ambiguousSubmission: any = await vscode.commands.executeCommand('forge-agent.submitMessage', {
+    message: 'This could be useful.',
+    messages: [{ role: 'user', content: 'This could be useful.' }],
+    modeId: 'code'
+  });
+  assert.equal(ambiguousSubmission.decision.route, 'clarify_intent');
   const mentionProbeDir = path.join(workspace, 'mention-e2e');
   fs.mkdirSync(mentionProbeDir, { recursive: true });
   fs.writeFileSync(path.join(mentionProbeDir, 'focused-context.ts'), 'export const mentionProbe = true;\n', 'utf8');
@@ -120,6 +161,44 @@ async function runSuite(): Promise<void> {
   assert.equal(reloadedReadiness.credential.configured, true, 'secret storage should remain configured on a later command read.');
   assert.equal(JSON.stringify(reloadedReadiness).includes(secretProbe), false, 'readiness command must never expose stored secret bytes.');
   await vscode.commands.executeCommand('forge-agent.clearOpenRouterApiKey');
+
+  const mcpFixtureServer = path.resolve(__dirname, '..', 'fixtures', 'mcpFixtureServer.js');
+  await vscode.workspace.getConfiguration('forge').update('mcpServers', [{
+    id: 'e2e-fixture', enabled: true, transport: 'stdio', command: process.execPath, args: [mcpFixtureServer], cwd: workspace, env: { ELECTRON_RUN_AS_NODE: '1' },
+    tools: { read_echo: { sideEffect: 'read', approval: 'never', allowedRoles: ['Explorer'], scope: 'external', workspacePathFields: [], evidenceRequired: true } }
+  }], vscode.ConfigurationTarget.Workspace);
+  const mcpCatalog: any = await vscode.commands.executeCommand('forge-agent.listMcpTools');
+  assert.equal(mcpCatalog.serverCount, 1, 'extension host must discover the configured MCP server.');
+  assert.equal(mcpCatalog.tools.some((tool: any) => tool.serverId === 'e2e-fixture' && tool.name === 'read_echo'), true, 'extension host must expose only the authorized MCP tool.');
+  assert.equal(mcpCatalog.tools.some((tool: any) => tool.name === 'undeclared_tool'), false, 'extension host discovery must not authorize an undeclared MCP tool.');
+  const storedMcpCredential: any = await vscode.commands.executeCommand('forge-agent.setMcpCredential', 'e2e-fixture', 'token', 'secret-e2e-value');
+  assert.equal(storedMcpCredential.stored, true);
+  const clearedMcpCredential: any = await vscode.commands.executeCommand('forge-agent.clearMcpCredential', 'e2e-fixture', 'token');
+  assert.equal(clearedMcpCredential.cleared, true);
+  const openedMcpCatalog = await vscode.commands.executeCommand('forge-agent.openMcpCatalog');
+  assert.equal(openedMcpCatalog, path.join(workspace, '.forge', 'mcp-catalog.json'), 'MCP catalog must open in a native editor artifact.');
+  await vscode.workspace.getConfiguration('forge').update('mcpServers', [], vscode.ConfigurationTarget.Workspace);
+  await vscode.workspace.getConfiguration('forge').update('mcpServers', undefined, vscode.ConfigurationTarget.Workspace);
+  const onboardingConfig = {
+    id: 'onboarding-fixture', enabled: true, transport: 'stdio', command: process.execPath, args: [mcpFixtureServer], cwd: workspace, env: { ELECTRON_RUN_AS_NODE: '1' },
+    tools: { read_echo: { sideEffect: 'read', approval: 'never', allowedRoles: ['Explorer'], scope: 'external', workspacePathFields: [], evidenceRequired: true } }
+  };
+  const addedMcp: any = await vscode.commands.executeCommand('forge-agent.addMcpServer', onboardingConfig);
+  assert.equal(addedMcp.added, true);
+  assert.equal(vscode.workspace.getConfiguration('forge').get<any[]>('mcpServers', []).some(server => server.id === 'onboarding-fixture'), true, 'native onboarding must persist a validated server.');
+  const replacedMcp: any = await vscode.commands.executeCommand('forge-agent.addMcpServer', { ...onboardingConfig, name: 'Replaced fixture' });
+  assert.equal(replacedMcp.server.name, 'Replaced fixture', 'same-id onboarding must replace rather than duplicate.');
+  await assert.rejects(async () => vscode.commands.executeCommand('forge-agent.addMcpServer', { ...onboardingConfig, id: 'remote-fixture', transport: 'streamable-http', command: undefined, url: 'https://example.com/mcp' }), /loopback host/);
+  const removedMcp: any = await vscode.commands.executeCommand('forge-agent.removeMcpServer', 'onboarding-fixture');
+  assert.equal(removedMcp.removed, true);
+  assert.equal(vscode.workspace.getConfiguration('forge').get<any[]>('mcpServers', []).some(server => server.id === 'onboarding-fixture'), false);
+
+  const priorPromptModel = vscode.workspace.getConfiguration('forge').get<string>('promptEnhancementModel');
+  assert.equal(await vscode.commands.executeCommand('forge-agent.setPromptEnhancementModel', 'google/gemini-2.5-flash-lite'), 'google/gemini-2.5-flash-lite');
+  const enhancementSettings: any = await vscode.commands.executeCommand('forge-agent.getPromptEnhancementSettings');
+  assert.equal(enhancementSettings.modelId, 'google/gemini-2.5-flash-lite', 'prompt enhancement model must be host-owned and queryable.');
+  await assert.rejects(async () => vscode.commands.executeCommand('forge-agent.setPromptEnhancementModel', '../bad model'), /exact bounded model slug/);
+  await vscode.workspace.getConfiguration('forge').update('promptEnhancementModel', priorPromptModel, vscode.ConfigurationTarget.Global);
   const workspaceText = fs.readdirSync(workspace).filter(name => fs.statSync(path.join(workspace, name)).isFile()).map(name => fs.readFileSync(path.join(workspace, name), 'utf8')).join('\n');
   assert.equal(workspaceText.includes(secretProbe), false, 'workspace artifacts must not contain the secret-storage probe value.');
   const supportResult: any = await vscode.commands.executeCommand('forge-agent.reportProblem', { copy: false, openReport: false, offerIssue: false });
@@ -142,7 +221,7 @@ async function runSuite(): Promise<void> {
   const laterModes: any[] = await vscode.commands.executeCommand('forge-agent.listModes');
   assert.ok(laterModes.some(mode => mode.id === savedMode.id && mode.name === savedMode.name), 'saved custom mode must persist to a later command call.');
   await assert.rejects(async () => { await vscode.commands.executeCommand('forge-agent.upsertMode', { id: 'code', name: 'Spoof Code', description: 'x', instructions: 'x', intent: 'code', modelRole: 'code', inference: 'Instant', allowedTools: modeTools }); }, /Built-in modes cannot be overwritten/);
-  await assert.rejects(async () => { await vscode.commands.executeCommand('forge-agent.runAgentGoal', { goal: 'Must not run.', modeId: 'ask' }); }, /advisory/);
+  await assert.rejects(async () => { await vscode.commands.executeCommand('forge-agent.runAgentGoal', { goal: 'Must not run.', modeId: 'ask' }); }, /non-mutating/);
   await assert.rejects(async () => { await vscode.commands.executeCommand('forge-agent.runAgentGoal', { goal: 'Must not run.', modeId: 'unknown-mode', allowedTools: ['run_command'] }); }, /Unknown Forge mode/);
   assert.equal(await vscode.commands.executeCommand('forge-agent.deleteMode', savedMode.id), true);
 
@@ -663,7 +742,9 @@ async function runSuite(): Promise<void> {
   assert.equal(commandPolicyFirewall.validateCommand('git commit -am "agent commit"').valid, false, 'shared git history mutation must be rejected.');
   assert.equal(commandPolicyFirewall.validateCommand('git config user.name Forge').valid, false, 'shared git configuration mutation must be rejected.');
   assert.equal(commandPolicyFirewall.validateCommand('git status --short').valid, true, 'read-only git inspection should remain allowed.');
-  assert.equal(commandPolicyFirewall.validateCommand('curl https://example.test/status').valid, true, 'read-only network command intent should pass deterministic policy.');
+  const strictNetworkRead = commandPolicyFirewall.validateCommand('curl https://example.test/status');
+  assert.equal(strictNetworkRead.valid, false, 'network reads must fail closed when no proven socket sandbox is available.');
+  assert.match(strictNetworkRead.reason || '', /strict_isolation_unavailable/);
   const blockedNetworkWorkspace = createTempWorkspace('forge-network-block-');
   const blockedNetworkProvider = {
     capabilities: () => ({ structuredOutput: true, toolCalls: true, vision: false, contextLength: 128000 }),
@@ -713,7 +794,7 @@ async function runSuite(): Promise<void> {
   assert.match(String(editorEscapeState.firewall.validationReason), /Editor cannot use declare_success/, 'Editor must not access reviewer-only success declaration.');
   assert.ok(editorEscapeState.blockers.some((blocker: any) => blocker.category === 'role_capability' && blocker.retryable), 'role violation should persist with deterministic retry policy.');
   assert.equal(editorEscapeState.workerContexts.Editor.rejectedProposals, 1, 'Editor worker context should retain its rejected proposal count.');
-  assert.match(roleSessionIds[0], /:worker:editor$/, 'Editor provider call must use a role-scoped session identity.');
+  assert.match(roleSessionIds[0], /:subagent:editor:3$/, 'Editor provider call must use a task-scoped sub-agent session identity.');
 
   const reviewerEscapeProvider = {
     capabilities: () => ({ structuredOutput: true, toolCalls: true, vision: false, contextLength: 128000 }),
@@ -740,7 +821,7 @@ async function runSuite(): Promise<void> {
   assert.equal(fs.readFileSync(path.join(roleWorkspace, 'src', 'guard.txt'), 'utf8'), 'unchanged', 'Reviewer capability rejection must happen before file mutation.');
   assert.equal(reviewerEscapeState.runStats.roleCapabilityBlocks, 1, 'Reviewer cross-role proposal should increment capability block evidence.');
   assert.match(String(reviewerEscapeState.firewall.validationReason), /Reviewer cannot use apply_patch/, 'Reviewer must not access Editor mutation tools.');
-  assert.match(roleSessionIds[1], /:worker:reviewer$/, 'Reviewer provider call must use a distinct role-scoped session identity.');
+  assert.match(roleSessionIds[1], /:subagent:reviewer:4$/, 'Reviewer provider call must use a task-scoped sub-agent session identity.');
   assert.notEqual(roleSessionIds[0], roleSessionIds[1], 'Editor and Reviewer must not share provider session identity.');
   const workerContextsArtifact = JSON.parse(fs.readFileSync(path.join(roleWorkspace, '.forge', 'worker-contexts.json'), 'utf8'));
   assert.equal(workerContextsArtifact.Reviewer.rejectedProposals, 1, 'worker-contexts artifact should persist role rejection evidence.');
@@ -1138,25 +1219,19 @@ async function runSuite(): Promise<void> {
   satisfyWorkflowPlanning(commandState);
   commandState = await commandLoop.runStep(commandState, {});
   delete process.env.FORGE_SANDBOX_SECRET;
-  assert.ok(fs.existsSync(path.join(commandWorkspace, 'generated', 'effect.txt')), 'command should create fixture file.');
-  assert.ok(commandState.commandEffects.some((entry: any) => entry.created.includes('generated/effect.txt')), 'command side-effect ledger should record created file.');
-  assert.ok(commandState.commandEffects.some((entry: any) => entry.sandbox?.sanitizedEnv === true), 'command side-effect ledger should record sanitized sandbox metadata.');
-  assert.ok(commandState.commandEffects.some((entry: any) => entry.sandbox?.blockedEnvKeys?.includes('FORGE_SANDBOX_SECRET')), 'command sandbox should block non-allowlisted secret env keys.');
-  assert.ok(commandState.commandEffects.every((entry: any) => !(entry.sandbox?.allowedEnvKeys || []).includes('FORGE_SANDBOX_SECRET')), 'command sandbox must not allow the secret env key.');
-  assert.equal(commandState.runStats.commandEffectCaptures, 1, 'command side-effect capture should be counted.');
-  assert.equal(commandState.runStats.commandTransactions, 1, 'command transaction should be counted.');
-  assert.equal(commandState.runStats.commandTransactionMergedFiles, 1, 'merged command files should be counted.');
-  assert.equal(commandState.workerCommandTransactions[0]?.committed, true, 'main loop must persist committed command transaction evidence.');
-  assert.equal(commandState.commandEffects[0]?.transactionId, commandState.workerCommandTransactions[0]?.id, 'side-effect evidence must link to its command transaction.');
+  assert.equal(fs.existsSync(path.join(commandWorkspace, 'generated', 'effect.txt')), false, 'unknown inline command must not create a fixture file without strict isolation.');
+  assert.equal(commandState.commandEffects.length, 0, 'strict-isolation rejection must occur before command side-effect capture.');
+  assert.equal(commandState.workerCommandTransactions.length, 0, 'strict-isolation rejection must occur before transactional command launch.');
+  assert.match(String(commandState.firewall.validationReason), /strict_isolation_unavailable/, 'product rejection must expose the missing containment guarantee.');
   const commandEffectsArtifact = JSON.parse(fs.readFileSync(path.join(commandWorkspace, '.forge', 'command-effects.json'), 'utf8'));
-  assert.ok(commandEffectsArtifact.some((entry: any) => entry.created.includes('generated/effect.txt')), 'command side-effect artifact should persist created file.');
-  assert.ok(commandEffectsArtifact.some((entry: any) => entry.sandbox?.blockedEnvKeys?.includes('FORGE_SANDBOX_SECRET')), 'command side-effect artifact should persist sandbox blocked key names.');
+  assert.equal(commandEffectsArtifact.length, 0, 'rejected inline command must persist no execution record.');
   const commandTransactionsArtifact = JSON.parse(fs.readFileSync(path.join(commandWorkspace, '.forge', 'worker-command-transactions.json'), 'utf8'));
-  assert.equal(commandTransactionsArtifact[0]?.mergedFileCount, 1, 'command transaction artifact should persist merged-file evidence.');
+  assert.equal(commandTransactionsArtifact.length, 0, 'rejected inline command must persist no transaction.');
   const versionResult = await new WorkspaceTools(commandWorkspace).runCommand('curl.exe --version');
   assert.equal(versionResult.success, true, 'curl version probe should execute without making a network request.');
   assert.equal(versionResult.commandMetadata?.network.detected, true, 'command metadata should capture network-capable command intent.');
   assert.equal(versionResult.commandMetadata?.network.risk, 'read', 'non-mutating curl probe should classify as read intent.');
+  assert.equal(versionResult.commandMetadata?.isolationAllowed, false, 'direct diagnostic execution must still report that strict network isolation was unavailable.');
 
   let wallClockProviderCalls = 0;
   const wallClockProvider = {
@@ -1480,7 +1555,7 @@ async function runSuite(): Promise<void> {
   assert.equal(isolatedCommandReport.sourceMutated, false, 'isolated command report should prove source workspace stayed unchanged.');
   assert.equal(isolatedCommandReport.reportPath, path.join(workspace, '.forge', 'isolated-runs', 'latest-isolated-run.json'), 'isolated command should persist report in workspace.');
 
-  for (const rel of ['.forge/state.json', '.forge/workflow-governance.json', '.forge/workflow-task-record.md', '.forge/project-adapter.json', '.forge/oracle-failures.json', '.forge/clarifications.json', '.forge/context-bundle.json', '.forge/retrieval-index.json', '.forge/semantic-retrieval.json', '.forge/role-handoffs.json', '.forge/worker-contexts.json', '.forge/worker-edit-transactions.json', '.forge/worker-command-transactions.json', '.forge/skill-registry.json', '.forge/blockers.json', '.forge/safety-checkpoints.json', '.forge/checkpoint-restores.json', '.forge/command-effects.json', '.forge/budget.json', '.forge/isolated-runs/latest-isolated-run.json', '.forge/isolated-runs/latest-isolated-run.diff', '.forge/goal-contract.json', '.forge/task-graph.json', '.forge/evidence-ledger.json', '.forge/diff-reviews.json', '.forge/reviewer-critiques.json', '.forge/precommit-reviews.json', '.forge/escalations.json', '.forge/latest-proof-report.json', '.forge/evals/latest-weak-model-eval.json', '.forge/verification-fixture-matrix.json', 'PLAN.md', 'todos.json', 'SCRATCHPAD.md', 'evidence_ledger.json']) {
+  for (const rel of ['.forge/state.json', '.forge/workflow-governance.json', '.forge/workflow-task-record.md', '.forge/project-adapter.json', '.forge/oracle-failures.json', '.forge/clarifications.json', '.forge/context-bundle.json', '.forge/retrieval-index.json', '.forge/semantic-retrieval.json', '.forge/role-handoffs.json', '.forge/worker-contexts.json', '.forge/worker-edit-transactions.json', '.forge/worker-command-transactions.json', '.forge/skill-registry.json', '.forge/blockers.json', '.forge/safety-checkpoints.json', '.forge/checkpoint-restores.json', '.forge/command-effects.json', '.forge/budget.json', '.forge/subagent-topology.json', '.forge/subagent-handoffs.json', '.forge/subagent-merges.json', '.forge/subagent-metrics.json', '.forge/isolated-runs/latest-isolated-run.json', '.forge/isolated-runs/latest-isolated-run.diff', '.forge/goal-contract.json', '.forge/task-graph.json', '.forge/evidence-ledger.json', '.forge/diff-reviews.json', '.forge/reviewer-critiques.json', '.forge/precommit-reviews.json', '.forge/escalations.json', '.forge/latest-proof-report.json', '.forge/evals/latest-weak-model-eval.json', '.forge/verification-fixture-matrix.json', 'PLAN.md', 'todos.json', 'SCRATCHPAD.md', 'evidence_ledger.json']) {
     assert.ok(fs.existsSync(path.join(workspace, rel)), `${rel} should exist`);
   }
 
@@ -1538,6 +1613,9 @@ async function runSuite(): Promise<void> {
   const openedBrowserScreenshot = await vscode.commands.executeCommand('forge-agent.openArtifact', 'browserScreenshot');
   assert.equal(openedBrowserScreenshot, path.join(workspace, '.forge', 'browser-runs', 'latest-browser-validation.png'), 'browser screenshot should open through the native image editor command.');
 
+  const openedMcpArtifact = await vscode.commands.executeCommand('forge-agent.openArtifact', 'mcp-catalog');
+  assert.equal(openedMcpArtifact, path.join(workspace, '.forge', 'mcp-catalog.json'), 'MCP catalog should open through the generic native artifact command.');
+
   const openedCommandEffects = await vscode.commands.executeCommand('forge-agent.openArtifact', 'commandEffects');
   assert.equal(openedCommandEffects, path.join(workspace, '.forge', 'command-effects.json'), 'command effects should open through native editor command.');
 
@@ -1552,6 +1630,15 @@ async function runSuite(): Promise<void> {
 
   const openedPreCommit = await vscode.commands.executeCommand('forge-agent.openArtifact', 'precommit');
   assert.equal(openedPreCommit, path.join(workspace, '.forge', 'precommit-reviews.json'), 'pre-commit reviews should open through native editor command.');
+
+  const openedSubAgentTopology = await vscode.commands.executeCommand('forge-agent.openSubAgentTopology');
+  assert.equal(openedSubAgentTopology, path.join(workspace, '.forge', 'subagent-topology.json'), 'sub-agent topology command should open the native artifact path.');
+  const openedSubAgentHandoffs = await vscode.commands.executeCommand('forge-agent.openSubAgentHandoffs');
+  assert.equal(openedSubAgentHandoffs, path.join(workspace, '.forge', 'subagent-handoffs.json'), 'sub-agent handoffs command should open the native artifact path.');
+  const openedSubAgentMerges = await vscode.commands.executeCommand('forge-agent.openSubAgentMerges');
+  assert.equal(openedSubAgentMerges, path.join(workspace, '.forge', 'subagent-merges.json'), 'sub-agent merges command should open the native artifact path.');
+  const openedSubAgentMetrics = await vscode.commands.executeCommand('forge-agent.openSubAgentMetrics');
+  assert.equal(openedSubAgentMetrics, path.join(workspace, '.forge', 'subagent-metrics.json'), 'sub-agent metrics command should open the native artifact path.');
 
   const terminalName = await vscode.commands.executeCommand('forge-agent.openTerminal');
   assert.equal(terminalName, 'Forge Agent', 'terminal command should create a native IDE terminal.');

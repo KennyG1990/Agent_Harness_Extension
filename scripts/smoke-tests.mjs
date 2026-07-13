@@ -67,6 +67,10 @@ assert.match(firewall, /workspace-snapshot/, 'firewall must support workspace sn
 assert.match(firewall, /network_intent_blocked/, 'firewall must reject high-risk outbound network intent before execution');
 
 const commandNetwork = read('src/harness/commandNetwork.ts');
+const runtimeIsolation = read('src/harness/runtimeIsolation.ts');
+assert.match(runtimeIsolation, /classifyCommandAuthority/, 'host-owned command authority classifier must exist');
+assert.match(runtimeIsolation, /strict-unavailable/, 'missing socket isolation must fail closed explicitly');
+assert.match(runtimeIsolation, /FORGE_SANDBOX_IMAGE/, 'container backends must require a preinstalled configured image');
 assert.match(commandNetwork, /classifyCommandNetworkIntent/, 'network command intent classifier must exist');
 assert.match(commandNetwork, /package-registry-write/, 'network classifier must identify package publication');
 assert.match(commandNetwork, /remote-file-transfer/, 'network classifier must identify remote file transfer');
@@ -95,6 +99,9 @@ assert.match(tools, /sanitizedEnv: true/, 'command results must record sanitized
 assert.match(tools, /blockedEnvKeys/, 'command sandbox must report blocked env key names');
 assert.match(tools, /classifyCommandNetworkIntent/, 'command evidence must use the same network classifier as the firewall');
 const workerExecutor = read('src/harness/workerExecutor.ts');
+assert.match(workerExecutor, /--allow-fs-read/, 'native workers must use Node filesystem permissions');
+assert.match(workerExecutor, /max-old-space-size/, 'workers must receive a memory ceiling');
+assert.match(workerExecutor, /terminateProcessTree/, 'worker timeout must terminate descendants');
 const workerHost = read('src/harness/workerHost.ts');
 const semanticRetrieval = read('src/harness/semanticRetrieval.ts');
 const transactionalEdits = read('src/harness/transactionalEdits.ts');
@@ -137,6 +144,7 @@ assert.match(workerHost, /process\.exit/, 'one-shot worker must exit after retur
 
 const loop = read('src/harness/loop.ts');
 const harnessTypes = read('src/harness/types.ts');
+const coordinator = read('src/harness/subAgentCoordinator.ts');
 const blockers = read('src/harness/blockers.ts');
 assert.match(blockers, /classifyBlocker/, 'deterministic blocker classifier must exist');
 assert.match(blockers, /role_capability/, 'blocker taxonomy must distinguish role capability violations');
@@ -180,7 +188,18 @@ assert.match(loop, /allowedToolsForRole/, 'role handoffs must include allowed to
 assert.match(loop, /validateRoleCapability/, 'role tool scopes must be enforced before commit');
 assert.match(loop, /role_capability_blocked/, 'cross-role tool use must produce an explicit firewall reason');
 assert.match(loop, /worker-contexts\.json/, 'role-scoped worker contexts must persist as evidence');
-assert.match(loop, /:worker:/, 'provider sessions must be role-scoped rather than shared across workers');
+assert.match(coordinator, /sessionId: `\$\{topology\.runId\}:subagent:\$\{role\.toLowerCase\(\)\}:\$\{task\.id/, 'provider sessions must be task-scoped sub-agent identities');
+assert.doesNotMatch(coordinator, /sessionId: `\$\{topology\.runId\}:worker:/, 'provider sessions must not use obsolete worker identities');
+assert.match(coordinator, /maxWorkers: 5/, 'coordinator must define a hard worker-count cap');
+assert.match(coordinator, /maxFanOut: 3/, 'coordinator must define a hard fan-out cap');
+assert.match(coordinator, /maxDepth: 1/, 'coordinator must define a hard nesting-depth cap');
+assert.match(coordinator, /maxRetries: 2/, 'coordinator must define a hard retry cap');
+assert.match(coordinator, /topology\.workers\.length >= topology\.limits\.maxWorkers/, 'coordinator must enforce the worker-count cap');
+assert.match(coordinator, /active\.length >= topology\.limits\.maxFanOut/, 'coordinator must enforce the fan-out cap');
+assert.match(coordinator, /requestedBy !== 'coordinator'.*Sub-agents cannot spawn sub-agents/s, 'sub-agents must not spawn nested sub-agents');
+assert.match(coordinator, /transferStage\(/, 'coordinator must transfer retained Editor staging to a task-matched Escalation worker');
+assert.match(coordinator, /stage\.reviewerStatus = status/, 'merge records must retain Reviewer status');
+assert.match(coordinator, /status === 'blocked'.*!stage\.stagedOracleGreen/s, 'merge must block without Reviewer approval or green staged evidence');
 assert.match(loop, /roleCapabilityBlocks/, 'role capability denials must be counted');
 assert.match(loop, /ProcessWorkerExecutor/, 'main product loop must route tool commits through process workers');
 assert.match(loop, /recordWorkerExecution/, 'worker PID and outcome evidence must persist in role context');
@@ -362,6 +381,7 @@ assert.match(tier4, /PROVEN_EXTRA\[task\.id\]/, 'tier-4 solvability proof must i
 assert.match(read('scripts/weak-model-eval-tier4.mjs'), /proveTier4SuiteSolvable\(tasks\)/, 'tier-4 CLI must refuse unsolvable suites before model calls');
 
 const extension = read('src/extension.ts');
+const conversationController = read('src/harness/conversationController.ts');
 assert.match(extension, /forge-agent\.runBlueprintProofMatrix/, 'extension must expose proof matrix command');
 assert.match(extension, /forge-agent\.getProofReport/, 'extension must expose proof report command');
 assert.match(extension, /forge-agent\.runWeakModelEval/, 'extension must expose weak-model eval command');
@@ -375,15 +395,35 @@ assert.match(extension, /budget: path\.join\('\.forge', 'budget\.json'\)/, 'exte
 assert.match(extension, /isolatedRun: path\.join\('\.forge', 'isolated-runs', 'latest-isolated-run\.json'\)/, 'extension must expose isolated run artifact open path');
 assert.match(extension, /critiques: path\.join\('\.forge', 'reviewer-critiques\.json'\)/, 'extension must expose reviewer critique artifact open path');
 assert.match(extension, /precommit: path\.join\('\.forge', 'precommit-reviews\.json'\)/, 'extension must expose pre-commit artifact open path');
+assert.match(extension, /isolatedRoot: '\[host-owned staging root\]'/, 'webview state must redact staging roots');
+assert.match(extension, /tempParent: '\[host-owned staging root\]'/, 'webview state must redact staging temp roots');
+assert.match(extension, /baselineBackupPath: '\[host-owned baseline\]'/, 'webview state must redact staging baseline paths');
+assert.match(extension, /backupPath: '\[host-owned baseline\]'/, 'webview state must redact every cumulative per-file baseline path');
+for (const [command, key, file] of [
+  ['forge-agent.openSubAgentTopology', 'subAgentTopology', 'subagent-topology.json'],
+  ['forge-agent.openSubAgentHandoffs', 'subAgentHandoffs', 'subagent-handoffs.json'],
+  ['forge-agent.openSubAgentMerges', 'subAgentMerges', 'subagent-merges.json'],
+  ['forge-agent.openSubAgentMetrics', 'subAgentMetrics', 'subagent-metrics.json']
+  ,['forge-agent.openRuntimeIsolationReport', 'runtimeIsolation', 'runtime-isolation.json']
+]) {
+  assert.match(extension, new RegExp(`registerCommand\\('${command}'`), `${command} must be activated by the extension host`);
+  assert.match(extension, new RegExp(`${key}: path\\.join\\('\\.forge', '${file}'\\)`), `${command} must map to the native ${file} path`);
+}
 assert.match(extension, /forge-agent\.chat/, 'extension must expose chat command');
+assert.match(extension, /forge-agent\.submitMessage/, 'extension must expose the unified conversation command');
 assert.match(extension, /forge-agent\.runAgentGoal/, 'extension must expose autonomous goal run command');
+assert.match(extension, /forge-agent\.decideExecutionContract/, 'extension must expose digest-bound execution contract decisions');
+assert.match(extension, /forge-agent\.setAssuranceLevel/, 'extension must expose assurance selection');
 assert.match(extension, /forge-agent\.runIsolatedAgentGoal/, 'extension must expose isolated goal run command');
 assert.match(extension, /forge-agent\.runReflectionAbEval/, 'extension must expose reflection A/B eval command');
 assert.match(extension, /forge-agent\.setGoal/, 'extension must expose goal elicitation command');
 assert.match(extension, /forge-agent\.pauseGoal/, 'extension must expose pause command');
 assert.match(extension, /forge-agent\.steerGoal/, 'extension must expose mid-run steering command');
 assert.match(extension, /forge-agent\.resumeAgentGoal/, 'extension must expose session resume command');
-assert.match(extension, /\/goal\\s\+/, 'chat bridge must intercept /goal directives');
+assert.match(conversationController, /\/goal\\s\+/, 'conversation controller must intercept /goal directives');
+assert.match(conversationController, /pendingApprovalId/, 'pending approval identity must have highest routing precedence');
+assert.match(conversationController, /pendingClarificationId/, 'pending clarification identity must route through the active run');
+assert.match(conversationController, /requiresModeChange/, 'non-mutating modes must impose an authority ceiling');
 assert.match(loop, /persistSession/, 'sessions must persist durably under .forge/sessions/<id>/');
 assert.match(loop, /autoTitle/, 'sessions must get contextual titles (cosmetic; sessionId is identity)');
 assert.match(loop, /sessions', 'index\.json'/, 'a fast session index must be maintained');
@@ -401,6 +441,8 @@ assert.match(extension, /'success', 'failed', 'gave_up', 'paused'/, 'ALL run loo
 assert.match(extension, /getConfiguration\('forge'\)/, 'UI runs must honor forge.* settings');
 assert.ok(JSON.parse(read('package.json')).contributes.configuration.properties['forge.maxCostUsd'], 'budget cap must be a native setting');
 assert.ok(JSON.parse(read('package.json')).contributes.configuration.properties['forge.reflectionEnabled'], 'reflection toggle must be a native setting');
+assert.ok(JSON.parse(read('package.json')).contributes.configuration.properties['forge.assuranceLevel'], 'assurance policy must be a native setting');
+assert.match(extension, /executionContract: path\.join\('\.forge', 'execution-contract\.json'\)/, 'extension must expose the active execution contract in the native editor');
 assert.match(extension, /reflectionAb: path\.join\('\.forge', 'evals', 'latest-reflection-ab\.json'\)/, 'extension must expose reflection A/B artifact open path');
 assert.match(extension, /aar: path\.join\('\.forge', 'aar\.json'\)/, 'extension must expose AAR artifact open path');
 assert.match(extension, /lessons: path\.join\('\.forge', 'lessons\.json'\)/, 'extension must expose lessons artifact open path');
@@ -434,17 +476,20 @@ assert.match(workspaceIndex, /Math\.min\(20/, '@ mention search must enforce a 2
 const webview = read('src/webview/src/App.tsx');
 assert.match(webview, /testId="pause-run"/, 'webview must expose a pause button');
 assert.match(webview, /testId="resume-run"/, 'webview must expose a resume button');
-for (const testId of ['forge-agent-app', 'run-console', 'view-run', 'view-proof', 'view-settings', 'initialize-run', 'step-loop', 'proof-panel', 'settings-panel', 'run-proof-matrix', 'refresh-models', 'agent-chat', 'chat-input', 'send-chat', 'role-menu-button', 'model-menu-button', 'inference-menu-button', 'role-menu', 'composer-model-menu', 'composer-model-search', 'inference-menu']) {
+for (const testId of ['forge-agent-app', 'run-console', 'view-run', 'view-proof', 'view-settings', 'proof-panel', 'settings-panel', 'run-proof-matrix', 'refresh-models', 'agent-chat', 'chat-input', 'submit-message', 'role-menu-button', 'model-menu-button', 'inference-menu-button', 'assurance-menu-button', 'role-menu', 'composer-model-menu', 'composer-model-search', 'inference-menu', 'assurance-menu', 'execution-contract-card']) {
   assert.match(webview, new RegExp(`(data-testid|testId)="${testId}"`), `missing webview selector ${testId}`);
 }
+assert.doesNotMatch(webview, /testId="initialize-run"/, 'normal product composer must not expose a separate Run control');
+assert.doesNotMatch(webview, /testId="step-loop"/, 'normal product composer must not expose a single-step control');
 assert.match(webview, /run-weak-model-eval/, 'webview must expose weak eval button');
 assert.match(webview, /open-weak-model-eval/, 'webview must expose weak eval scorecard open button');
 assert.match(webview, /run-verification-matrix/, 'webview must expose verification fixture matrix button');
 assert.match(webview, /open-verification-matrix/, 'webview must expose verification matrix open button');
 assert.match(webview, /run-isolated-agent-goal/, 'webview must expose isolated run button');
 assert.match(webview, /open-isolated-run/, 'webview must expose isolated run report open button');
-assert.match(webview, /command: 'chat'/, 'webview must post chat messages to extension host');
-assert.match(webview, /run-agent-loop/, 'webview run button must start the firewalled agent loop');
+assert.match(webview, /command: 'submit-message'/, 'webview must post every composer submission through the unified controller');
+assert.doesNotMatch(webview, /command: 'chat'/, 'product webview must not emit the legacy advisory-only bridge');
+assert.doesNotMatch(webview, /run-agent-loop/, 'product webview must not emit the legacy separate-run bridge');
 assert.match(webview, /modes\.map/, 'webview must render host-provided mode presets');
 assert.match(webview, /selectedModeId/, 'webview must track selected trusted mode ID');
 assert.match(webview, /modeId: selectedMode\.id/, 'webview must send only the selected mode ID to the host');

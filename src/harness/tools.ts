@@ -3,10 +3,12 @@ import * as path from 'path';
 import { exec } from 'child_process';
 import { CommandExecutionMetadata, ToolName, ToolProposal } from './types';
 import { classifyCommandNetworkIntent } from './commandNetwork';
+import { classifyCommandAuthority, decideRuntimeIsolation } from './runtimeIsolation';
 import { BrowserValidationEvidence, BrowserValidationRunner } from './browserValidation';
 import { BrowserUseRunner, BrowserUseState } from './browserUse';
 import { ComputerUsePolicy, ComputerUseRunner, ComputerUseState } from './computerUse';
 import { WorkspaceIndexService } from './workspaceIndex';
+import { McpCallContext, McpInteractionRecord, McpToolGateway } from './mcpGateway';
 
 const MAX_INDEXED_SEARCH_BYTES = 64 * 1024 * 1024;
 const MAX_SEARCH_RESULTS = 200;
@@ -19,12 +21,13 @@ export interface ToolResult {
   browserValidation?: BrowserValidationEvidence;
   browserInteraction?: BrowserUseState;
   computerInteraction?: ComputerUseState;
+  mcpInteraction?: McpInteractionRecord;
 }
 
 export type ToolHandler = (args: Record<string, any>) => Promise<ToolResult>;
 
 export class WorkspaceTools {
-  constructor(private readonly workspaceRootOverride?: string, private readonly computerUsePolicyOverride?: ComputerUsePolicy) {}
+  constructor(private readonly workspaceRootOverride?: string, private readonly computerUsePolicyOverride?: ComputerUsePolicy, private readonly mcpGateway?: McpToolGateway) {}
 
   public registry(): Record<ToolName, ToolHandler> {
     return {
@@ -71,6 +74,7 @@ export class WorkspaceTools {
         const result = await new ComputerUseRunner(this.getWorkspaceRoot(), this.computerUsePolicy()).act({ stateId: String(args.stateId || ''), action: String(args.action || '') as any, targetId: String(args.targetId || ''), value: args.value === undefined ? undefined : String(args.value) });
         return { success: result.success, output: result.output, computerInteraction: result.state };
       },
+      external_tool: async () => ({ success: false, output: 'external_tool requires harness execution context.' }),
       get_diff: () => this.getDiff(),
       update_tasks: async () => ({ success: true, output: 'Task graph update handled by harness state.' }),
       update_plan: async () => ({ success: true, output: 'Plan update handled by harness state.' }),
@@ -80,12 +84,21 @@ export class WorkspaceTools {
     };
   }
 
-  public async dispatch(proposal: ToolProposal): Promise<ToolResult> {
+  public async dispatch(proposal: ToolProposal, context?: McpCallContext): Promise<ToolResult> {
+    if (proposal.name === 'external_tool') {
+      if (!this.mcpGateway || !context) return { success: false, output: 'MCP gateway or call context is unavailable.' };
+      const result = await this.mcpGateway.execute(proposal.arguments || {}, context);
+      return { success: result.success, output: result.output, mcpInteraction: result.interaction };
+    }
     const handler = this.registry()[proposal.name];
     if (!handler) {
       return { success: false, output: `Unknown tool: ${proposal.name}` };
     }
     return handler(proposal.arguments || {});
+  }
+
+  public getMcpGateway(): McpToolGateway | undefined {
+    return this.mcpGateway;
   }
 
   public getWorkspaceRoot(): string {
@@ -168,6 +181,8 @@ export class WorkspaceTools {
       const started = Date.now();
       const sandbox = buildCommandSandbox(cwd, timeoutMs);
       const network = classifyCommandNetworkIntent(command);
+      const authority = classifyCommandAuthority(command);
+      const isolation = decideRuntimeIsolation(command);
       exec(command, { cwd, timeout: timeoutMs, maxBuffer: 1024 * 1024 * 8, env: sandbox.env }, (error: any, stdout, stderr) => {
         const output = `${stdout}${stderr}`;
         const metadata: CommandExecutionMetadata = {
@@ -180,7 +195,14 @@ export class WorkspaceTools {
           inheritedEnvKeyCount: Object.keys(process.env).length,
           allowedEnvKeys: sandbox.allowedEnvKeys,
           blockedEnvKeys: sandbox.blockedEnvKeys,
-          network
+          network,
+          authority: authority.authority,
+          isolationGrade: isolation.grade,
+          isolationBackend: isolation.backend,
+          isolationAllowed: isolation.allowed,
+          filesystemIsolated: isolation.guarantees.filesystem,
+          networkIsolated: isolation.guarantees.network,
+          resourceLimited: isolation.guarantees.resources
         };
         resolve({ success: !error, output: error ? `Command failed: ${error.message}\n${output}` : output, commandMetadata: metadata });
       });
@@ -282,7 +304,7 @@ export class WorkspaceTools {
       }
       fs.writeFileSync(fullPath, content, 'utf8');
       const lenientNote = lenientApplications ? ` (${lenientApplications} hunk(s) located with whitespace-lenient matching)` : '';
-      return { success: true, output: `Applied ${hunks.length} patch hunk(s) to ${relativePath}${lenientNote}`, diff: await this.getDiffText() };
+      return { success: true, output: `Applied ${hunks.length} patch hunk(s) to ${relativePath}${lenientNote}` };
     } catch (e: any) {
       return { success: false, output: e.message };
     }

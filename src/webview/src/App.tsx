@@ -24,23 +24,22 @@ import {
   Send,
   Settings,
   ShieldCheck,
-  Square,
   Star,
   Terminal,
   Trash2,
   Wand2,
   X,
 } from 'lucide-react';
-import { AgentMode, ComposerContextSummary, HarnessState, HumanApprovalPolicy, ProviderReadiness, RunProgressEvent, SessionSummary, StepLog, WorkspaceIndexStatus, WorkspaceMentionCandidate } from './types';
+import { AgentMode, AssuranceLevel, ComposerContextSummary, HarnessState, HumanApprovalPolicy, ProviderReadiness, RunProgressEvent, SessionSummary, StepLog, WorkspaceIndexStatus, WorkspaceMentionCandidate } from './types';
 import { DEFAULT_BINDINGS, PERSISTED_BINDINGS_KEY, STANDARD_MODELS } from './data/models';
 
 type ViewMode = 'run' | 'proof' | 'settings';
 
 const SLASH_COMMANDS: Array<{ cmd: string; hint: string }> = [
-  { cmd: '/goal', hint: 'Autonomous firewalled run. Optional lines: done when: | constraints: | non-goals: | budget: $N | max steps: N. Type it, then press Run ▶.' },
+  { cmd: '/goal', hint: 'Autonomous firewalled run. Optional lines: done when: | constraints: | non-goals: | budget: $N | max steps: N. Press Enter to submit.' },
   { cmd: '/research', hint: 'Deep web research (plan → web-grounded workers → cited report). Artifact saves to .forge/research/ and attaches to this conversation. Press Enter.' }
 ];
-type ModelRole = 'code' | 'plan' | 'review';
+type ModelRole = 'code' | 'plan' | 'review' | 'prompt';
 type InferenceMode = 'Instant' | 'Thinking';
 type ChatMessage = { role: 'user' | 'assistant'; content: string; modelId?: string; error?: boolean };
 type ModelSortMode = 'recommended' | 'context' | 'reasoning' | 'coding' | 'cost' | 'newest';
@@ -52,7 +51,7 @@ const FALLBACK_MODES: AgentMode[] = [
   { id: 'code-reviewer', name: 'Code Reviewer', description: 'Review code without implementing changes.', instructions: 'Find correctness risks.', intent: 'review', modelRole: 'review', inference: 'Thinking', allowedTools: [], builtIn: true }
 ];
 const REQUIRED_CUSTOM_CODE_TOOLS = ['update_plan', 'run_tests', 'get_diff', 'record_evidence', 'ask_user', 'declare_success'];
-const OPTIONAL_CUSTOM_CODE_TOOLS = ['repo_search', 'symbol_search', 'read_file', 'read_range', 'apply_patch', 'write_file', 'run_command', 'browser_validate', 'browser_inspect', 'browser_action', 'computer_inspect', 'computer_action', 'update_tasks'];
+const OPTIONAL_CUSTOM_CODE_TOOLS = ['repo_search', 'symbol_search', 'read_file', 'read_range', 'apply_patch', 'write_file', 'run_command', 'browser_validate', 'browser_inspect', 'browser_action', 'computer_inspect', 'computer_action', 'external_tool', 'update_tasks'];
 
 declare global {
   interface Window {
@@ -75,6 +74,8 @@ export default function App() {
   const [isBusy, setIsBusy] = useState(false);
   const [isChatting, setIsChatting] = useState(false);
   const [isRefreshingModels, setIsRefreshingModels] = useState(false);
+  const [isEnhancingPrompt, setIsEnhancingPrompt] = useState(false);
+  const [promptEnhancementModel, setPromptEnhancementModel] = useState('google/gemini-2.5-flash-lite');
   const [state, setState] = useState<HarnessState | null>(null);
   const [modelsCatalog, setModelsCatalog] = useState(STANDARD_MODELS);
   const [modelsStatus, setModelsStatus] = useState(`Fallback catalog loaded (${STANDARD_MODELS.length} models).`);
@@ -93,6 +94,8 @@ export default function App() {
   const [difficultProofModel, setDifficultProofModel] = useState('qwen/qwen-2.5-7b-instruct');
   const [difficultProofTasks, setDifficultProofTasks] = useState(4);
   const [confirmLiveSpend, setConfirmLiveSpend] = useState(false);
+  const [confirmProductionSpend, setConfirmProductionSpend] = useState(false);
+  const [productionBenchmarkReport, setProductionBenchmarkReport] = useState<any>(null);
   const [verificationMatrixReport, setVerificationMatrixReport] = useState<any>(null);
   const [isolatedRunReport, setIsolatedRunReport] = useState<any>(null);
   const [chatInput, setChatInput] = useState('');
@@ -112,7 +115,7 @@ export default function App() {
   const [modeIntent, setModeIntent] = useState<AgentMode['intent']>('code');
   const [modeOptionalTools, setModeOptionalTools] = useState<string[]>(['repo_search', 'symbol_search', 'read_file', 'read_range', 'apply_patch', 'write_file']);
   const [modeError, setModeError] = useState('');
-  const [openComposerMenu, setOpenComposerMenu] = useState<'role' | 'model' | 'inference' | 'checkpoint' | 'index' | 'context' | null>(null);
+  const [openComposerMenu, setOpenComposerMenu] = useState<'role' | 'model' | 'inference' | 'assurance' | 'checkpoint' | 'index' | 'context' | null>(null);
   const [pendingRestoreId, setPendingRestoreId] = useState<string | null>(null);
   const [modelSearch, setModelSearch] = useState('');
   const [composerSortMode, setComposerSortMode] = useState<ModelSortMode>('recommended');
@@ -124,6 +127,7 @@ export default function App() {
     }
   });
   const [humanApprovalPolicy, setHumanApprovalPolicy] = useState<HumanApprovalPolicy>('ask');
+  const [assuranceLevel, setAssuranceLevel] = useState<AssuranceLevel>('standard');
   const [workspaceIndexStatus, setWorkspaceIndexStatus] = useState<WorkspaceIndexStatus>({ status: 'missing', fileCount: 0, symbolCount: 0, ignoredCount: 0, truncated: false });
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [corruptSessionCount, setCorruptSessionCount] = useState(0);
@@ -134,6 +138,7 @@ export default function App() {
   const [mentionCandidates, setMentionCandidates] = useState<WorkspaceMentionCandidate[]>([]);
   const [mentionProvenance, setMentionProvenance] = useState<'ready' | 'stale' | 'missing'>('missing');
   const [mentionSelection, setMentionSelection] = useState(0);
+  const [mcpCatalog, setMcpCatalog] = useState<{ serverCount: number; toolCount: number }>({ serverCount: 0, toolCount: 0 });
   const mentionRequestRef = useRef('');
 
   useEffect(() => {
@@ -143,13 +148,17 @@ export default function App() {
     vscode?.postMessage({ command: 'list-modes' });
     vscode?.postMessage({ command: 'list-sessions' });
     vscode?.postMessage({ command: 'load-human-approval-policy' });
+    vscode?.postMessage({ command: 'load-assurance-level' });
     vscode?.postMessage({ command: 'load-workspace-index-status' });
     vscode?.postMessage({ command: 'load-composer-context' });
+    vscode?.postMessage({ command: 'load-mcp-catalog' });
+    vscode?.postMessage({ command: 'load-prompt-enhancement-settings' });
 
     const handleMessage = (event: MessageEvent) => {
       const message = event.data;
       if (message.command === 'state-update') {
         setState(message.state);
+        setIsChatting(false);
         if (message.state?.sessionId) setActiveSessionId(message.state.sessionId);
         if (message.state?.modePolicy?.id) setSelectedModeId(message.state.modePolicy.id);
         setProgressEvents(previous => mergeProgressEvents(previous, message.state?.progressEvents || []));
@@ -170,6 +179,9 @@ export default function App() {
         setProgressEvents(previous => mergeProgressEvents(previous, [message.event]));
         setStatusMessage(message.event.summary || 'Forge run updated.');
       }
+      if (message.command === 'conversation-route' && message.decision) {
+        setStatusMessage(`Forge route: ${String(message.decision.route || 'unknown').replace(/_/g, ' ')}.`);
+      }
       if (message.command === 'models-list') {
         setModelsCatalog(message.models || STANDARD_MODELS);
         setIsRefreshingModels(false);
@@ -189,7 +201,22 @@ export default function App() {
         setModeError('');
       }
       if (message.command === 'human-approval-policy') setHumanApprovalPolicy(message.policy === 'auto' ? 'auto' : 'ask');
+      if (message.command === 'assurance-level') setAssuranceLevel(message.level === 'verified' || message.level === 'audited' ? message.level : 'standard');
       if (message.command === 'workspace-index-status' && message.status) setWorkspaceIndexStatus(message.status);
+      if (message.command === 'mcp-catalog') setMcpCatalog({ serverCount: Number(message.serverCount || 0), toolCount: Number(message.toolCount || 0) });
+      if (message.command === 'mcp-config-updated') setStatusMessage(`MCP server ${message.serverId} ${message.action}. Refresh the catalog after its explicit tool policies are ready.`);
+      if (message.command === 'prompt-enhancement-settings') setPromptEnhancementModel(String(message.modelId || 'google/gemini-2.5-flash-lite'));
+      if (message.command === 'prompt-enhanced') {
+        const result = message.result || {};
+        setChatInput(String(result.enhancedPrompt || ''));
+        setIsEnhancingPrompt(false);
+        const cost = Number(result.usage?.totalCost || 0);
+        setStatusMessage(`Prompt enhanced with ${result.modelId || 'configured model'}${cost > 0 ? ` · $${cost.toFixed(6)}` : ''}. Review before sending.`);
+      }
+      if (message.command === 'prompt-enhancement-error') {
+        setIsEnhancingPrompt(false);
+        setStatusMessage(message.message || 'Prompt enhancement failed. The original draft was preserved.');
+      }
       if (message.command === 'composer-context') {
         setComposerContext(Array.isArray(message.attachments) ? message.attachments : []);
         if (message.sessionId) setActiveSessionId(message.sessionId);
@@ -239,6 +266,11 @@ export default function App() {
         setIsBusy(false);
         setStatusMessage(message.report?.capabilityGatePassed ? 'Difficult live weak-model capability gate passed.' : `Difficult live proof finished honestly: ${message.report?.outcome || 'no result'}.`);
       }
+      if (message.command === 'production-benchmark-report') {
+        setProductionBenchmarkReport(message.report);
+        setIsBusy(false);
+        setStatusMessage(message.report?.benchmarkPassed ? 'Production benchmark floors passed; installed-product release proof remains separate.' : 'Production benchmark finished without a release-floor pass.');
+      }
       if (message.command === 'verification-matrix-report') {
         setVerificationMatrixReport(message.report);
         setIsBusy(false);
@@ -264,7 +296,9 @@ export default function App() {
       }
       if (message.command === 'host-error') {
         setIsBusy(false);
+        setIsChatting(false);
         setIsRefreshingModels(false);
+        setIsEnhancingPrompt(false);
         setStatusMessage(message.message || 'Host command failed.');
       }
     };
@@ -362,22 +396,6 @@ export default function App() {
     vscode?.postMessage({ command: 'list-models' });
   };
 
-  const initializeRun = () => {
-    setIsBusy(true);
-    setStatusMessage('Initializing harness artifacts...');
-    vscode?.postMessage({ command: 'init', goal, modelBindings: bindings, modeId: selectedMode.id });
-  };
-
-  const runStep = () => {
-    if (!state) {
-      initializeRun();
-      return;
-    }
-    setIsBusy(true);
-    setStatusMessage('Running one firewalled harness step...');
-    vscode?.postMessage({ command: 'run-step', state, modelBindings: bindings });
-  };
-
   const runProofMatrix = () => {
     setIsBusy(true);
     setStatusMessage('Running blueprint proof matrix in disposable fixtures...');
@@ -419,6 +437,24 @@ export default function App() {
     } });
   };
 
+  const runProductionBenchmark = () => {
+    if (!confirmProductionSpend) {
+      setStatusMessage('Confirm provider-credit use before running the production benchmark.');
+      return;
+    }
+    setIsBusy(true);
+    setProductionBenchmarkReport(null);
+    setStatusMessage('Starting fixed 16-task production benchmark...');
+    vscode?.postMessage({ command: 'run-production-benchmark', options: {
+      model: 'qwen/qwen-2.5-7b-instruct',
+      taskLimit: 16,
+      maxHarnessSteps: 10,
+      providerCallTimeoutMs: 90000,
+      confirmLiveSpend: true,
+      keepFixtures: false
+    } });
+  };
+
   const runVerificationMatrix = () => {
     setIsBusy(true);
     setStatusMessage('Running verification fixture matrix in disposable workspaces...');
@@ -454,8 +490,7 @@ export default function App() {
     vscode?.postMessage({ command: 'restore-checkpoint', checkpointId });
   };
 
-  const sendChat = () => {
-    const content = chatInput.trim();
+  const submitText = (content: string) => {
     if (!content || isChatting) {
       return;
     }
@@ -465,7 +500,7 @@ export default function App() {
     setChatInput('');
     setIsChatting(true);
     vscode?.postMessage({
-      command: 'chat',
+      command: 'submit-message',
       modelId: selectedModelId,
       modeId: selectedMode.id,
       sessionId: activeSessionId,
@@ -474,30 +509,15 @@ export default function App() {
     });
   };
 
+  const submitMessage = () => submitText(chatInput.trim());
+
   const attachMention = (candidate: WorkspaceMentionCandidate) => {
     const mention = activeMention(chatInput);
     if (!mention) return;
-    vscode?.postMessage({ command: 'attach-context-mention', kind: candidate.kind, path: candidate.path });
+    vscode?.postMessage({ command: 'attach-context-mention', kind: candidate.kind, path: candidate.path, symbolName: candidate.symbolName, line: candidate.line });
     setChatInput(chatInput.slice(0, mention.start));
     setMentionCandidates([]);
     setMentionSelection(0);
-  };
-
-  const startRunFromComposer = () => {
-    if (readiness && !readiness.ready) {
-      setStatusMessage(readiness.blockers[0]?.message || 'Complete Forge setup before starting a run.');
-      return;
-    }
-    if (selectedMode.intent !== 'code') {
-      setStatusMessage(`${selectedMode.name} is advisory. Use Send for non-mutating guidance, or select a Code mode to run tools.`);
-      return;
-    }
-    const composerGoal = chatInput.trim() || chatMessages.filter(message => message.role === 'user').at(-1)?.content || goal;
-    setGoal(composerGoal);
-    setProgressEvents([]);
-    setIsBusy(true);
-    setStatusMessage('Running firewalled agent loop...');
-    vscode?.postMessage({ command: 'run-agent-loop', goal: composerGoal, modelBindings: bindings, modeId: selectedMode.id });
   };
 
   const saveCustomMode = () => {
@@ -531,10 +551,12 @@ export default function App() {
   const enhancePrompt = () => {
     const content = chatInput.trim();
     if (!content) {
-      setChatInput('Inspect the current workspace, identify the next safest step, and explain what evidence would prove success.');
+      setStatusMessage('Enter a prompt before enhancing it.');
       return;
     }
-    setChatInput(`Goal: ${content}\n\nPlease clarify assumptions, propose a safe plan, and identify the exact verification command or artifact that would prove completion.`);
+    setIsEnhancingPrompt(true);
+    setStatusMessage(`Enhancing with ${promptEnhancementModel}...`);
+    vscode?.postMessage({ command: 'enhance-prompt', draft: content, modeId: selectedModeId });
   };
 
   const startVoiceInput = () => {
@@ -638,7 +660,7 @@ export default function App() {
                     </div>
                   </div>
                 </div>
-              ) : chatMessages.length === 0 && progressEvents.length === 0 && !state?.pendingHumanApproval ? (
+              ) : chatMessages.length === 0 && progressEvents.length === 0 && !state?.pendingHumanApproval && state?.executionContract?.status !== 'pending' ? (
                 <div className="flex h-full items-center justify-center text-center">
                   <div>
                     <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded bg-[#dfff2e] text-sm font-black text-black">F</div>
@@ -696,6 +718,24 @@ export default function App() {
                       </div>
                     </div>
                   )}
+                  {state?.executionContract?.status === 'pending' && (
+                    <div data-testid="execution-contract-card" className="mr-4 rounded border border-cyan-500/50 bg-cyan-950/20 p-2.5 text-[11px] text-slate-200">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <ShieldCheck size={14} className="shrink-0 text-cyan-300" />
+                          <span className="truncate font-semibold">Confirm {state.executionContract.authority.assurance} execution contract</span>
+                        </div>
+                        <button data-testid="open-execution-contract" onClick={() => openArtifact('executionContract')} className="shrink-0 font-mono text-[9px] text-cyan-300 hover:text-cyan-100">{state.executionContract.digest.slice(0, 12)}</button>
+                      </div>
+                      <p className="mt-1.5 break-words text-[10px] leading-relaxed text-slate-300">{state.executionContract.authority.objective}</p>
+                      <p className="mt-1 text-[9px] text-slate-500">{state.executionContract.authority.workspaceScopes.length} path scope(s) · {state.executionContract.authority.allowedTools.length} tools · ${state.executionContract.authority.budget.maxCostUsd.toFixed(2)} · {state.executionContract.authority.budget.maxSteps} steps</p>
+                      {!state.executionContract.availability.available && <p data-testid="assurance-unavailable" className="mt-1 text-[9px] text-rose-300">Unavailable: {state.executionContract.availability.missing.join(', ')}</p>}
+                      <div className="mt-2 flex justify-end gap-2">
+                        <button data-testid="reject-execution-contract" disabled={isBusy} onClick={() => { setIsBusy(true); vscode?.postMessage({ command: 'decide-execution-contract', decision: 'reject', digest: state.executionContract.digest, modelBindings: bindings }); }} className="rounded border border-slate-600 px-2 py-1 text-[10px] text-slate-300 hover:text-white">Reject</button>
+                        <button data-testid="confirm-execution-contract" disabled={isBusy || !state.executionContract.availability.available} onClick={() => { setIsBusy(true); vscode?.postMessage({ command: 'decide-execution-contract', decision: 'confirm', digest: state.executionContract.digest, modelBindings: bindings }); }} className="rounded border border-cyan-400 bg-cyan-400/10 px-2 py-1 text-[10px] font-semibold text-cyan-200 hover:bg-cyan-400/20 disabled:opacity-40">Confirm</button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -735,11 +775,11 @@ export default function App() {
                       onMouseEnter={() => setMentionSelection(index)}
                       onClick={() => attachMention(candidate)}
                     >
-                      {candidate.kind === 'folder' ? <Folder size={13} className="shrink-0 text-amber-300" /> : <FileCode2 size={13} className="shrink-0 text-sky-300" />}
+                      {candidate.kind === 'folder' ? <Folder size={13} className="shrink-0 text-amber-300" /> : <FileCode2 size={13} className={`shrink-0 ${candidate.kind === 'symbol' ? 'text-fuchsia-300' : 'text-sky-300'}`} />}
                       <span className="min-w-0 flex-1"><span className="block truncate text-xs font-medium">{candidate.label}</span><span className="block truncate text-[9px] text-slate-500">{candidate.detail}</span></span>
                     </button>
                   ))}
-                  {!mentionCandidates.length && <div className="px-2 py-2 text-[10px] text-slate-500">{mentionProvenance === 'missing' ? 'Build the workspace index to use @ mentions.' : 'No matching workspace files or folders.'}</div>}
+                  {!mentionCandidates.length && <div className="px-2 py-2 text-[10px] text-slate-500">{mentionProvenance === 'missing' ? 'Build the workspace index to use @ mentions.' : 'No matching workspace files, folders, or symbols.'}</div>}
                 </div>
               )}
               {composerContext.length > 0 && (
@@ -794,7 +834,7 @@ export default function App() {
                     }
                     if (event.key === 'Enter' && !event.shiftKey) {
                       event.preventDefault();
-                      sendChat();
+                      submitMessage();
                     }
                   }}
                   className="min-h-14 w-full resize-none bg-transparent p-1 text-xs text-slate-100 outline-none placeholder:text-slate-400"
@@ -812,6 +852,9 @@ export default function App() {
                     <button data-testid="inference-menu-button" onClick={() => setOpenComposerMenu(openComposerMenu === 'inference' ? null : 'inference')}>
                       <Chip label={inferenceMode} />
                     </button>
+                    <button data-testid="assurance-menu-button" title="Execution assurance" onClick={() => setOpenComposerMenu(openComposerMenu === 'assurance' ? null : 'assurance')}>
+                      <Chip label={assuranceLevel} />
+                    </button>
                   </div>
                   <div className="flex flex-wrap items-center justify-end gap-1 text-slate-300">
                     <IconButton title={`Attach workspace context${composerContext.length ? ` (${composerContext.length})` : ''}`} testId="composer-context-toggle" onClick={() => setOpenComposerMenu(openComposerMenu === 'context' ? null : 'context')}>
@@ -823,24 +866,22 @@ export default function App() {
                     <IconButton title={humanApprovalPolicy === 'auto' ? 'Auto approve is on. Firewall and verification still apply. Click to ask before changes.' : 'Ask before file changes and commands. Click to auto approve validated actions.'} testId="human-approval-policy" onClick={() => vscode?.postMessage({ command: 'set-human-approval-policy', policy: humanApprovalPolicy === 'auto' ? 'ask' : 'auto' })}>
                       <ShieldCheck size={14} className={humanApprovalPolicy === 'auto' ? 'text-[#dfff2e]' : 'text-amber-300'} />
                     </IconButton>
-                    <IconButton title="Enhance prompt" onClick={enhancePrompt}>
-                      <Wand2 size={14} />
+                    <IconButton title={`Enhance prompt with ${promptEnhancementModel}. The draft will not be sent automatically.`} testId="enhance-prompt" onClick={enhancePrompt} disabled={isEnhancingPrompt}>
+                      {isEnhancingPrompt ? <RotateCcw size={14} className="animate-spin" /> : <Wand2 size={14} />}
                     </IconButton>
                     <IconButton title="Start voice input" onClick={startVoiceInput}>
                       <Mic size={14} />
                     </IconButton>
-                    <IconButton title={selectedMode.intent === 'code' ? 'Start firewalled run' : `${selectedMode.name} is advisory; use Send`} testId="initialize-run" onClick={startRunFromComposer} disabled={isBusy || selectedMode.intent !== 'code'}>
-                      <Play size={14} />
-                    </IconButton>
-                    <IconButton title="Run next step" testId="step-loop" onClick={runStep} disabled={isBusy}>
-                      <Square size={13} />
-                    </IconButton>
-                    <IconButton title="Pause run (honored before the next step; no provider calls while paused)" testId="pause-run" onClick={() => vscode?.postMessage({ command: 'pause-goal' })}>
-                      <Pause size={14} />
-                    </IconButton>
-                    <IconButton title="Resume paused run" testId="resume-run" onClick={() => vscode?.postMessage({ command: 'resume-goal' })}>
-                      <RotateCcw size={14} />
-                    </IconButton>
+                    {state && !['success', 'failed', 'gave_up', 'paused'].includes(state.status) && (
+                      <IconButton title="Pause run at the next governed boundary" testId="pause-run" onClick={() => submitText('/pause')}>
+                        <Pause size={14} />
+                      </IconButton>
+                    )}
+                    {state?.status === 'paused' && (
+                      <IconButton title="Resume paused run" testId="resume-run" onClick={() => submitText('/resume')}>
+                        <RotateCcw size={14} />
+                      </IconButton>
+                    )}
                     <IconButton title="Checkpoint history" testId="checkpoint-history-toggle" onClick={() => { setPendingRestoreId(null); setOpenComposerMenu(openComposerMenu === 'checkpoint' ? null : 'checkpoint'); }}>
                       <History size={14} />
                     </IconButton>
@@ -861,7 +902,7 @@ export default function App() {
                     <IconButton title="Settings" onClick={() => setActiveView('settings')}>
                       <Settings size={14} />
                     </IconButton>
-                    <IconButton title="Send" testId="send-chat" onClick={sendChat} disabled={isChatting || !chatInput.trim()}>
+                    <IconButton title="Send to Forge Agent" testId="submit-message" onClick={submitMessage} disabled={isChatting || !chatInput.trim()}>
                       <Send size={14} />
                     </IconButton>
                   </div>
@@ -889,6 +930,7 @@ export default function App() {
                       <div className="px-2 py-1 text-[9px] font-semibold uppercase text-slate-500">Attach context</div>
                       <button data-testid="attach-active-context" onClick={() => { vscode?.postMessage({ command: 'add-active-context' }); setOpenComposerMenu(null); }} className="block w-full rounded px-2 py-2 text-left text-xs text-slate-300 hover:bg-slate-800">Active file or selection</button>
                       <button data-testid="attach-workspace-file" onClick={() => { vscode?.postMessage({ command: 'pick-context-file' }); setOpenComposerMenu(null); }} className="block w-full rounded px-2 py-2 text-left text-xs text-slate-300 hover:bg-slate-800">Workspace file...</button>
+                      <button data-testid="attach-workspace-image" onClick={() => { vscode?.postMessage({ command: 'pick-context-image' }); setOpenComposerMenu(null); }} className="block w-full rounded px-2 py-2 text-left text-xs text-slate-300 hover:bg-slate-800">Workspace image...</button>
                       <button data-testid="attach-diagnostics" onClick={() => { vscode?.postMessage({ command: 'add-diagnostics-context' }); setOpenComposerMenu(null); }} className="block w-full rounded px-2 py-2 text-left text-xs text-slate-300 hover:bg-slate-800">Problems and diagnostics</button>
                       {composerContext.length > 0 && <button data-testid="clear-composer-context" onClick={() => { vscode?.postMessage({ command: 'clear-composer-context' }); setOpenComposerMenu(null); }} className="mt-1 block w-full border-t border-slate-800 px-2 py-2 text-left text-xs text-rose-300 hover:bg-slate-800">Clear attached context</button>}
                     </div>
@@ -938,6 +980,20 @@ export default function App() {
                           }}
                         >
                           {mode}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {openComposerMenu === 'assurance' && (
+                    <div data-testid="assurance-menu" className="absolute bottom-8 left-52 z-10 w-72 rounded border border-slate-700 bg-[#202020] shadow-xl">
+                      {([
+                        ['standard', 'Current full harness compatibility.'],
+                        ['verified', 'Model-driven, no fallback actions, green oracles, and independent diff review.'],
+                        ['audited', 'Verified plus proven isolation, calibrated oracles, and signed attestations.']
+                      ] as Array<[AssuranceLevel, string]>).map(([level, description]) => (
+                        <button key={level} data-testid={`assurance-option-${level}`} className={`block w-full px-3 py-2 text-left ${assuranceLevel === level ? 'bg-[#06466d] text-white' : 'text-slate-300 hover:bg-slate-800'}`} onClick={() => { setAssuranceLevel(level); vscode?.postMessage({ command: 'set-assurance-level', level }); setOpenComposerMenu(null); }}>
+                          <div className="text-xs font-bold capitalize">{level}</div>
+                          <div className="mt-0.5 text-[10px] font-normal text-slate-400">{description}</div>
                         </button>
                       ))}
                     </div>
@@ -1003,7 +1059,7 @@ export default function App() {
               <div data-testid="run-status-line" className="mt-2 flex items-center justify-between gap-2 text-[10px] text-slate-500">
                 <span className="truncate">{state?.status || 'idle'} · {activeTask?.title || statusMessage}</span>
                 <span className="shrink-0 font-mono">
-                  tests {state?.oracleStatuses.tests || '-'} · build {state?.oracleStatuses.build || '-'} · web {state?.runStats?.browserValidations ?? 0}/{state?.runStats?.browserValidationFailures ?? 0} · proj {state?.projectAdapter?.ecosystem || '-'}/{state?.projectAdapter?.packageManager || '-'} · fix {state?.runStats?.oracleFailureCaptures ?? 0}/{state?.runStats?.repeatedOracleFailures ?? 0}/{state?.runStats?.oracleFailureResolutions ?? 0} · stuck {state?.runStats?.oracleStagnationHalts ?? 0} · back {state?.runStats?.checkpointRestores ?? 0}/{state?.runStats?.checkpointRestoreFailures ?? 0} · cost ${budgetSpent.toFixed(4)}/${budgetCap.toFixed(2)} · ask {state?.runStats?.clarificationAnswers ?? 0}/{state?.runStats?.clarificationRequests ?? 0} · halt {state?.runStats?.budgetHalts ?? 0} · model {state?.runStats?.modelDrivenProposals ?? 0} · fallback {state?.runStats?.fallbackActions ?? 0} · repair {state?.runStats?.repairAttempts ?? 0} · reflect {state?.runStats?.reflectionAttempts ?? 0} · review {state?.runStats?.reviewerApprovals ?? 0} · crit {state?.runStats?.reviewerCritiques ?? 0} · pre {state?.runStats?.preCommitReviews ?? 0} · cmd {state?.runStats?.commandEffectCaptures ?? 0} · net {state?.runStats?.networkIntentCaptures ?? 0}/{state?.runStats?.networkWriteBlocks ?? 0} · perm {state?.runStats?.roleCapabilityBlocks ?? 0} · proc {state?.runStats?.workerProcessExecutions ?? 0}/{state?.runStats?.workerProcessFailures ?? 0} · txn {state?.runStats?.editTransactions ?? 0}+{state?.runStats?.commandTransactions ?? 0}/{(state?.runStats?.editTransactionConflicts ?? 0) + (state?.runStats?.commandTransactionConflicts ?? 0)} · flow {state?.workflow?.currentStage ?? '-'}/{state?.runStats?.workflowGateBlocks ?? 0} · skill {state?.runStats?.skillApplications ?? 0}/{state?.runStats?.skillRetrievals ?? 0} · blk {state?.runStats?.openBlockers ?? 0}/{state?.runStats?.blockerEvents ?? 0} · sem {state?.runStats?.semanticRefreshes ?? 0}/{state?.runStats?.semanticFailures ?? 0} · esc {state?.runStats?.escalationCount ?? 0} · ctx {state?.runStats?.contextRefreshes ?? 0} · hand {state?.runStats?.roleHandoffRefreshes ?? 0} · ret {state?.runStats?.retrievalRefreshes ?? 0} · safe {state?.runStats?.safetyCheckpoints ?? 0}
+                  tests {state?.oracleStatuses.tests || '-'} · build {state?.oracleStatuses.build || '-'} · agents {state?.runStats?.subAgentWorkers ?? 0}/{state?.runStats?.subAgentMerges ?? 0} · web {state?.runStats?.browserValidations ?? 0}/{state?.runStats?.browserValidationFailures ?? 0} · proj {state?.projectAdapter?.ecosystem || '-'}/{state?.projectAdapter?.packageManager || '-'} · fix {state?.runStats?.oracleFailureCaptures ?? 0}/{state?.runStats?.repeatedOracleFailures ?? 0}/{state?.runStats?.oracleFailureResolutions ?? 0} · stuck {state?.runStats?.oracleStagnationHalts ?? 0} · back {state?.runStats?.checkpointRestores ?? 0}/{state?.runStats?.checkpointRestoreFailures ?? 0} · cost ${budgetSpent.toFixed(4)}/${budgetCap.toFixed(2)} · ask {state?.runStats?.clarificationAnswers ?? 0}/{state?.runStats?.clarificationRequests ?? 0} · halt {state?.runStats?.budgetHalts ?? 0} · model {state?.runStats?.modelDrivenProposals ?? 0} · fallback {state?.runStats?.fallbackActions ?? 0} · repair {state?.runStats?.repairAttempts ?? 0} · reflect {state?.runStats?.reflectionAttempts ?? 0} · review {state?.runStats?.reviewerApprovals ?? 0} · crit {state?.runStats?.reviewerCritiques ?? 0} · pre {state?.runStats?.preCommitReviews ?? 0} · cmd {state?.runStats?.commandEffectCaptures ?? 0} · net {state?.runStats?.networkIntentCaptures ?? 0}/{state?.runStats?.networkWriteBlocks ?? 0} · perm {state?.runStats?.roleCapabilityBlocks ?? 0} · proc {state?.runStats?.workerProcessExecutions ?? 0}/{state?.runStats?.workerProcessFailures ?? 0} · txn {state?.runStats?.editTransactions ?? 0}+{state?.runStats?.commandTransactions ?? 0}/{(state?.runStats?.editTransactionConflicts ?? 0) + (state?.runStats?.commandTransactionConflicts ?? 0)} · flow {state?.workflow?.currentStage ?? '-'}/{state?.runStats?.workflowGateBlocks ?? 0} · skill {state?.runStats?.skillApplications ?? 0}/{state?.runStats?.skillRetrievals ?? 0} · blk {state?.runStats?.openBlockers ?? 0}/{state?.runStats?.blockerEvents ?? 0} · sem {state?.runStats?.semanticRefreshes ?? 0}/{state?.runStats?.semanticFailures ?? 0} · esc {state?.runStats?.escalationCount ?? 0} · ctx {state?.runStats?.contextRefreshes ?? 0} · hand {state?.runStats?.roleHandoffRefreshes ?? 0} · ret {state?.runStats?.retrievalRefreshes ?? 0} · safe {state?.runStats?.safetyCheckpoints ?? 0}
                 </span>
               </div>
             </div>
@@ -1079,6 +1135,29 @@ export default function App() {
                   <KeyValue label="Model-driven solved" value={String(difficultProofReport.harnessModelDrivenSolved ?? '-')} />
                   <KeyValue label="Fallback solved" value={String(difficultProofReport.fallbackSolved ?? '-')} />
                   <KeyValue label="Capability gate" value={difficultProofReport.capabilityGatePassed ? 'PASS' : 'NOT PASSED'} />
+                </div>}
+              </div>
+            </details>
+
+            <details data-testid="production-benchmark" className="rounded border border-slate-800 bg-[#151518] p-3">
+              <summary className="cursor-pointer text-xs font-bold text-slate-200">Production Benchmark</summary>
+              <div className="mt-3 space-y-2">
+                <p className="text-[11px] text-slate-400">Runs the fixed 16-task bare-versus-harness suite with runner-only judges, immutable final evidence, cost/latency accounting, and release floors.</p>
+                <div className="rounded border border-slate-800 bg-[#0c0c0f] p-2 text-[10px] text-slate-400">qwen/qwen-2.5-7b-instruct · 16 fixed tasks · 10 steps/task · 90s/call</div>
+                <label className="flex items-start gap-2 rounded border border-amber-900/50 bg-amber-950/20 p-2 text-[10px] text-amber-200">
+                  <input data-testid="confirm-production-spend" type="checkbox" checked={confirmProductionSpend} onChange={event => setConfirmProductionSpend(event.target.checked)} className="mt-0.5" />
+                  <span>I authorize this 16-task live OpenRouter benchmark and understand that calls and cost are recorded.</span>
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button data-testid="run-production-benchmark" onClick={runProductionBenchmark} disabled={isBusy || !confirmProductionSpend} className="forge-primary"><Play size={13} /> Run Benchmark</button>
+                  <button data-testid="open-production-benchmark" onClick={() => openArtifact('productionBenchmark')} className="forge-secondary"><ExternalLink size={13} /> Open Report</button>
+                </div>
+                {productionBenchmarkReport && <div data-testid="production-benchmark-summary" className="rounded border border-slate-800 bg-[#0c0c0f] p-2 text-[11px]">
+                  <KeyValue label="Bare / harness" value={`${productionBenchmarkReport.bareSolved}/${productionBenchmarkReport.harnessSolved}`} />
+                  <KeyValue label="Model-driven" value={String(productionBenchmarkReport.harnessModelDrivenSolved ?? '-')} />
+                  <KeyValue label="False success" value={String(productionBenchmarkReport.falseSuccessCount ?? '-')} />
+                  <KeyValue label="Benchmark floors" value={productionBenchmarkReport.benchmarkPassed ? 'PASS' : 'NOT PASSED'} />
+                  <KeyValue label="Release ready" value={productionBenchmarkReport.releaseReady ? 'YES' : 'NO - installed proof required'} />
                 </div>}
               </div>
             </details>
@@ -1161,6 +1240,7 @@ export default function App() {
               <SearchableModelPicker role="code" label="Coding model" value={bindings.code || bindings.Editor || ''} models={modelsCatalog} onChange={value => saveBindings({ ...bindings, code: value, Editor: value })} />
               <SearchableModelPicker role="plan" label="Plan model" value={bindings.plan || bindings.Architect || ''} models={modelsCatalog} onChange={value => saveBindings({ ...bindings, plan: value, Architect: value })} />
               <SearchableModelPicker role="review" label="Review model" value={bindings.review || bindings.Reviewer || ''} models={modelsCatalog} onChange={value => saveBindings({ ...bindings, review: value, Reviewer: value })} />
+              <SearchableModelPicker role="prompt" label="Prompt enhancement model" value={promptEnhancementModel} models={modelsCatalog} onChange={value => { setPromptEnhancementModel(value); vscode?.postMessage({ command: 'set-prompt-enhancement-model', modelId: value }); }} />
             </Panel>
 
             <Panel title="Hybrid Settings">
@@ -1180,6 +1260,18 @@ export default function App() {
               <button data-testid="settings-check-readiness" onClick={retryReadiness} disabled={isCheckingReadiness} className="forge-secondary mt-2 w-full"><RotateCcw size={12} className={isCheckingReadiness ? 'animate-spin' : ''} /> Check again</button>
               {readiness?.provider === 'openrouter' && readiness.credential.configured && <button data-testid="settings-clear-key" onClick={() => vscode?.postMessage({ command: 'clear-openrouter-key' })} className="forge-link-button mt-2">Change OpenRouter key</button>}
             </Panel>
+
+            <details data-testid="mcp-settings" className="rounded border border-slate-800 bg-[#17171b] p-3">
+              <summary className="cursor-pointer text-[11px] font-bold uppercase text-slate-300">External tools <span className="font-normal text-slate-500">({mcpCatalog.serverCount} servers · {mcpCatalog.toolCount} tools)</span></summary>
+              <div className="mt-3 space-y-2 text-[11px] text-slate-500">
+                <p>Only explicitly configured and policy-authorized MCP tools are available. Side effects always require approval.</p>
+                <button data-testid="refresh-mcp-catalog" onClick={() => vscode?.postMessage({ command: 'refresh-mcp-catalog' })} className="forge-secondary w-full"><RotateCcw size={12} /> Refresh catalog</button>
+                <button data-testid="open-mcp-catalog" onClick={() => vscode?.postMessage({ command: 'open-mcp-catalog' })} className="forge-link-button w-full"><ExternalLink size={12} /> Open sanitized catalog</button>
+                <button data-testid="add-mcp-server" onClick={() => vscode?.postMessage({ command: 'add-mcp-server' })} className="forge-secondary w-full"><ExternalLink size={12} /> Add governed server</button>
+                <button data-testid="remove-mcp-server" onClick={() => vscode?.postMessage({ command: 'remove-mcp-server' })} className="forge-link-button w-full"><Trash2 size={12} /> Remove server</button>
+                <button onClick={() => vscode?.postMessage({ command: 'open-native-settings' })} className="forge-link-button w-full"><Settings size={12} /> Configure servers</button>
+              </div>
+            </details>
 
             <details data-testid="custom-modes-settings" className="rounded border border-slate-800 bg-[#17171b] p-3">
               <summary className="cursor-pointer text-[11px] font-bold uppercase text-slate-300">Custom modes <span className="font-normal text-slate-500">({modes.filter(mode => !mode.builtIn).length}/20)</span></summary>
@@ -1333,7 +1425,7 @@ function SearchableModelPicker({ role, label, value, models, onChange }: { role:
     <div className="mb-3" data-testid={`model-picker-${role}`}>
       <div className="mb-1 flex items-center justify-between gap-2 text-[11px] text-slate-400">
         <span>{label}</span>
-        <span className="text-[10px] text-slate-600">{selected?.provider || 'OpenRouter'}</span>
+          <span className="text-[10px] text-slate-600">{selected?.provider || value.split('/')[0] || 'OpenRouter'}</span>
       </div>
       <button
         type="button"
@@ -1341,8 +1433,8 @@ function SearchableModelPicker({ role, label, value, models, onChange }: { role:
         className="flex w-full items-center justify-between gap-2 rounded border border-slate-800 bg-[#0c0c0f] px-2 py-2 text-left hover:border-slate-700"
       >
         <span className="min-w-0">
-          <span className="block truncate text-xs font-medium text-slate-200">{selected?.name || selected?.id || 'Select model'}</span>
-          <span className="block truncate font-mono text-[10px] text-slate-500">{selected?.id || 'No model selected'}</span>
+          <span className="block truncate text-xs font-medium text-slate-200">{selected?.name || selected?.id || value || 'Select model'}</span>
+          <span className="block truncate font-mono text-[10px] text-slate-500">{selected?.id || value || 'No model selected'}</span>
         </span>
         <ChevronUp size={13} className={`shrink-0 text-slate-500 transition-transform ${isOpen ? '' : 'rotate-180'}`} />
       </button>
@@ -1434,16 +1526,22 @@ function scoreModelForRole(model: any, role: ModelRole, query: string): number {
   const reviewHints = ['sonnet', 'opus', 'gpt-4.1', 'gpt-4o', 'gemini', 'qwen', 'llama-3.3', 'reason'];
   const cheapPenaltyHints = ['free', 'tiny', 'mini', 'small'];
 
-  const hints = role === 'code' ? codeHints : role === 'plan' ? planHints : reviewHints;
+  const promptHints = ['flash-lite', 'flash', 'mini', 'small', 'haiku', 'light', 'instant'];
+  const hints = role === 'code' ? codeHints : role === 'plan' ? planHints : role === 'review' ? reviewHints : promptHints;
   for (const hint of hints) {
     if (haystack.includes(hint)) score += 18;
   }
   if (role === 'code' && haystack.includes('openrouter/pareto-code')) score += 90;
   if (role === 'plan' && haystack.includes('openrouter/auto')) score += 75;
   if (role === 'review' && (haystack.includes('sonnet') || haystack.includes('gpt-4.1') || haystack.includes('opus'))) score += 35;
+  if (role === 'prompt') {
+    const cost = modelCost(model);
+    if (cost !== Number.MAX_SAFE_INTEGER) score += Math.max(0, 80 - Math.min(cost * 1_000_000, 80));
+    if (haystack.includes('gemini-2.5-flash-lite')) score += 70;
+  }
   if (role !== 'code' && haystack.includes('code')) score -= 8;
   for (const hint of cheapPenaltyHints) {
-    if (haystack.includes(hint)) score -= role === 'review' ? 12 : 5;
+    if (haystack.includes(hint)) score += role === 'prompt' ? 18 : role === 'review' ? -12 : -5;
   }
   return score;
 }
@@ -1500,6 +1598,7 @@ function byName(a: any, b: any): number {
 function categoryLabel(model: any, role: ModelRole, score: number): string {
   if (model.id === 'openrouter/pareto-code' && role === 'code') return 'best coding';
   if (model.id === 'openrouter/auto' && role === 'plan') return 'best planning';
+  if (model.id === 'google/gemini-2.5-flash-lite' && role === 'prompt') return 'best quick task';
   if (score >= 100) return `strong ${role}`;
   if (score >= 60) return `good ${role}`;
   return 'available';

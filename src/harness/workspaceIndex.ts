@@ -58,10 +58,13 @@ export interface WorkspaceIndexStatus {
 }
 
 export interface WorkspaceMentionCandidate {
-  kind: 'file' | 'folder';
+  kind: 'file' | 'folder' | 'symbol';
   path: string;
   label: string;
   detail: string;
+  symbolName?: string;
+  line?: number;
+  symbolKind?: string;
 }
 
 export interface WorkspaceMentionSearchResult {
@@ -210,6 +213,17 @@ export class WorkspaceIndexService {
           kind: 'folder', path: folderPath, label: `${segments[index - 1]}/`, detail: `${folderPath}/ · folder`
         });
       }
+      for (const symbol of file.symbols) {
+        candidates.set(`symbol:${file.path}:${symbol.line}:${symbol.name}`, {
+          kind: 'symbol',
+          path: file.path,
+          label: symbol.name,
+          detail: `${file.path}:${symbol.line} · ${symbol.kind}`,
+          symbolName: symbol.name,
+          line: symbol.line,
+          symbolKind: symbol.kind
+        });
+      }
     }
     const ranked = [...candidates.values()]
       .map(candidate => ({ candidate, score: mentionScore(candidate, normalizedQuery) }))
@@ -247,11 +261,11 @@ export class WorkspaceIndexService {
 }
 
 function mentionScore(candidate: WorkspaceMentionCandidate, query: string): number {
-  if (!query) return candidate.kind === 'folder' ? 30 : 40;
+  if (!query) return candidate.kind === 'folder' ? 30 : candidate.kind === 'symbol' ? 35 : 40;
   const label = candidate.label.toLowerCase();
   const candidatePath = candidate.path.toLowerCase();
-  if (label === query || candidatePath === query) return 300;
-  if (label.startsWith(query)) return 220;
+  if (label === query || candidatePath === query) return candidate.kind === 'symbol' ? 340 : 300;
+  if (label.startsWith(query)) return candidate.kind === 'symbol' ? 250 : 220;
   if (candidatePath.startsWith(query)) return 180;
   if (label.includes(query)) return 140;
   if (candidatePath.includes(query)) return 100;

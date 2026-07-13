@@ -20,6 +20,12 @@ import { runDeepResearch } from './harness/research';
 import { BrowserValidationRunner } from './harness/browserValidation';
 import { WorkspaceIndexService, WorkspaceIndexStatus, WorkspaceMentionSearchResult } from './harness/workspaceIndex';
 import { ComposerContextAttachment, ComposerContextService } from './harness/composerContext';
+import { ConversationController } from './harness/conversationController';
+import { McpServerConfig, McpToolGateway, removeMcpServerConfig, upsertMcpServerConfig } from './harness/mcpGateway';
+import { runScriptedPlanBigExecuteSmallEval } from './harness/topologyEval';
+import { normalizeProductionBenchmarkRequest, runProductionBenchmark } from './harness/productionBenchmark';
+import { enhancePrompt, PromptEnhancementResult } from './harness/promptEnhancer';
+import { AssuranceLevel, normalizeAssuranceLevel } from './harness/executionContract';
 
 /** Research artifacts attached to the live chat context this extension-host session. */
 const attachedResearch: string[] = [];
@@ -110,6 +116,75 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand('forge-agent.listMcpTools', async () => provider.refreshMcpCatalog())
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('forge-agent.testMcpServer', async (serverId?: string) => {
+      const id = String(serverId || '').trim();
+      if (!id) throw new Error('MCP server id is required.');
+      return provider.refreshMcpCatalog(id);
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('forge-agent.addMcpServer', async (config?: McpServerConfig) => provider.addMcpServer(config)),
+    vscode.commands.registerCommand('forge-agent.removeMcpServer', async (serverId?: string) => provider.removeMcpServer(serverId)),
+    vscode.commands.registerCommand('forge-agent.enhancePrompt', async (draft?: string, modeId?: string) => {
+      const value = String(draft || await vscode.window.showInputBox({ prompt: 'Prompt to enhance', placeHolder: 'Describe the coding task' }) || '').trim();
+      return provider.enhanceDraft(value, modeId || 'code');
+    }),
+    vscode.commands.registerCommand('forge-agent.setPromptEnhancementModel', async (modelId?: string) => {
+      const value = String(modelId || await vscode.window.showInputBox({ prompt: 'Exact prompt enhancement model slug', value: 'google/gemini-2.5-flash-lite' }) || '').trim();
+      return provider.setPromptEnhancementModel(value);
+    }),
+    vscode.commands.registerCommand('forge-agent.getPromptEnhancementSettings', () => ({
+      modelId: vscode.workspace.getConfiguration('forge').get<string>('promptEnhancementModel', 'google/gemini-2.5-flash-lite')
+    }))
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('forge-agent.setMcpCredential', async (serverId?: string, secretName?: string, value?: string) => {
+      const id = String(serverId || '').trim();
+      const name = String(secretName || '').trim();
+      if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/.test(id) || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/.test(name)) throw new Error('MCP server id and secret name must be bounded identifiers.');
+      const secretValue = String(value || '').trim();
+      if (!secretValue) throw new Error('MCP credential cannot be empty.');
+      await context.secrets.store(`forge.mcp.${id}.${name}`, secretValue);
+      return { stored: true, serverId: id, secretName: name };
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('forge-agent.clearMcpCredential', async (serverId?: string, secretName?: string) => {
+      const id = String(serverId || '').trim();
+      const name = String(secretName || '').trim();
+      if (!id || !name) throw new Error('MCP server id and secret name are required.');
+      await context.secrets.delete(`forge.mcp.${id}.${name}`);
+      return { cleared: true, serverId: id, secretName: name };
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('forge-agent.openMcpCatalog', async () => openArtifact('mcp-catalog', proofRunner))
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand('forge-agent.openSubAgentTopology', async () => openArtifact('subAgentTopology', proofRunner)),
+    vscode.commands.registerCommand('forge-agent.openSubAgentHandoffs', async () => openArtifact('subAgentHandoffs', proofRunner)),
+    vscode.commands.registerCommand('forge-agent.openSubAgentMerges', async () => openArtifact('subAgentMerges', proofRunner)),
+    vscode.commands.registerCommand('forge-agent.openSubAgentMetrics', async () => openArtifact('subAgentMetrics', proofRunner))
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand('forge-agent.openRuntimeIsolationReport', async () => openArtifact('runtimeIsolation', proofRunner)),
+    vscode.commands.registerCommand('forge-agent.openContextOptimizationReport', async () => openArtifact('contextOptimization', proofRunner)),
+    vscode.commands.registerCommand('forge-agent.openModelRoutingReport', async () => openArtifact('modelRouting', proofRunner))
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand('forge-agent.runPlanBigExecuteSmallEval', async () => runScriptedPlanBigExecuteSmallEval(getWorkspaceRoot())),
+    vscode.commands.registerCommand('forge-agent.openPlanBigExecuteSmallReport', async () => openArtifact('topologyEval', proofRunner))
+  );
+
+  context.subscriptions.push(
     vscode.commands.registerCommand('forge-agent.setOpenRouterApiKey', async (apiKey?: string) => {
       const value = String(apiKey || '').trim();
       if (!value) throw new Error('OpenRouter API key cannot be empty.');
@@ -139,6 +214,10 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(vscode.commands.registerCommand('forge-agent.deleteSession', (sessionId: string) => provider.deleteSession(sessionId)));
   context.subscriptions.push(vscode.commands.registerCommand('forge-agent.setHumanApprovalPolicy', (policy: HumanApprovalPolicy) => provider.setHumanApprovalPolicy(policy)));
   context.subscriptions.push(vscode.commands.registerCommand('forge-agent.resolveHumanApproval', (decision: 'approve' | 'reject', approvalId: string, reason?: string) => provider.resolveHumanApproval(decision, approvalId, reason)));
+  context.subscriptions.push(vscode.commands.registerCommand('forge-agent.getAssuranceLevel', () => provider.getAssuranceLevel()));
+  context.subscriptions.push(vscode.commands.registerCommand('forge-agent.setAssuranceLevel', (level: AssuranceLevel) => provider.setAssuranceLevel(level)));
+  context.subscriptions.push(vscode.commands.registerCommand('forge-agent.decideExecutionContract', (decision: 'confirm' | 'reject', digest: string, modelBindings?: Record<string, string>) => provider.resolveExecutionContract(decision, digest, modelBindings || {})));
+  context.subscriptions.push(vscode.commands.registerCommand('forge-agent.openExecutionContract', () => openArtifact('executionContract', proofRunner)));
   context.subscriptions.push(vscode.commands.registerCommand('forge-agent.buildWorkspaceIndex', () => provider.buildWorkspaceIndex()));
   context.subscriptions.push(vscode.commands.registerCommand('forge-agent.getWorkspaceIndexStatus', () => provider.getWorkspaceIndexStatus()));
   context.subscriptions.push(vscode.commands.registerCommand('forge-agent.openWorkspaceIndex', () => openArtifact('workspaceIndex', proofRunner)));
@@ -146,13 +225,20 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(vscode.commands.registerCommand('forge-agent.attachContextFile', (filePath: string) => provider.attachContextFile(filePath)));
   context.subscriptions.push(vscode.commands.registerCommand('forge-agent.clearComposerContext', () => provider.clearComposerContext()));
   context.subscriptions.push(vscode.commands.registerCommand('forge-agent.searchContextMentions', (query: string) => provider.searchContextMentions(query)));
-  context.subscriptions.push(vscode.commands.registerCommand('forge-agent.attachContextMention', (kind: 'file' | 'folder', relativePath: string) => provider.attachContextMention(kind, relativePath)));
+  context.subscriptions.push(vscode.commands.registerCommand('forge-agent.attachContextMention', (kind: 'file' | 'folder' | 'symbol', relativePath: string, symbolName?: string, line?: number) => provider.attachContextMention(kind, relativePath, symbolName, line)));
   context.subscriptions.push(vscode.commands.registerCommand('forge-agent.runDifficultWeakModelProof', async (options?: any) => {
     const request = normalizeDifficultLiveProofRequest({ ...(options || {}), reportRoot: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd() });
     const readiness = await provider.refreshReadiness(false);
     if (!readiness.ready) throw new Error(readiness.blockers[0]?.message || 'Provider is not ready for a live proof.');
     return runDifficultLiveProof(request);
   }));
+  context.subscriptions.push(vscode.commands.registerCommand('forge-agent.runProductionBenchmark', async (options?: any) => {
+    const request = normalizeProductionBenchmarkRequest({ ...(options || {}), reportRoot: getWorkspaceRoot() });
+    const readiness = await provider.refreshReadiness(false);
+    if (!readiness.ready) throw new Error(readiness.blockers[0]?.message || 'Provider is not ready for the production benchmark.');
+    return runProductionBenchmark(request);
+  }));
+  context.subscriptions.push(vscode.commands.registerCommand('forge-agent.openProductionBenchmarkReport', async () => openArtifact('productionBenchmark', proofRunner)));
 
   context.subscriptions.push(
     vscode.commands.registerCommand('forge-agent.runBrowserValidation', async (options?: any) => {
@@ -193,16 +279,20 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand('forge-agent.submitMessage', async (options?: any) => provider.submitConversationMessage(options || {}))
+  );
+
+  context.subscriptions.push(
     vscode.commands.registerCommand('forge-agent.runAgentGoal', async (options?: any) => {
       const mode = modeRegistry.resolve(options?.modeId || 'code');
-      if (mode.intent !== 'code') throw new Error(`Mode '${mode.name}' is advisory. Use chat Send instead of starting a coding run.`);
-      const loop = new AgentHarnessLoop();
+      if (mode.intent !== 'code') throw new Error(`Mode '${mode.name}' is non-mutating. Select a code-capable mode before starting a coding run.`);
+      const loop = new AgentHarnessLoop(createConfiguredProvider(), undefined, undefined, createMcpGateway(context));
       const rawGoal = String(options?.goal || 'Validate the workspace with Forge Agent.');
       const directive = parseGoalDirective(rawGoal);
       const goalOverrides = directive.isDirective
         ? { ...directiveToGoalOverrides(directive), ...(options?.goalOverrides || {}) }
         : options?.goalOverrides;
-      let state = await loop.initializeHarness(directive.isDirective ? directive.goal : rawGoal, options?.modelBindings || {}, options?.runBudget || {}, { goalOverrides, modePolicy: toModePolicy(mode), humanApprovalPolicy: options?.humanApprovalPolicy === 'ask' ? 'ask' : 'auto' });
+      let state = await loop.initializeHarness(directive.isDirective ? directive.goal : rawGoal, options?.modelBindings || {}, options?.runBudget || {}, { goalOverrides, modePolicy: toModePolicy(mode), humanApprovalPolicy: options?.humanApprovalPolicy === 'ask' ? 'ask' : 'auto', assuranceLevel: normalizeAssuranceLevel(options?.assuranceLevel || vscode.workspace.getConfiguration('forge').get<string>('assuranceLevel', 'standard')) });
       while (!['success', 'failed', 'gave_up', 'paused', 'awaiting_input', 'awaiting_approval'].includes(state.status) && state.currentStepIndex < state.maxSteps) {
         state = await loop.runStep(state, options?.modelBindings || {});
       }
@@ -233,14 +323,14 @@ export async function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     vscode.commands.registerCommand('forge-agent.answerClarification', (answer: string, clarificationId?: string) => {
-      const loop = new AgentHarnessLoop();
+      const loop = new AgentHarnessLoop(createConfiguredProvider(), undefined, undefined, createMcpGateway(context));
       return loop.answerClarification(answer, clarificationId);
     })
   );
 
   context.subscriptions.push(
     vscode.commands.registerCommand('forge-agent.restoreCheckpoint', async (checkpointId: string) => {
-      const loop = new AgentHarnessLoop();
+      const loop = new AgentHarnessLoop(createConfiguredProvider(), undefined, undefined, createMcpGateway(context));
       return loop.restoreCheckpoint(checkpointId);
     })
   );
@@ -255,7 +345,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     vscode.commands.registerCommand('forge-agent.resumeAgentGoal', async (options?: any) => {
-      const loop = new AgentHarnessLoop();
+      const loop = new AgentHarnessLoop(createConfiguredProvider(), undefined, undefined, createMcpGateway(context));
       let state = await loop.resumeFromDisk({
         additionalSteps: options?.additionalSteps,
         allowBudgetHaltResume: options?.allowBudgetHaltResume === true
@@ -291,15 +381,20 @@ export async function activate(context: vscode.ExtensionContext) {
 
 class ForgeStudioWebviewProvider implements vscode.WebviewViewProvider {
   private harnessLoop: AgentHarnessLoop;
+  private readonly conversationController = new ConversationController();
   private webview?: vscode.Webview;
   private readinessCache?: ProviderReadiness;
   private readinessProbe?: Promise<ProviderReadiness>;
   private activeChatSessionId?: string;
   private workspaceIndexBuilding = false;
   private workspaceIndexError?: string;
+  private runPromise?: Promise<HarnessState>;
+  private readonly mcpGateway: McpToolGateway;
 
   constructor(private readonly extensionUri: vscode.Uri, private readonly extensionContext: vscode.ExtensionContext, private readonly modeRegistry: ModeRegistry) {
-    this.harnessLoop = new AgentHarnessLoop();
+    this.mcpGateway = createMcpGateway(extensionContext);
+    this.harnessLoop = new AgentHarnessLoop(createConfiguredProvider(), undefined, undefined, this.mcpGateway);
+    void this.refreshMcpCatalog().catch(() => undefined);
   }
 
   public diagnostics(): any {
@@ -308,6 +403,58 @@ class ForgeStudioWebviewProvider implements vscode.WebviewViewProvider {
 
   public async refreshReadiness(force = true): Promise<ProviderReadiness> {
     return this.publishReadiness(force);
+  }
+
+  public async refreshMcpCatalog(serverId?: string): Promise<any> {
+    const tools = await this.mcpGateway.discover(serverId);
+    const catalog = this.mcpGateway.sanitizedCatalog();
+    const root = getWorkspaceRoot();
+    const target = path.join(root, '.forge', 'mcp-catalog.json');
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, JSON.stringify({ generatedAt: new Date().toISOString(), serverCount: new Set(catalog.map(tool => tool.serverId)).size, tools: catalog }, null, 2), 'utf8');
+    await this.webview?.postMessage({ command: 'mcp-catalog', serverCount: new Set(catalog.map(tool => tool.serverId)).size, toolCount: catalog.length, tools: catalog });
+    return { discovered: tools.length, serverCount: new Set(catalog.map(tool => tool.serverId)).size, tools: catalog, artifactPath: target };
+  }
+
+  public async enhanceDraft(draft: string, modeId = 'code'): Promise<PromptEnhancementResult> {
+    const mode = this.modeRegistry.resolve(modeId || 'code');
+    const configuration = vscode.workspace.getConfiguration('forge');
+    const modelId = String(configuration.get<string>('promptEnhancementModel', 'google/gemini-2.5-flash-lite') || '').trim();
+    return enhancePrompt(createConfiguredProvider(), {
+      draft,
+      modelId,
+      modeName: mode.name,
+      sessionId: `forge-enhance-${Date.now()}`
+    });
+  }
+
+  public async setPromptEnhancementModel(modelId: string): Promise<string> {
+    const normalized = String(modelId || '').trim();
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9._:/-]{1,199}$/.test(normalized)) throw new Error('Prompt enhancement model must be an exact bounded model slug.');
+    await vscode.workspace.getConfiguration('forge').update('promptEnhancementModel', normalized, vscode.ConfigurationTarget.Global);
+    await this.publishPromptEnhancementSettings();
+    return normalized;
+  }
+
+  public async addMcpServer(config?: McpServerConfig): Promise<{ added: true; server: McpServerConfig }> {
+    const candidate = config || await promptForMcpServerConfig();
+    const configuration = vscode.workspace.getConfiguration('forge');
+    const existing = configuration.get<McpServerConfig[]>('mcpServers', []);
+    const next = upsertMcpServerConfig(existing, candidate);
+    const server = next.find(item => item.id === String(candidate.id).trim())!;
+    await configuration.update('mcpServers', next, vscode.ConfigurationTarget.Global);
+    await this.webview?.postMessage({ command: 'mcp-config-updated', action: 'added', serverId: server.id });
+    return { added: true, server };
+  }
+
+  public async removeMcpServer(serverId?: string): Promise<{ removed: true; serverId: string }> {
+    const configuration = vscode.workspace.getConfiguration('forge');
+    const existing = configuration.get<McpServerConfig[]>('mcpServers', []);
+    const id = String(serverId || await vscode.window.showQuickPick(existing.map(server => server.id), { placeHolder: 'Remove a governed MCP server' }) || '').trim();
+    const next = removeMcpServerConfig(existing, id);
+    await configuration.update('mcpServers', next, vscode.ConfigurationTarget.Global);
+    await this.webview?.postMessage({ command: 'mcp-config-updated', action: 'removed', serverId: id });
+    return { removed: true, serverId: id };
   }
 
   public listSessions(): any {
@@ -330,7 +477,7 @@ class ForgeStudioWebviewProvider implements vscode.WebviewViewProvider {
     const loaded = this.openSession(sessionId);
     if (!loaded.meta.resumable) return loaded;
     let state = await this.harnessLoop.resumeFromDisk({ additionalSteps: 30, allowBudgetHaltResume: true });
-    while (state && !['success', 'failed', 'gave_up', 'paused', 'awaiting_input'].includes(state.status) && state.currentStepIndex < state.maxSteps) {
+    while (state && !['success', 'failed', 'gave_up', 'paused', 'awaiting_input', 'awaiting_approval'].includes(state.status) && state.currentStepIndex < state.maxSteps) {
       state = await this.harnessLoop.runStep(state, modelBindings);
     }
     return { ...loaded, state };
@@ -349,6 +496,246 @@ class ForgeStudioWebviewProvider implements vscode.WebviewViewProvider {
 
   public async resolveHumanApproval(decision: 'approve' | 'reject', approvalId: string, reason = '', modelBindings: Record<string, string> = {}): Promise<HarnessState> {
     return this.harnessLoop.decideHumanApproval(decision, approvalId, reason, modelBindings);
+  }
+
+  public getAssuranceLevel(): AssuranceLevel {
+    return normalizeAssuranceLevel(vscode.workspace.getConfiguration('forge').get<string>('assuranceLevel', 'standard'));
+  }
+
+  public async setAssuranceLevel(level: AssuranceLevel): Promise<AssuranceLevel> {
+    const normalized = normalizeAssuranceLevel(level);
+    await vscode.workspace.getConfiguration('forge').update('assuranceLevel', normalized, vscode.ConfigurationTarget.Global);
+    await this.publishAssuranceLevel();
+    return normalized;
+  }
+
+  public async resolveExecutionContract(decision: 'confirm' | 'reject', digest: string, modelBindings: Record<string, string> = {}): Promise<HarnessState> {
+    let state = await this.harnessLoop.decideExecutionContract(decision, digest);
+    await this.publishState(state);
+    if (decision === 'confirm') state = await this.runUntilBoundary(state, modelBindings);
+    return state;
+  }
+
+  public async submitConversationMessage(options: any): Promise<any> {
+    const messages = Array.isArray(options.messages) ? options.messages : [];
+    const lastUser = String(options.message || messages.slice(-1)[0]?.content || '').trim();
+    const mode = this.modeRegistry.resolve(options.modeId || 'code');
+    const state = this.harnessLoop.getDiagnostics()?.state as HarnessState | undefined;
+    const pendingClarification = state?.clarifications?.find(item => item.status === 'pending');
+    const pendingApproval = state?.pendingHumanApproval?.status === 'pending' ? state.pendingHumanApproval : undefined;
+    const pendingContract = state?.executionContract?.status === 'pending' ? state.executionContract : undefined;
+    const decision = this.conversationController.route({
+      message: lastUser,
+      modeIntent: mode.intent,
+      runStatus: state?.status,
+      pendingClarificationId: pendingClarification?.id,
+      pendingApprovalId: pendingApproval?.id || pendingContract?.digest
+    });
+    const sessionId = this.ensureConversationSession(lastUser);
+    await this.webview?.postMessage({ command: 'conversation-route', sessionId, decision });
+
+    if (decision.route === 'answer') {
+      const result = await runChatCompletion({ messages, modelId: options.modelId, sessionId, mode, userContext: this.currentComposerContext(sessionId) });
+      await this.publishConversationText(sessionId, messages, result.text, result.modelId, result.usage);
+      return { decision, sessionId, text: result.text, modelId: result.modelId, usage: result.usage };
+    }
+
+    if (decision.route === 'clarify_intent') {
+      const text = decision.requiresModeChange
+        ? `This request appears to require workspace changes, but ${mode.name} mode is non-mutating. Switch to a code-capable mode and send it again.`
+        : state && !this.isTerminal(state)
+          ? 'Should this change the active run, or are you asking a read-only question?'
+          : 'Should Forge change the workspace, or are you asking for a read-only answer?';
+      await this.publishConversationText(sessionId, messages, text);
+      return { decision, sessionId, text };
+    }
+
+    if (decision.route === 'inspect_status') {
+      const text = this.authoritativeStatusText(state);
+      await this.publishConversationText(sessionId, messages, text);
+      return { decision, sessionId, text, state };
+    }
+
+    if (decision.route === 'research') {
+      const question = lastUser.replace(/^\/research\s+/i, '').trim();
+      const research = await runDeepResearch(question, createConfiguredProvider(), getWorkspaceRoot(), options.modelId);
+      attachedResearch.push(research.artifactPath);
+      const text = `Research artifact attached (${research.subQuestions.length} sub-questions, web-grounded: ${research.webGrounded}, saved to ${path.relative(getWorkspaceRoot(), research.artifactPath)}).\n\n${research.markdown.slice(0, 4000)}`;
+      await this.publishConversationText(sessionId, messages, text);
+      return { decision, sessionId, text, artifactPath: research.artifactPath };
+    }
+
+    if (decision.route === 'pause') {
+      writeRunControl({ ...(readRunControl() || {}), paused: true, requestedAt: new Date().toISOString() });
+      const next = state && !this.isTerminal(state) && !this.runPromise ? await this.harnessLoop.runStep(state, options.modelBindings || {}) : state;
+      if (next) await this.publishState(next);
+      const text = 'Run paused at the next governed boundary. No provider calls will be made while paused.';
+      await this.publishConversationText(sessionId, messages, text);
+      return { decision, sessionId, text, state: next };
+    }
+
+    if (decision.route === 'cancel') {
+      if (this.runPromise) {
+        writeRunControl({ ...(readRunControl() || {}), cancelRequested: true, requestedAt: new Date().toISOString() });
+        const text = 'Cancellation requested. Forge will stop at the next governed boundary after the current bounded action.';
+        await this.publishConversationText(sessionId, messages, text);
+        return { decision, sessionId, text, state };
+      }
+      const cancelled = this.harnessLoop.cancelRun('Cancelled by the user through the conversation controller.');
+      await this.publishState(cancelled);
+      const text = 'Run cancelled. Its history and evidence remain available, and this terminal run will not resume.';
+      await this.publishConversationText(cancelled.sessionId, messages, text);
+      return { decision, sessionId: cancelled.sessionId, text, state: cancelled };
+    }
+
+    if (decision.route === 'steer_run') {
+      writeRunControl({ ...(readRunControl() || {}), editedGoal: { constraints: [lastUser] }, requestedAt: new Date().toISOString() });
+      const text = `Steering recorded for this run: ${lastUser}`;
+      await this.publishConversationText(sessionId, messages, text);
+      if (!this.runPromise && state && !this.isBoundary(state)) await this.runUntilBoundary(state, options.modelBindings || {});
+      return { decision, sessionId, text, state: this.harnessLoop.getDiagnostics()?.state };
+    }
+
+    let nextState: HarnessState | undefined = state;
+    if (decision.route === 'start_run') {
+      const readiness = await this.publishReadiness();
+      if (!readiness.ready) throw new Error(readiness.blockers[0]?.message || 'Forge provider is not ready.');
+      nextState = await this.initializeConversationRun(lastUser, messages, mode, options);
+    } else if (decision.route === 'answer_clarification') {
+      if (!pendingClarification) throw new Error('The pending clarification changed before the answer was applied.');
+      nextState = this.harnessLoop.answerClarification(lastUser, pendingClarification.id);
+      await this.publishState(nextState);
+    } else if (decision.route === 'resolve_approval') {
+      if (!decision.approvalDecision) throw new Error('The pending approval changed before the decision was applied.');
+      if (pendingApproval) {
+        nextState = await this.harnessLoop.decideHumanApproval(decision.approvalDecision, pendingApproval.id, lastUser, options.modelBindings || {});
+      } else if (pendingContract) {
+        nextState = await this.harnessLoop.decideExecutionContract(decision.approvalDecision === 'approve' ? 'confirm' : 'reject', pendingContract.digest);
+      } else {
+        throw new Error('The pending approval changed before the decision was applied.');
+      }
+      await this.publishState(nextState);
+    } else if (decision.route === 'resume') {
+      writeRunControl({ ...(readRunControl() || {}), paused: false, requestedAt: new Date().toISOString() });
+      if (nextState?.status === 'paused') {
+        nextState = await this.harnessLoop.runStep(nextState, options.modelBindings || {});
+        await this.publishState(nextState);
+      }
+    }
+
+    if (!nextState) throw new Error(`Conversation route '${decision.route}' requires an active run.`);
+    nextState = await this.runUntilBoundary(nextState, options.modelBindings || {});
+    const text = this.authoritativeStatusText(nextState);
+    await this.publishConversationText(nextState.sessionId, messages, text);
+    return { decision, sessionId: nextState.sessionId, text, state: nextState };
+  }
+
+  private async initializeConversationRun(rawGoal: string, messages: any[], mode: AgentMode, options: any): Promise<HarnessState> {
+    if (mode.intent !== 'code') throw new Error(`Mode '${mode.name}' cannot start a governed coding run.`);
+    const previousSessionId = this.currentContextSessionId();
+    let previousChat: any[] = [];
+    let userContext: ComposerContextAttachment[] = [];
+    if (previousSessionId) {
+      try {
+        const previous = this.sessionStore().load(previousSessionId);
+        previousChat = previous.chat;
+        userContext = previous.context;
+      } catch { /* a new run can start without stale session data */ }
+    }
+    const directive = parseGoalDirective(rawGoal);
+    const config = vscode.workspace.getConfiguration('forge');
+    const configBudget = {
+      maxCostUsd: config.get<number>('maxCostUsd', 1),
+      maxWallClockMs: Math.max(1, config.get<number>('maxWallClockMinutes', 30)) * 60 * 1000
+    };
+    const goalOverrides = directive.isDirective ? directiveToGoalOverrides(directive) : { maxSteps: config.get<number>('maxSteps', 30) };
+    const next = await this.harnessLoop.initializeHarness(
+      directive.isDirective ? directive.goal : rawGoal,
+      options.modelBindings || {},
+      { ...configBudget, ...(options.runBudget || {}) },
+      { reflectionEnabled: config.get<boolean>('reflectionEnabled', true), goalOverrides, modePolicy: toModePolicy(mode), humanApprovalPolicy: this.humanApprovalPolicy(), assuranceLevel: this.getAssuranceLevel(), userContext }
+    );
+    const mergedChat = messages.length >= previousChat.length ? messages : [...previousChat, ...messages];
+    this.sessionStore().saveChat(next.sessionId, mergedChat);
+    this.sessionStore().saveContext(next.sessionId, userContext);
+    this.activeChatSessionId = undefined;
+    await this.webview?.postMessage({ command: 'composer-context', sessionId: next.sessionId, attachments: this.contextService().summaries(userContext) });
+    await this.publishState(next);
+    return next;
+  }
+
+  private async runUntilBoundary(initial: HarnessState, modelBindings: Record<string, string>): Promise<HarnessState> {
+    if (this.runPromise) return this.runPromise;
+    const execute = async () => {
+      let state = initial;
+      while (!this.isBoundary(state) && state.currentStepIndex < state.maxSteps) {
+        state = await this.harnessLoop.runStep(state, modelBindings);
+        await this.publishState(state);
+        const control = readRunControl();
+        if (!this.isTerminal(state) && (control?.cancelRequested === true || control?.paused === true)) {
+          state = await this.harnessLoop.runStep(state, modelBindings);
+          await this.publishState(state);
+        }
+      }
+      return state;
+    };
+    this.runPromise = execute();
+    try { return await this.runPromise; }
+    finally { this.runPromise = undefined; }
+  }
+
+  private isBoundary(state: HarnessState): boolean {
+    return ['success', 'failed', 'gave_up', 'paused', 'awaiting_input', 'awaiting_approval'].includes(state.status);
+  }
+
+  private isTerminal(state: HarnessState): boolean {
+    return ['success', 'failed', 'gave_up'].includes(state.status);
+  }
+
+  private async publishState(state: HarnessState): Promise<void> {
+    await this.webview?.postMessage({ command: 'state-update', state: this.webviewState(state) });
+  }
+
+  private webviewState(state: HarnessState): HarnessState {
+    const topology = state.subAgentTopology;
+    if (!topology) return state;
+    return {
+      ...state,
+      subAgentTopology: {
+        ...topology,
+        workers: topology.workers.map(worker => ({
+          ...worker,
+          staging: worker.staging ? {
+            ...worker.staging,
+            isolatedRoot: '[host-owned staging root]',
+            tempParent: '[host-owned staging root]',
+            baselineBackupPath: '[host-owned baseline]',
+            baselines: Object.fromEntries(Object.entries(worker.staging.baselines || {}).map(([rel, baseline]) => [rel, {
+              ...baseline,
+              backupPath: '[host-owned baseline]'
+            }]))
+          } : undefined
+        }))
+      }
+    };
+  }
+
+  private authoritativeStatusText(state?: HarnessState): string {
+    if (!state) return 'No governed run is active.';
+    const task = state.taskGraph.tasks.find(item => item.status === 'running' || item.status === 'pending');
+    const oracle = Object.entries(state.oracleStatuses).map(([name, value]) => `${name}: ${value}`).join(', ');
+    const pending = state.executionContract?.status === 'pending'
+      ? ` Execution contract confirmation required (${state.executionContract.authority.assurance}, ${state.executionContract.digest.slice(0, 12)}).`
+      : state.pendingHumanApproval?.status === 'pending'
+      ? ` Approval required for ${state.pendingHumanApproval.proposal.name}.`
+      : state.clarifications?.some(item => item.status === 'pending')
+        ? ` Waiting for clarification: ${state.clarifications.find(item => item.status === 'pending')?.question}`
+        : '';
+    return `Run ${state.status}. Phase ${state.firewall.stage}. Task: ${task?.title || 'none'}. Oracles: ${oracle}. Spend: $${Number(state.goalContract.spent || 0).toFixed(4)} of $${Number(state.runBudget.maxCostUsd || state.goalContract.budget || 0).toFixed(2)}.${pending}${state.haltReason ? ` ${state.haltReason}` : ''}`;
+  }
+
+  private async publishConversationText(sessionId: string, messages: any, text: string, modelId?: string, usage?: any): Promise<void> {
+    await this.publishChatResponse(this.webview, sessionId, messages, text, modelId, usage);
   }
 
   public getWorkspaceIndexStatus(): WorkspaceIndexStatus {
@@ -392,7 +779,7 @@ class ForgeStudioWebviewProvider implements vscode.WebviewViewProvider {
     return new WorkspaceIndexService(getWorkspaceRoot()).searchMentions(String(query || '').slice(0, 120), 20);
   }
 
-  public attachContextMention(kind: 'file' | 'folder', relativePath: string): ReturnType<ComposerContextService['summaries']> {
+  public attachContextMention(kind: 'file' | 'folder' | 'symbol', relativePath: string, symbolName?: string, line?: number): ReturnType<ComposerContextService['summaries']> {
     const report = new WorkspaceIndexService(getWorkspaceRoot()).load();
     if (!report) throw new Error('Build the Forge workspace index before using @ mentions.');
     const normalizedPath = String(relativePath || '').replace(/\\/g, '/');
@@ -402,6 +789,10 @@ class ForgeStudioWebviewProvider implements vscode.WebviewViewProvider {
     } else if (kind === 'folder') {
       if (!report.files.some(file => file.path.startsWith(`${normalizedPath}/`))) throw new Error('The selected folder is not present in the validated workspace index.');
       this.addComposerContext(this.contextService().captureFolder(normalizedPath, report.files.map(file => file.path)));
+    } else if (kind === 'symbol') {
+      const indexed = report.files.find(file => file.path === normalizedPath)?.symbols.find(symbol => symbol.name === symbolName && symbol.line === Number(line));
+      if (!indexed) throw new Error('The selected symbol is not present in the validated workspace index. Rebuild the index if the file changed.');
+      this.addComposerContext(this.contextService().captureSymbol(normalizedPath, indexed.name, indexed.line, report.files));
     } else {
       throw new Error('Unsupported context mention kind.');
     }
@@ -423,7 +814,9 @@ class ForgeStudioWebviewProvider implements vscode.WebviewViewProvider {
     void this.publishReadiness();
     void this.publishModes();
     void this.publishHumanApprovalPolicy();
+    void this.publishAssuranceLevel();
     void this.publishWorkspaceIndexStatus();
+    void this.publishPromptEnhancementSettings();
     this.harnessLoop.setProgressListener(event => {
       void webviewView.webview.postMessage({ command: 'run-progress', event });
     });
@@ -453,12 +846,12 @@ class ForgeStudioWebviewProvider implements vscode.WebviewViewProvider {
         case 'init': {
           try {
             const mode = this.modeRegistry.resolve(message.modeId || 'code');
-            if (mode.intent !== 'code') throw new Error(`Mode '${mode.name}' is advisory. Use Send instead of Run.`);
+            if (mode.intent !== 'code') throw new Error(`Mode '${mode.name}' is non-mutating. Select a code-capable mode before initializing a run.`);
             const userContext = this.currentComposerContext();
-            const state = await this.harnessLoop.initializeHarness(message.goal, message.modelBindings, message.runBudget || {}, { modePolicy: toModePolicy(mode), humanApprovalPolicy: this.humanApprovalPolicy(), userContext });
+            const state = await this.harnessLoop.initializeHarness(message.goal, message.modelBindings, message.runBudget || {}, { modePolicy: toModePolicy(mode), humanApprovalPolicy: this.humanApprovalPolicy(), assuranceLevel: this.getAssuranceLevel(), userContext });
             this.sessionStore().saveContext(state.sessionId, userContext);
             this.activeChatSessionId = undefined;
-            webviewView.webview.postMessage({ command: 'state-update', state });
+            webviewView.webview.postMessage({ command: 'state-update', state: this.webviewState(state) });
           } catch (err: any) {
             vscode.window.showErrorMessage("Harness Initialization failed: " + err.message);
           }
@@ -469,7 +862,7 @@ class ForgeStudioWebviewProvider implements vscode.WebviewViewProvider {
             const trustedState = this.harnessLoop.getDiagnostics()?.state as HarnessState | undefined;
             if (!trustedState) throw new Error('Initialize a Forge run before stepping it.');
             const state = await this.harnessLoop.runStep(trustedState, message.modelBindings);
-            webviewView.webview.postMessage({ command: 'state-update', state });
+            webviewView.webview.postMessage({ command: 'state-update', state: this.webviewState(state) });
           } catch (err: any) {
             vscode.window.showErrorMessage("Harness Run Step failed: " + err.message);
           }
@@ -477,42 +870,8 @@ class ForgeStudioWebviewProvider implements vscode.WebviewViewProvider {
         }
         case 'run-agent-loop': {
           try {
-            const readiness = await this.publishReadiness();
-            if (!readiness.ready) {
-              webviewView.webview.postMessage({ command: 'host-error', message: readiness.blockers[0]?.message || 'Forge provider is not ready.' });
-              break;
-            }
-            // /goal typed into the composer gets full elicitation in the UI path too.
-            const rawGoal = String(message.goal || '');
-            const mode = this.modeRegistry.resolve(message.modeId || 'code');
-            if (mode.intent !== 'code') {
-              webviewView.webview.postMessage({ command: 'host-error', message: `Mode '${mode.name}' is advisory. Use Send for non-mutating guidance.` });
-              break;
-            }
-            const directive = parseGoalDirective(rawGoal);
-            const config = vscode.workspace.getConfiguration('forge');
-            const configBudget = {
-              maxCostUsd: config.get<number>('maxCostUsd', 1),
-              maxWallClockMs: Math.max(1, config.get<number>('maxWallClockMinutes', 30)) * 60 * 1000
-            };
-            const goalOverrides = directive.isDirective ? directiveToGoalOverrides(directive) : { maxSteps: config.get<number>('maxSteps', 30) };
-            const userContext = this.currentComposerContext();
-            let state = await this.harnessLoop.initializeHarness(
-              directive.isDirective ? directive.goal : rawGoal,
-              message.modelBindings,
-              { ...configBudget, ...(message.runBudget || {}) },
-              { reflectionEnabled: config.get<boolean>('reflectionEnabled', true), goalOverrides, modePolicy: toModePolicy(mode), humanApprovalPolicy: this.humanApprovalPolicy(), userContext }
-            );
-            this.sessionStore().saveContext(state.sessionId, userContext);
-            this.activeChatSessionId = undefined;
-            webviewView.webview.postMessage({ command: 'composer-context', sessionId: state.sessionId, attachments: this.contextService().summaries(userContext) });
-            webviewView.webview.postMessage({ command: 'state-update', state });
-            while (!['success', 'failed', 'gave_up', 'paused', 'awaiting_input', 'awaiting_approval'].includes(state.status) && state.currentStepIndex < state.maxSteps) {
-              state = await this.harnessLoop.runStep(state, message.modelBindings);
-              webviewView.webview.postMessage({ command: 'state-update', state });
-            }
+            await this.submitConversationMessage({ ...message, message: String(message.goal || ''), messages: [{ role: 'user', content: String(message.goal || '') }] });
           } catch (err: any) {
-            vscode.window.showErrorMessage("Agent run failed: " + err.message);
             webviewView.webview.postMessage({ command: 'host-error', message: err.message || 'Agent run failed.' });
           }
           break;
@@ -532,7 +891,7 @@ class ForgeStudioWebviewProvider implements vscode.WebviewViewProvider {
         }
         case 'attach-context-mention': {
           try {
-            this.attachContextMention(message.kind, String(message.path || ''));
+            this.attachContextMention(message.kind, String(message.path || ''), String(message.symbolName || ''), Number(message.line || 0));
           } catch (err: any) {
             webviewView.webview.postMessage({ command: 'host-error', message: `Could not attach @ mention: ${err.message}` });
           }
@@ -565,6 +924,21 @@ class ForgeStudioWebviewProvider implements vscode.WebviewViewProvider {
             if (picked) this.addComposerContext(this.contextService().captureFile(picked.uri.fsPath));
           } catch (err: any) {
             webviewView.webview.postMessage({ command: 'host-error', message: `Could not attach workspace file: ${err.message}` });
+          }
+          break;
+        }
+        case 'pick-context-image': {
+          try {
+            const uris = await vscode.workspace.findFiles('**/*.{png,jpg,jpeg,webp}', '**/{node_modules,.git,.forge,out,dist,build,coverage,.cache}/**', 500);
+            const root = getWorkspaceRoot();
+            const choices = uris
+              .filter(uri => uri.scheme === 'file' && isInsideWorkspace(uri.fsPath))
+              .map(uri => ({ label: path.relative(root, uri.fsPath).replace(/\\/g, '/'), uri }))
+              .sort((a, b) => a.label.localeCompare(b.label));
+            const picked = await vscode.window.showQuickPick(choices, { placeHolder: 'Attach a workspace image to Forge', matchOnDescription: true });
+            if (picked) this.addComposerContext(this.contextService().captureImage(picked.uri.fsPath));
+          } catch (err: any) {
+            webviewView.webview.postMessage({ command: 'host-error', message: `Could not attach workspace image: ${err.message}` });
           }
           break;
         }
@@ -605,8 +979,51 @@ class ForgeStudioWebviewProvider implements vscode.WebviewViewProvider {
           await this.publishReadiness();
           break;
         }
+        case 'load-mcp-catalog':
+        case 'refresh-mcp-catalog': {
+          try { await this.refreshMcpCatalog(); }
+          catch (err: any) { webviewView.webview.postMessage({ command: 'host-error', message: `MCP catalog refresh failed: ${err.message}` }); }
+          break;
+        }
+        case 'add-mcp-server': {
+          try { await this.addMcpServer(); }
+          catch (err: any) { webviewView.webview.postMessage({ command: 'host-error', message: `MCP server was not added: ${err.message}` }); }
+          break;
+        }
+        case 'remove-mcp-server': {
+          try { await this.removeMcpServer(); }
+          catch (err: any) { webviewView.webview.postMessage({ command: 'host-error', message: `MCP server was not removed: ${err.message}` }); }
+          break;
+        }
+        case 'set-prompt-enhancement-model': {
+          try { await this.setPromptEnhancementModel(String(message.modelId || '')); }
+          catch (err: any) { webviewView.webview.postMessage({ command: 'host-error', message: `Prompt model was not updated: ${err.message}` }); }
+          break;
+        }
+        case 'load-prompt-enhancement-settings': {
+          await this.publishPromptEnhancementSettings();
+          break;
+        }
+        case 'enhance-prompt': {
+          try {
+            const result = await this.enhanceDraft(String(message.draft || ''), String(message.modeId || 'code'));
+            webviewView.webview.postMessage({ command: 'prompt-enhanced', result });
+          } catch (err: any) {
+            webviewView.webview.postMessage({ command: 'prompt-enhancement-error', message: err.message || 'Prompt enhancement failed. The original draft was preserved.' });
+          }
+          break;
+        }
+        case 'open-mcp-catalog': {
+          try { await openArtifact('mcp-catalog', proofRunner); }
+          catch (err: any) { webviewView.webview.postMessage({ command: 'host-error', message: `MCP catalog is unavailable: ${err.message}` }); }
+          break;
+        }
         case 'load-human-approval-policy': {
           await this.publishHumanApprovalPolicy();
+          break;
+        }
+        case 'load-assurance-level': {
+          await this.publishAssuranceLevel();
           break;
         }
         case 'load-workspace-index-status': {
@@ -626,13 +1043,25 @@ class ForgeStudioWebviewProvider implements vscode.WebviewViewProvider {
           await this.setHumanApprovalPolicy(message.policy);
           break;
         }
+        case 'set-assurance-level': {
+          await this.setAssuranceLevel(message.level);
+          break;
+        }
+        case 'decide-execution-contract': {
+          try {
+            await this.resolveExecutionContract(message.decision === 'confirm' ? 'confirm' : 'reject', String(message.digest || ''), message.modelBindings || {});
+          } catch (err: any) {
+            webviewView.webview.postMessage({ command: 'host-error', message: `Execution contract decision failed: ${err.message}` });
+          }
+          break;
+        }
         case 'resolve-human-approval': {
           try {
             let state = await this.resolveHumanApproval(message.decision === 'approve' ? 'approve' : 'reject', String(message.approvalId || ''), String(message.reason || ''), message.modelBindings || {});
-            webviewView.webview.postMessage({ command: 'state-update', state });
+            webviewView.webview.postMessage({ command: 'state-update', state: this.webviewState(state) });
             while (!['success', 'failed', 'gave_up', 'paused', 'awaiting_input', 'awaiting_approval'].includes(state.status) && state.currentStepIndex < state.maxSteps) {
               state = await this.harnessLoop.runStep(state, message.modelBindings || {});
-              webviewView.webview.postMessage({ command: 'state-update', state });
+              webviewView.webview.postMessage({ command: 'state-update', state: this.webviewState(state) });
             }
           } catch (err: any) {
             webviewView.webview.postMessage({ command: 'host-error', message: `Approval decision failed: ${err.message}` });
@@ -703,10 +1132,10 @@ class ForgeStudioWebviewProvider implements vscode.WebviewViewProvider {
                 this.harnessLoop.clearActiveSession();
                 this.activeChatSessionId = active.meta.sessionId;
               }
-              webviewView.webview.postMessage({ command: 'session-loaded', ...active, resumed: false });
+              webviewView.webview.postMessage({ command: 'session-loaded', ...active, state: active.state ? this.webviewState(active.state) : undefined, resumed: false });
             } else {
               const state = this.harnessLoop.loadPersistedSession();
-              if (state) webviewView.webview.postMessage({ command: 'state-update', state });
+              if (state) webviewView.webview.postMessage({ command: 'state-update', state: this.webviewState(state) });
             }
           } catch (err) {}
           break;
@@ -773,6 +1202,15 @@ class ForgeStudioWebviewProvider implements vscode.WebviewViewProvider {
           }
           break;
         }
+        case 'run-production-benchmark': {
+          try {
+            const report = await vscode.commands.executeCommand<any>('forge-agent.runProductionBenchmark', message.options || {});
+            webviewView.webview.postMessage({ command: 'production-benchmark-report', report });
+          } catch (err: any) {
+            webviewView.webview.postMessage({ command: 'host-error', message: `Production benchmark failed: ${err.message}` });
+          }
+          break;
+        }
         case 'run-verification-fixture-matrix': {
           try {
             const report = await runVerificationFixtureMatrix(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd());
@@ -824,58 +1262,17 @@ class ForgeStudioWebviewProvider implements vscode.WebviewViewProvider {
         case 'restore-checkpoint': {
           try {
             const state = await this.harnessLoop.restoreCheckpoint(String(message.checkpointId || ''));
-            webviewView.webview.postMessage({ command: 'state-update', state });
+            webviewView.webview.postMessage({ command: 'state-update', state: this.webviewState(state) });
             webviewView.webview.postMessage({ command: 'chat-response', text: `Restored checkpoint ${message.checkpointId}. Later evidence and reviews were invalidated; fresh verification is required.` });
           } catch (err: any) {
             webviewView.webview.postMessage({ command: 'host-error', message: `Checkpoint restore failed: ${err.message}` });
           }
           break;
         }
+        case 'submit-message':
         case 'chat': {
           try {
-            const lastUser = String((message.messages || []).slice(-1)[0]?.content || '');
-            const conversationSessionId = this.ensureConversationSession(lastUser);
-            const pending = this.harnessLoop.getDiagnostics()?.state?.clarifications?.find((item: any) => item.status === 'pending');
-            if (pending) {
-              let state = this.harnessLoop.answerClarification(lastUser, pending.id);
-              await this.publishChatResponse(webviewView.webview, conversationSessionId, message.messages, `Clarification recorded. Resuming the same run with your answer: ${lastUser}`);
-              webviewView.webview.postMessage({ command: 'state-update', state });
-              while (!['success', 'failed', 'gave_up', 'paused', 'awaiting_input', 'awaiting_approval'].includes(state.status) && state.currentStepIndex < state.maxSteps) {
-                state = await this.harnessLoop.runStep(state, message.modelBindings || {});
-                webviewView.webview.postMessage({ command: 'state-update', state });
-              }
-              break;
-            }
-            if (/^\/research\s+/i.test(lastUser.trim())) {
-              const question = lastUser.trim().replace(/^\/research\s+/i, '');
-              webviewView.webview.postMessage({ command: 'chat-response', sessionId: conversationSessionId, text: `Deep research: "${question}" - planning sub-questions and dispatching web-grounded workers (OpenRouter :online)...` });
-              const research = await runDeepResearch(question, createConfiguredProvider(), getWorkspaceRoot(), message.modelId);
-              attachedResearch.push(research.artifactPath);
-              await this.publishChatResponse(webviewView.webview, conversationSessionId, message.messages, `Research artifact attached to this conversation (${research.subQuestions.length} sub-questions, web-grounded: ${research.webGrounded}, saved to ${path.relative(getWorkspaceRoot(), research.artifactPath)}). It will ground my answers from now on.\n\n${research.markdown.slice(0, 4000)}`);
-              break;
-            }
-            if (/^\/goal\s+/i.test(lastUser.trim())) {
-              const directive = parseGoalDirective(lastUser);
-              const contractPreview = {
-                goal: directive.goal,
-                doneWhen: directive.doneWhen,
-                constraints: directive.constraints,
-                nonGoals: directive.nonGoals,
-                budgetUsd: directive.budgetUsd,
-                maxSteps: directive.maxSteps
-              };
-              await this.publishChatResponse(webviewView.webview, conversationSessionId, message.messages, `Goal contract compiled (oracle gates are mandatory and cannot be removed):\n${JSON.stringify(contractPreview, null, 2)}\nStart it with the Run button or the forge-agent.runAgentGoal command; steer with forge-agent.pauseGoal / steerGoal / resumeGoal.`);
-              break;
-            }
-            const mode = this.modeRegistry.resolve(message.modeId || 'ask');
-            const result = await runChatCompletion({
-              messages: message.messages || [],
-              modelId: message.modelId,
-              sessionId: conversationSessionId,
-              mode,
-              userContext: this.currentComposerContext(conversationSessionId)
-            });
-            await this.publishChatResponse(webviewView.webview, conversationSessionId, message.messages, result.text, result.modelId, result.usage);
+            await this.submitConversationMessage(message);
           } catch (err: any) {
             webviewView.webview.postMessage({ command: 'chat-response', error: err.message || 'Chat failed.' });
           }
@@ -892,7 +1289,7 @@ class ForgeStudioWebviewProvider implements vscode.WebviewViewProvider {
         case 'load-session': {
           try {
             const loaded = this.openSession(String(message.sessionId || ''));
-            webviewView.webview.postMessage({ command: 'session-loaded', ...loaded, resumed: false });
+            webviewView.webview.postMessage({ command: 'session-loaded', ...loaded, state: loaded.state ? this.webviewState(loaded.state) : undefined, resumed: false });
           } catch (err: any) {
             webviewView.webview.postMessage({ command: 'host-error', message: `Could not load session: ${err.message}` });
           }
@@ -901,7 +1298,7 @@ class ForgeStudioWebviewProvider implements vscode.WebviewViewProvider {
         case 'resume-session': {
           try {
             const loaded = await this.resumeSession(String(message.sessionId || ''), message.modelBindings || {});
-            webviewView.webview.postMessage({ command: 'session-loaded', ...loaded, resumed: loaded.meta.resumable === true });
+            webviewView.webview.postMessage({ command: 'session-loaded', ...loaded, state: loaded.state ? this.webviewState(loaded.state) : undefined, resumed: loaded.meta.resumable === true });
             webviewView.webview.postMessage({ command: 'sessions-list', ...this.listSessions() });
           } catch (err: any) {
             webviewView.webview.postMessage({ command: 'host-error', message: `Could not resume session: ${err.message}` });
@@ -944,11 +1341,11 @@ class ForgeStudioWebviewProvider implements vscode.WebviewViewProvider {
               if (state.status === 'paused') {
                 // One step lets applyControl consume the cleared pause flag.
                 state = await this.harnessLoop.runStep(state, message.modelBindings || {});
-                webviewView.webview.postMessage({ command: 'state-update', state });
+                webviewView.webview.postMessage({ command: 'state-update', state: this.webviewState(state) });
               }
               while (!['success', 'failed', 'gave_up', 'paused', 'awaiting_input', 'awaiting_approval'].includes(state.status) && state.currentStepIndex < state.maxSteps) {
                 state = await this.harnessLoop.runStep(state, message.modelBindings || {});
-                webviewView.webview.postMessage({ command: 'state-update', state });
+                webviewView.webview.postMessage({ command: 'state-update', state: this.webviewState(state) });
               }
             }
           } catch (err: any) {
@@ -973,6 +1370,11 @@ class ForgeStudioWebviewProvider implements vscode.WebviewViewProvider {
         }
       }
     });
+  }
+
+  private async publishPromptEnhancementSettings(): Promise<void> {
+    const modelId = vscode.workspace.getConfiguration('forge').get<string>('promptEnhancementModel', 'google/gemini-2.5-flash-lite');
+    await this.webview?.postMessage({ command: 'prompt-enhancement-settings', modelId });
   }
 
   private sessionStore(): SessionStore {
@@ -1024,11 +1426,11 @@ class ForgeStudioWebviewProvider implements vscode.WebviewViewProvider {
     return created.meta.sessionId;
   }
 
-  private async publishChatResponse(webview: vscode.Webview, sessionId: string, messages: any, text: string, modelId?: string, usage?: any): Promise<void> {
+  private async publishChatResponse(webview: vscode.Webview | undefined, sessionId: string, messages: any, text: string, modelId?: string, usage?: any): Promise<void> {
     const history = Array.isArray(messages) ? messages : [];
     this.sessionStore().saveChat(sessionId, [...history, { role: 'assistant', content: text, ...(modelId ? { modelId } : {}) }]);
-    await webview.postMessage({ command: 'chat-response', sessionId, text, modelId, usage });
-    await webview.postMessage({ command: 'sessions-list', ...this.listSessions() });
+    await webview?.postMessage({ command: 'chat-response', sessionId, text, modelId, usage });
+    await webview?.postMessage({ command: 'sessions-list', ...this.listSessions() });
   }
 
   private async publishReadiness(force = false): Promise<ProviderReadiness> {
@@ -1060,6 +1462,10 @@ class ForgeStudioWebviewProvider implements vscode.WebviewViewProvider {
 
   private async publishHumanApprovalPolicy(): Promise<void> {
     await this.webview?.postMessage({ command: 'human-approval-policy', policy: this.humanApprovalPolicy() });
+  }
+
+  private async publishAssuranceLevel(): Promise<void> {
+    await this.webview?.postMessage({ command: 'assurance-level', level: this.getAssuranceLevel() });
   }
 
   private async publishWorkspaceIndexStatus(): Promise<WorkspaceIndexStatus> {
@@ -1175,19 +1581,19 @@ async function runChatCompletion(options: {
       {
         role: 'system',
         content: [
-          'You are Forge Agent chat inside the Forge Studio panel (a VS Code/Antigravity extension).',
-          'HARD FACTS ABOUT THE UI - never contradict or embellish these:',
-          'This chat has NO tools: it cannot create/edit files, run commands, or commit anything. It is advisory only.',
-          'The ONLY way work gets done: the user types a goal in this same composer box and clicks the Run (play) button. That starts the autonomous firewalled agent, which itself creates files, runs tests, and only succeeds when tests pass.',
-          'Optional goal syntax the user can type before clicking Run: "/goal <objective>" with optional lines "done when:", "constraints:", "budget: $N", "max steps: N".',
-          'Pause and Resume buttons sit next to Run. Artifacts (plan, evidence, diffs) open via the panel buttons.',
+          'You are Forge Agent inside the Forge Studio panel (a VS Code/Antigravity extension).',
+          'This invocation is the controller-selected read-only answer route. Explain and inspect supplied context, but do not claim to have changed files or run commands.',
+          'The same composer accepts implementation requests. The deterministic extension host routes those requests into the governed Forge harness automatically; there is no separate Run button.',
+          'Optional explicit syntax is "/goal <objective>" with lines such as "done when:", "constraints:", "budget: $N", and "max steps: N".',
+          'The governed harness performs changes through PROPOSE -> VALIDATE -> COMMIT -> NARRATE and reports success only with same-run green oracle evidence.',
+          'Pause, resume, approvals, clarifications, progress, and evidence remain in the same conversation. Artifacts open in native IDE surfaces.',
           'There are NO commands named "Forge: Propose" or "PROPOSE run", NO manual commit step, and NO command-palette workflow for this - never instruct the user to paste code into files themselves; that defeats the agent.',
           'The user can also type "/research <question>" in this composer for web-grounded deep research; the resulting artifact attaches to this conversation as context.',
-          'When the user asks you to build or fix something: give a one-line summary of what the agent will do, then tell them exactly: type the goal (suggest a concrete /goal line for them) and click Run.',
+          'If a mutation request reaches this read-only route, state that Forge needs confirmation or a code-capable mode; never pretend the advisory response performed work.',
           'If asked about UI you are not certain exists, say you are not certain instead of inventing steps.'
         ].join('\n')
       },
-      ...(options.mode ? [{ role: 'system' as const, content: `Trusted Forge mode: ${options.mode.name} (${options.mode.intent}).\n${options.mode.instructions}\nThis mode remains advisory in chat and has no mutation tools.` }] : []),
+      ...(options.mode ? [{ role: 'system' as const, content: `Trusted Forge mode: ${options.mode.name} (${options.mode.intent}).\n${options.mode.instructions}\nFor this answer route, remain read-only. Mutation authority belongs only to the host-routed governed harness.` }] : []),
       ...(userContext ? [{ role: 'system' as const, content: `User-attached workspace context captured and validated by the extension host:\n${userContext}` }] : []),
       ...researchContext,
       ...messages.slice(-12)
@@ -1208,6 +1614,81 @@ function getWorkspaceRoot(): string {
     throw new Error('No workspace folder is open.');
   }
   return fs.realpathSync(folders[0].uri.fsPath);
+}
+
+function createMcpGateway(context: vscode.ExtensionContext): McpToolGateway {
+  return new McpToolGateway({
+    workspaceRoot: getWorkspaceRoot,
+    resolveWorkspacePath: resolveContainedWorkspacePath,
+    servers: () => {
+      const configured = vscode.workspace.getConfiguration('forge').get<any[]>('mcpServers', []);
+      return Array.isArray(configured) ? configured as McpServerConfig[] : [];
+    },
+    getSecret: key => context.secrets.get(`forge.mcp.${key}`),
+    timeoutMs: Math.max(1_000, Math.min(120_000, vscode.workspace.getConfiguration('forge').get<number>('mcpTimeoutMs', 30_000)))
+  });
+}
+
+async function promptForMcpServerConfig(): Promise<McpServerConfig> {
+  const id = String(await vscode.window.showInputBox({
+    prompt: 'MCP server ID',
+    placeHolder: 'my-local-server',
+    validateInput: value => /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/.test(value.trim()) ? undefined : 'Use 1-64 letters, numbers, dots, underscores, or hyphens.'
+  }) || '').trim();
+  if (!id) throw new Error('MCP server onboarding was cancelled.');
+  const transport = await vscode.window.showQuickPick([
+    { label: 'Local stdio', value: 'stdio' as const, description: 'Launch a local command and communicate over stdio.' },
+    { label: 'Loopback HTTP', value: 'streamable-http' as const, description: 'Connect only to localhost/127.0.0.1/::1 Streamable HTTP.' }
+  ], { placeHolder: 'Choose the governed MCP transport' });
+  if (!transport) throw new Error('MCP server onboarding was cancelled.');
+
+  let command: string | undefined;
+  let args: string[] | undefined;
+  let url: string | undefined;
+  if (transport.value === 'stdio') {
+    command = String(await vscode.window.showInputBox({ prompt: 'Local MCP command', placeHolder: 'npx' }) || '').trim();
+    if (!command) throw new Error('A local stdio MCP server requires a command.');
+    const argsInput = await vscode.window.showInputBox({ prompt: 'Command arguments as a JSON array', value: '[]' });
+    if (argsInput === undefined) throw new Error('MCP server onboarding was cancelled.');
+    const rawArgs = String(argsInput).trim();
+    args = parseStringArray(rawArgs, 'MCP command arguments');
+  } else {
+    url = String(await vscode.window.showInputBox({ prompt: 'Loopback Streamable HTTP URL', placeHolder: 'http://127.0.0.1:3000/mcp' }) || '').trim();
+    if (!url) throw new Error('A loopback HTTP MCP server requires a URL.');
+  }
+
+  const toolsInput = await vscode.window.showInputBox({
+    prompt: 'Explicit tool policies as JSON keyed by exact tool name. Use {} to configure the server with no authorized tools yet.',
+    value: '{}',
+    ignoreFocusOut: true
+  });
+  if (toolsInput === undefined) throw new Error('MCP server onboarding was cancelled.');
+  const rawTools = String(toolsInput).trim();
+  const tools = parseToolPolicies(rawTools);
+  return {
+    id,
+    name: id,
+    enabled: true,
+    transport: transport.value,
+    command,
+    args,
+    url,
+    tools
+  };
+}
+
+function parseStringArray(raw: string, label: string): string[] {
+  let value: unknown;
+  try { value = JSON.parse(raw || '[]'); } catch { throw new Error(`${label} must be valid JSON.`); }
+  if (!Array.isArray(value) || value.some(item => typeof item !== 'string') || value.length > 100) throw new Error(`${label} must be a JSON array of at most 100 strings.`);
+  return value.map(String);
+}
+
+function parseToolPolicies(raw: string): McpServerConfig['tools'] {
+  let value: unknown;
+  try { value = JSON.parse(raw || '{}'); } catch { throw new Error('MCP tool policies must be valid JSON.'); }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('MCP tool policies must be a JSON object keyed by exact tool name.');
+  return value as McpServerConfig['tools'];
 }
 
 function diagnosticSeverityName(severity: vscode.DiagnosticSeverity): string {
@@ -1238,15 +1719,25 @@ function resolveContainedWorkspacePath(relativePath: string): string {
 async function openArtifact(artifact: string, runner: BlueprintProofRunner): Promise<string> {
   const artifactPaths: Record<string, string> = {
     plan: 'PLAN.md',
+    'mcp-catalog': '.forge/mcp-catalog.json',
     scratchpad: 'SCRATCHPAD.md',
     todos: 'todos.json',
     evidence: 'evidence_ledger.json',
     state: path.join('.forge', 'state.json'),
+    executionContract: path.join('.forge', 'execution-contract.json'),
     context: path.join('.forge', 'context-bundle.json'),
     retrieval: path.join('.forge', 'retrieval-index.json'),
     workspaceIndex: path.join('.forge', 'workspace-index.json'),
     handoffs: path.join('.forge', 'role-handoffs.json'),
     workerContexts: path.join('.forge', 'worker-contexts.json'),
+    subAgentTopology: path.join('.forge', 'subagent-topology.json'),
+    subAgentHandoffs: path.join('.forge', 'subagent-handoffs.json'),
+    subAgentMerges: path.join('.forge', 'subagent-merges.json'),
+    subAgentMetrics: path.join('.forge', 'subagent-metrics.json'),
+    runtimeIsolation: path.join('.forge', 'runtime-isolation.json'),
+    contextOptimization: path.join('.forge', 'context-optimization.json'),
+    modelRouting: path.join('.forge', 'model-routing.json'),
+    topologyEval: path.join('.forge', 'evals', 'latest-plan-big-execute-small.json'),
     blockers: path.join('.forge', 'blockers.json'),
     semanticRetrieval: path.join('.forge', 'semantic-retrieval.json'),
     editTransactions: path.join('.forge', 'worker-edit-transactions.json'),
@@ -1280,6 +1771,7 @@ async function openArtifact(artifact: string, runner: BlueprintProofRunner): Pro
     verificationMatrix: path.join('.forge', 'verification-fixture-matrix.json')
     ,support: path.join('.forge', 'support', 'latest-support-report.md')
     ,difficultProof: path.join('.forge', 'evals', 'latest-difficult-live-proof.json')
+    ,productionBenchmark: path.join('.forge', 'evals', 'latest-production-benchmark.json')
   };
 
   const relativePath = artifactPaths[artifact];

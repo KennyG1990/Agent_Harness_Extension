@@ -4,6 +4,7 @@ import { ToolName, ToolProposal } from './types';
 import { findLenientMatch, parseSearchReplaceHunks, WorkspaceTools } from './tools';
 import { classifyCommandNetworkIntent } from './commandNetwork';
 import { validateBrowserUrl } from './browserValidation';
+import { classifyCommandAuthority, decideRuntimeIsolation } from './runtimeIsolation';
 
 export interface ValidationResult {
   valid: boolean;
@@ -36,6 +37,7 @@ const TOOL_NAMES: ToolName[] = [
   'browser_action',
   'computer_inspect',
   'computer_action',
+  'external_tool',
   'get_diff',
   'update_tasks',
   'update_plan',
@@ -48,16 +50,30 @@ export class Firewall {
   constructor(private readonly tools = new WorkspaceTools()) {}
 
   public isMutating(proposal: ToolProposal): boolean {
+    if (proposal.name === 'external_tool') return this.tools.getMcpGateway()?.isMutating(proposal.arguments || {}) || false;
     return MUTATING_TOOLS.has(proposal.name);
   }
 
-  public async validateProposal(proposal: any): Promise<ValidationResult> {
+  public requiresHumanApproval(proposal: ToolProposal): boolean {
+    return proposal.name === 'external_tool' && Boolean(this.tools.getMcpGateway()?.requiresApproval(proposal.arguments || {}));
+  }
+
+  public affectsWorkspace(proposal: ToolProposal): boolean {
+    return proposal.name === 'external_tool' && Boolean(this.tools.getMcpGateway()?.affectsWorkspace(proposal.arguments || {}));
+  }
+
+  public async validateProposal(proposal: any, context?: { role?: string }): Promise<ValidationResult> {
     const schema = this.validateSchema(proposal);
     if (!schema.valid) {
       return schema;
     }
 
     const typed = proposal as ToolProposal;
+    if (typed.name === 'external_tool') {
+      const gateway = this.tools.getMcpGateway();
+      if (!gateway) return { valid: false, reason: '[mcp_unavailable] No governed MCP gateway is configured.' };
+      return gateway.validateProposal(typed.arguments || {}, String(context?.role || 'Orchestrator'));
+    }
     const scope = this.validateScope(typed);
     if (!scope.valid) {
       return scope;
@@ -68,6 +84,11 @@ export class Firewall {
       const commandPolicy = this.validateCommand(command);
       if (!commandPolicy.valid) {
         return commandPolicy;
+      }
+      const authority = classifyCommandAuthority(command);
+      const expected = String(typed.arguments.expectedAuthority || '').trim();
+      if (expected && expected !== authority.authority) {
+        return { valid: false, reason: `[command_authority_mismatch] Model expected '${expected}', host classified '${authority.authority}'.` };
       }
     }
 
@@ -192,6 +213,10 @@ export class Firewall {
     const network = classifyCommandNetworkIntent(command);
     if (network.decision === 'blocked') {
       return { valid: false, reason: `[network_intent_blocked] ${network.reason}` };
+    }
+    const isolation = decideRuntimeIsolation(command);
+    if (!isolation.allowed) {
+      return { valid: false, reason: `[strict_isolation_unavailable] ${isolation.reason}` };
     }
     return { valid: true };
   }

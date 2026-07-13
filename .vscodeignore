@@ -1,7 +1,9 @@
 Forge-agent-harness/**
 node_modules/*
-!node_modules/playwright-core/
-!node_modules/playwright-core/**
+**/node_modules/**
+.kilo/package.json
+.kilo/package-lock.json
+.kilo/.gitignore
 src/**
 scripts/**
 docs/**

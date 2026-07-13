@@ -2,7 +2,7 @@ import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 
-export type ComposerContextKind = 'file' | 'folder' | 'selection' | 'diagnostics';
+export type ComposerContextKind = 'file' | 'folder' | 'selection' | 'diagnostics' | 'symbol' | 'image';
 
 export interface ComposerContextAttachment {
   id: string;
@@ -12,6 +12,10 @@ export interface ComposerContextAttachment {
   lineStart?: number;
   lineEnd?: number;
   diagnosticCount?: number;
+  symbolName?: string;
+  neighborPaths?: string[];
+  mimeType?: 'image/png' | 'image/jpeg' | 'image/webp';
+  sha256?: string;
   byteCount: number;
   capturedAt: string;
   content: string;
@@ -24,6 +28,7 @@ const MAX_ATTACHMENT_BYTES = 64 * 1024;
 const MAX_TOTAL_BYTES = 192 * 1024;
 const MAX_DIAGNOSTICS = 100;
 const MAX_FOLDER_PATHS = 500;
+const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
 
 export class ComposerContextService {
   private readonly workspaceRoot: string;
@@ -82,6 +87,68 @@ export class ComposerContextService {
     return this.makeAttachment('diagnostics', `Diagnostics (${accepted.length})`, accepted.join('\n'), { diagnosticCount: accepted.length });
   }
 
+  public captureSymbol(filePath: string, symbolName: string, line: number, indexedFiles: Array<{ path: string }>): ComposerContextAttachment {
+    const resolved = this.resolveContainedFile(filePath);
+    const name = String(symbolName || '').trim().slice(0, 200);
+    if (!/^[A-Za-z_$][\w$]*$/.test(name)) throw new Error('Symbol name is invalid.');
+    const sourceLines = fs.readFileSync(resolved.absolutePath, 'utf8').split(/\r?\n/);
+    const declarationLine = positiveLine(line);
+    if (declarationLine > sourceLines.length || !new RegExp(`\\b${escapeRegExp(name)}\\b`).test(sourceLines[declarationLine - 1] || '')) {
+      throw new Error('The indexed symbol declaration is stale. Rebuild the workspace index.');
+    }
+    const declarationStart = Math.max(1, declarationLine - 12);
+    const declarationEnd = Math.min(sourceLines.length, declarationLine + 28);
+    const sections = [`### Declaration ${resolved.relativePath}:${declarationLine}\n${numberedWindow(sourceLines, declarationStart, declarationEnd)}`];
+    const neighborPaths: string[] = [];
+    const word = new RegExp(`\\b${escapeRegExp(name)}\\b`);
+    for (const item of indexedFiles) {
+      if (neighborPaths.length >= 4 || item.path === resolved.relativePath) continue;
+      let neighbor: { absolutePath: string; relativePath: string };
+      try { neighbor = this.resolveContainedFile(item.path); } catch { continue; }
+      let lines: string[];
+      try { lines = fs.readFileSync(neighbor.absolutePath, 'utf8').split(/\r?\n/); } catch { continue; }
+      const hit = lines.findIndex(candidate => word.test(candidate));
+      if (hit < 0) continue;
+      const start = Math.max(1, hit + 1 - 3);
+      const end = Math.min(lines.length, hit + 1 + 5);
+      sections.push(`### Exact-name neighbor ${neighbor.relativePath}:${hit + 1}\n${numberedWindow(lines, start, end)}`);
+      neighborPaths.push(neighbor.relativePath);
+    }
+    const content = boundedText(sections.join('\n\n'), MAX_ATTACHMENT_BYTES);
+    return this.makeAttachment('symbol', `${name} · ${resolved.relativePath}:${declarationLine}`, content, {
+      path: resolved.relativePath,
+      lineStart: declarationLine,
+      lineEnd: declarationLine,
+      symbolName: name,
+      neighborPaths
+    });
+  }
+
+  public captureImage(filePath: string): ComposerContextAttachment {
+    const resolved = this.resolveContainedFile(filePath);
+    const extension = path.extname(resolved.relativePath).toLowerCase();
+    const mimeType = extension === '.png' ? 'image/png' : ['.jpg', '.jpeg'].includes(extension) ? 'image/jpeg' : extension === '.webp' ? 'image/webp' : undefined;
+    if (!mimeType) throw new Error('Forge image context supports PNG, JPEG, and WebP only.');
+    const bytes = fs.readFileSync(resolved.absolutePath);
+    if (!bytes.length || bytes.length > MAX_IMAGE_BYTES) throw new Error('Image context must be between 1 byte and 2 MiB.');
+    if (!matchesImageSignature(bytes, mimeType)) throw new Error('Image bytes do not match the selected image format.');
+    const sha256 = crypto.createHash('sha256').update(bytes).digest('hex');
+    const content = `Host-owned image attachment: ${resolved.relativePath}\nMIME: ${mimeType}\nSHA-256: ${sha256}\nBytes: ${bytes.length}\nRaw bytes are supplied transiently only to a selected vision-capable model.`;
+    return this.makeAttachment('image', path.basename(resolved.relativePath), content, { path: resolved.relativePath, mimeType, sha256, byteCount: bytes.length });
+  }
+
+  public providerImageParts(attachments: unknown): Array<{ type: 'image_url'; image_url: { url: string } }> {
+    const parts: Array<{ type: 'image_url'; image_url: { url: string } }> = [];
+    for (const item of this.normalizeList(attachments).filter(attachment => attachment.kind === 'image')) {
+      const resolved = this.resolveContainedFile(item.path || '');
+      const bytes = fs.readFileSync(resolved.absolutePath);
+      if (!item.mimeType || !item.sha256 || bytes.length > MAX_IMAGE_BYTES || !matchesImageSignature(bytes, item.mimeType)) throw new Error('Persisted image context failed format or size revalidation.');
+      if (crypto.createHash('sha256').update(bytes).digest('hex') !== item.sha256) throw new Error('Persisted image context changed after capture. Remove it and attach the current image.');
+      parts.push({ type: 'image_url', image_url: { url: `data:${item.mimeType};base64,${bytes.toString('base64')}` } });
+    }
+    return parts;
+  }
+
   public normalizeList(raw: unknown): ComposerContextAttachment[] {
     if (!Array.isArray(raw)) return [];
     const accepted: ComposerContextAttachment[] = [];
@@ -90,9 +157,10 @@ export class ComposerContextService {
     for (const item of raw.slice(0, MAX_ATTACHMENTS)) {
       const normalized = this.normalizePersisted(item);
       if (!normalized || ids.has(normalized.id)) continue;
-      if (totalBytes + normalized.byteCount > MAX_TOTAL_BYTES) break;
+      const budgetBytes = normalized.kind === 'image' ? 0 : normalized.byteCount;
+      if (totalBytes + budgetBytes > MAX_TOTAL_BYTES) break;
       ids.add(normalized.id);
-      totalBytes += normalized.byteCount;
+      totalBytes += budgetBytes;
       accepted.push(normalized);
     }
     return accepted;
@@ -102,7 +170,7 @@ export class ComposerContextService {
     const current = this.normalizeList(existing).filter(item => item.id !== attachment.id);
     const next = [...current, this.normalizePersisted(attachment)].filter(Boolean) as ComposerContextAttachment[];
     if (next.length > MAX_ATTACHMENTS) throw new Error(`Forge supports at most ${MAX_ATTACHMENTS} context attachments per session.`);
-    if (next.reduce((sum, item) => sum + item.byteCount, 0) > MAX_TOTAL_BYTES) throw new Error('Context attachments exceed the 192 KiB session limit. Remove an item before adding another.');
+    if (next.reduce((sum, item) => sum + (item.kind === 'image' ? 0 : item.byteCount), 0) > MAX_TOTAL_BYTES) throw new Error('Context attachments exceed the 192 KiB text-session limit. Remove an item before adding another.');
     return next;
   }
 
@@ -119,13 +187,13 @@ export class ComposerContextService {
 
   private makeAttachment(kind: ComposerContextKind, label: string, content: string, extra: Partial<ComposerContextAttachment>): ComposerContextAttachment {
     const capturedAt = new Date().toISOString();
-    const byteCount = Buffer.byteLength(content, 'utf8');
-    const identity = `${kind}\0${extra.path || ''}\0${extra.lineStart || ''}\0${extra.lineEnd || ''}\0${content}`;
+    const contentByteCount = Buffer.byteLength(content, 'utf8');
+    const identity = `${kind}\0${extra.path || ''}\0${extra.lineStart || ''}\0${extra.lineEnd || ''}\0${extra.mimeType || ''}\0${extra.sha256 || ''}\0${content}`;
     return {
       id: `ctx-${crypto.createHash('sha256').update(identity).digest('hex').slice(0, 20)}`,
       kind,
       label: String(label || kind).slice(0, 120),
-      byteCount,
+      byteCount: contentByteCount,
       capturedAt,
       content,
       ...extra
@@ -133,11 +201,11 @@ export class ComposerContextService {
   }
 
   private normalizePersisted(raw: any): ComposerContextAttachment | null {
-    if (!raw || !['file', 'folder', 'selection', 'diagnostics'].includes(raw.kind)) return null;
+    if (!raw || !['file', 'folder', 'selection', 'diagnostics', 'symbol', 'image'].includes(raw.kind)) return null;
     const kind = raw.kind as ComposerContextKind;
     const content = boundedText(raw.content, MAX_ATTACHMENT_BYTES);
     if (!content.trim()) return null;
-    const byteCount = Buffer.byteLength(content, 'utf8');
+    const contentByteCount = Buffer.byteLength(content, 'utf8');
     const pathValue = typeof raw.path === 'string' ? raw.path.replace(/\\/g, '/') : undefined;
     if (kind !== 'diagnostics') {
       if (!pathValue || path.isAbsolute(pathValue)) return null;
@@ -151,10 +219,21 @@ export class ComposerContextService {
       const manifestPaths = content.split('\n').filter(Boolean);
       if (!manifestPaths.length || manifestPaths.length > MAX_FOLDER_PATHS || manifestPaths.some(item => !isSafeRelativePath(item) || !item.startsWith(prefix))) return null;
     }
-    const lineStart = kind === 'selection' ? positiveLine(raw.lineStart) : undefined;
-    const lineEnd = kind === 'selection' ? Math.max(lineStart!, positiveLine(raw.lineEnd)) : undefined;
+    const lineStart = kind === 'selection' || kind === 'symbol' ? positiveLine(raw.lineStart) : undefined;
+    const lineEnd = kind === 'selection' || kind === 'symbol' ? Math.max(lineStart!, positiveLine(raw.lineEnd)) : undefined;
     const diagnosticCount = kind === 'diagnostics' ? Math.min(MAX_DIAGNOSTICS, Math.max(1, Number(raw.diagnosticCount) || content.split('\n').length)) : undefined;
-    const expected = this.makeAttachment(kind, String(raw.label || kind), content, { path: pathValue, lineStart, lineEnd, diagnosticCount });
+    const symbolName = kind === 'symbol' ? String(raw.symbolName || '').trim().slice(0, 200) : undefined;
+    if (kind === 'symbol' && !/^[A-Za-z_$][\w$]*$/.test(symbolName || '')) return null;
+    const neighborPaths: string[] | undefined = kind === 'symbol' && Array.isArray(raw.neighborPaths)
+      ? raw.neighborPaths.map((item: unknown) => String(item || '').replace(/\\/g, '/')).filter((item: string) => isSafeRelativePath(item)).slice(0, 4)
+      : undefined;
+    if (neighborPaths?.some((item: string) => { try { this.resolveContainedFile(item); return false; } catch { return true; } })) return null;
+    const mimeType = kind === 'image' && ['image/png', 'image/jpeg', 'image/webp'].includes(raw.mimeType) ? raw.mimeType as ComposerContextAttachment['mimeType'] : undefined;
+    const sha256 = kind === 'image' && /^[a-f0-9]{64}$/.test(String(raw.sha256 || '')) ? String(raw.sha256) : undefined;
+    const byteCount = kind === 'image' ? Math.floor(Number(raw.byteCount || 0)) : contentByteCount;
+    if (kind === 'image' && (!mimeType || !sha256 || byteCount < 1 || byteCount > MAX_IMAGE_BYTES || contentByteCount > 2_000)) return null;
+    const expected = this.makeAttachment(kind, String(raw.label || kind), content, { path: pathValue, lineStart, lineEnd, diagnosticCount, symbolName, neighborPaths, mimeType, sha256, byteCount });
+    if (typeof raw.id === 'string' && raw.id !== expected.id) return null;
     return { ...expected, capturedAt: validIso(raw.capturedAt) || expected.capturedAt };
   }
 
@@ -209,4 +288,19 @@ function positiveLine(value: unknown): number {
 function validIso(value: unknown): string | undefined {
   const parsed = Date.parse(String(value || ''));
   return Number.isFinite(parsed) ? new Date(parsed).toISOString() : undefined;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function numberedWindow(lines: string[], start: number, end: number): string {
+  return lines.slice(start - 1, end).map((line, index) => `${start + index}: ${line}`).join('\n');
+}
+
+function matchesImageSignature(bytes: Buffer, mimeType: string): boolean {
+  if (mimeType === 'image/png') return bytes.length >= 8 && bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  if (mimeType === 'image/jpeg') return bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+  if (mimeType === 'image/webp') return bytes.length >= 12 && bytes.subarray(0, 4).toString('ascii') === 'RIFF' && bytes.subarray(8, 12).toString('ascii') === 'WEBP';
+  return false;
 }

@@ -22,7 +22,7 @@ export interface ModeStorage {
 }
 
 export const MODE_STORAGE_KEY = 'forge.agentModes.v1';
-export const ALL_MODE_TOOLS: ToolName[] = ['repo_search', 'symbol_search', 'read_file', 'read_range', 'write_file', 'apply_patch', 'run_command', 'run_tests', 'browser_validate', 'browser_inspect', 'browser_action', 'computer_inspect', 'computer_action', 'get_diff', 'update_tasks', 'update_plan', 'record_evidence', 'ask_user', 'declare_success'];
+export const ALL_MODE_TOOLS: ToolName[] = ['repo_search', 'symbol_search', 'read_file', 'read_range', 'write_file', 'apply_patch', 'run_command', 'run_tests', 'browser_validate', 'browser_inspect', 'browser_action', 'computer_inspect', 'computer_action', 'external_tool', 'get_diff', 'update_tasks', 'update_plan', 'record_evidence', 'ask_user', 'declare_success'];
 export const REQUIRED_CODE_MODE_TOOLS: ToolName[] = ['update_plan', 'run_tests', 'get_diff', 'record_evidence', 'ask_user', 'declare_success'];
 
 const READ_TOOLS: ToolName[] = ['repo_search', 'symbol_search', 'read_file', 'read_range', 'ask_user'];

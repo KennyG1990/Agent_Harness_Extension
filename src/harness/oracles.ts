@@ -22,7 +22,7 @@ export class VerificationOracles {
   private readonly root: string;
   private adapter: ProjectAdapter;
 
-  constructor(private readonly workspaceRootOverride?: string) {
+  constructor(private readonly workspaceRootOverride?: string, private readonly environmentOverride?: NodeJS.ProcessEnv) {
     this.root = this.getWorkspaceRoot();
     this.adapter = detectProjectAdapter(this.root);
   }
@@ -73,7 +73,7 @@ export class VerificationOracles {
 
   private execCommand(contract: AdapterOracleCommand, cwd: string): Promise<OracleResult> {
     return new Promise(resolve => {
-      exec(String(contract.command), { cwd, timeout: 120_000 }, (error, stdout, stderr) => {
+      exec(String(contract.command), { cwd, timeout: 120_000, env: this.environmentOverride ? { ...process.env, ...this.environmentOverride } : process.env }, (error, stdout, stderr) => {
         const output = `${stdout}${stderr}`;
         resolve(result(contract, !error, false, output || (error ? `${contract.kind} command failed.` : `${contract.kind} command passed.`)));
       });

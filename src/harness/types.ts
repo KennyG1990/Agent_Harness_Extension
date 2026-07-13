@@ -34,6 +34,7 @@ export type ToolName =
   | 'browser_action'
   | 'computer_inspect'
   | 'computer_action'
+  | 'external_tool'
   | 'get_diff'
   | 'update_tasks'
   | 'update_plan'
@@ -506,9 +507,22 @@ export interface WorkerContext {
   lastWorkerPid: number | null;
   lastWorkerDurationMs: number;
   lastWorkerBlockedEnvKeys: string[];
+  lastIsolationGrade?: import('./runtimeIsolation').IsolationGrade;
+  lastFilesystemRestricted?: boolean;
+  lastChildProcessAllowed?: boolean;
+  lastMemoryLimitMb?: number;
+  lastOutputTruncated?: boolean;
+  lastTimedOut?: boolean;
+  lastProcessTreeTerminated?: boolean;
   recentTools: ToolName[];
   lastTaskId: string;
   lastTaskTitle: string;
+  modelId?: string;
+  promptTokens?: number;
+  completionTokens?: number;
+  costUsd?: number;
+  latencyMs?: number;
+  fallbackProposals?: number;
 }
 
 export interface ArchitectHandoff {
@@ -624,6 +638,13 @@ export interface CommandExecutionMetadata {
   allowedEnvKeys: string[];
   blockedEnvKeys: string[];
   network: import('./commandNetwork').CommandNetworkIntent;
+  authority?: import('./runtimeIsolation').CommandAuthority;
+  isolationGrade?: import('./runtimeIsolation').IsolationGrade;
+  isolationBackend?: import('./runtimeIsolation').RuntimeBackend;
+  isolationAllowed?: boolean;
+  filesystemIsolated?: boolean;
+  networkIsolated?: boolean;
+  resourceLimited?: boolean;
 }
 
 export interface RunBudget {
@@ -706,6 +727,14 @@ export interface RunStats {
   computerInspections: number;
   computerActions: number;
   computerInteractionFailures: number;
+  mcpCalls: number;
+  mcpFailures: number;
+  subAgentWorkers: number;
+  subAgentHandoffs: number;
+  subAgentStagedRuns: number;
+  subAgentMerges: number;
+  subAgentMergeBlocks: number;
+  subAgentConflicts: number;
   progressEventsEmitted: number;
   commandTransactions: number;
   commandTransactionConflicts: number;
@@ -725,6 +754,8 @@ export interface RunStats {
 export interface HarnessState {
   sessionId: string;
   goalContract: GoalContract;
+  executionContract: import('./executionContract').ExecutionContractV1;
+  executionContractHistory: import('./executionContract').ExecutionContractV1[];
   taskGraph: TaskGraph;
   planMd: string;
   scratchpadMd: string;
@@ -754,12 +785,14 @@ export interface HarnessState {
   contextBundle: ContextBundle;
   roleHandoffs: Record<string, RoleHandoff>;
   workerContexts: Record<string, WorkerContext>;
+  subAgentTopology: import('./subAgentCoordinator').SubAgentTopology;
   architectHandoff?: ArchitectHandoff;
   safetyCheckpoints: SafetyCheckpoint[];
   checkpointRestores: CheckpointRestoreEntry[];
   browserValidations: BrowserValidationEvidence[];
   browserInteractions: BrowserInteractionEvidence[];
   computerInteractions: ComputerInteractionEvidence[];
+  mcpInteractions: import('./mcpGateway').McpInteractionRecord[];
   progressEvents: RunProgressEvent[];
   modePolicy?: ModePolicy;
   commandEffects: CommandSideEffectEntry[];

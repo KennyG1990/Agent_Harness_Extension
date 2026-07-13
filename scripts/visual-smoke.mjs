@@ -54,6 +54,16 @@ await page.addInitScript(() => {
           ]
         }, '*'), 0);
       }
+      if (message?.command === 'load-prompt-enhancement-settings') {
+        setTimeout(() => window.postMessage({ command: 'prompt-enhancement-settings', modelId: 'google/gemini-2.5-flash-lite' }, '*'), 0);
+      }
+      if (message?.command === 'enhance-prompt') {
+        setTimeout(() => window.postMessage({ command: 'prompt-enhanced', result: {
+          modelId: 'google/gemini-2.5-flash-lite',
+          enhancedPrompt: 'Objective:\nFix the parser defect.\n\nScope:\nChange only the parser and its focused tests.\n\nDone when:\n- Focused and existing parser tests pass.\n\nRequired evidence:\n- Focused test output and bounded diff.',
+          usage: { totalCost: 0.00004 }
+        } }, '*'), 0);
+      }
     },
     getState: () => undefined,
     setState: () => undefined
@@ -478,16 +488,59 @@ try {
   await page.locator('[data-testid="difficult-proof-summary"]').scrollIntoViewIfNeeded();
   const difficultProofResultScreenshot = path.join(artifacts, 'visual-smoke-difficult-proof-result.png');
   await page.screenshot({ path: difficultProofResultScreenshot, fullPage: true });
+  await page.evaluate(() => {
+    window.postMessage({ command: 'production-benchmark-report', report: {
+      runId: 'production-visual', modelId: 'qwen/qwen-2.5-7b-instruct', live: true,
+      taskCount: 16, bareSolved: 2, harnessSolved: 9, harnessModelDrivenSolved: 9,
+      falseSuccessCount: 0, benchmarkPassed: true, releaseReady: false
+    } }, '*');
+  });
+  await page.click('[data-testid="production-benchmark"] summary');
+  await page.waitForSelector('[data-testid="production-benchmark-summary"]');
+  if (!(await page.locator('[data-testid="run-production-benchmark"]').isDisabled())) throw new Error('Production benchmark must remain disabled before its own spend confirmation.');
+  await page.click('[data-testid="confirm-production-spend"]');
+  if (await page.locator('[data-testid="run-production-benchmark"]').isDisabled()) throw new Error('Production benchmark should enable only after explicit spend confirmation.');
+  const productionBenchmarkScreenshot = path.join(artifacts, 'visual-smoke-production-benchmark.png');
+  await page.locator('[data-testid="production-benchmark"]').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: productionBenchmarkScreenshot, fullPage: true });
+  await page.setViewportSize({ width: 520, height: 920 });
+  const productionBenchmarkSidebarScreenshot = path.join(artifacts, 'visual-smoke-production-benchmark-sidebar.png');
+  await page.locator('[data-testid="production-benchmark"]').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: productionBenchmarkSidebarScreenshot, fullPage: true });
+  await page.setViewportSize({ width: 1440, height: 920 });
   await page.click('[data-testid="view-settings"]');
   await page.waitForSelector('[data-testid="settings-panel"]', { timeout: 5000 });
   const screenshot = path.join(artifacts, 'visual-smoke.png');
   await page.screenshot({ path: screenshot, fullPage: true });
+  await page.waitForSelector('[data-testid="model-picker-prompt"]');
+  await page.click('[data-testid="mcp-settings"] summary');
+  await page.waitForSelector('[data-testid="add-mcp-server"]');
+  const mcpOnboardingScreenshot = path.join(artifacts, 'visual-smoke-mcp-onboarding.png');
+  await page.screenshot({ path: mcpOnboardingScreenshot, fullPage: true });
+  await page.setViewportSize({ width: 520, height: 920 });
+  await page.locator('[data-testid="mcp-settings"]').scrollIntoViewIfNeeded();
+  const mcpOnboardingSidebarScreenshot = path.join(artifacts, 'visual-smoke-mcp-onboarding-sidebar.png');
+  await page.screenshot({ path: mcpOnboardingSidebarScreenshot, fullPage: true });
+  await page.setViewportSize({ width: 1440, height: 920 });
   await page.click('[data-testid="custom-modes-settings"] summary');
   await page.waitForSelector('[data-testid="mode-name"]');
   const modesScreenshot = path.join(artifacts, 'visual-smoke-modes.png');
   await page.screenshot({ path: modesScreenshot, fullPage: true });
   await page.click('[data-testid="view-run"]');
   if (await page.locator('[data-testid="checkpoint-history"]').count()) await page.click('[data-testid="checkpoint-history-toggle"]');
+  await page.fill('[data-testid="chat-input"]', 'fix parser bug');
+  const submitCountBeforeEnhance = await page.evaluate(() => window.__forgePosted.filter(message => message?.command === 'submit-message').length);
+  await page.click('[data-testid="enhance-prompt"]');
+  await page.waitForFunction(() => document.querySelector('[data-testid="chat-input"]')?.value?.startsWith('Objective:'));
+  const submitCountAfterEnhance = await page.evaluate(() => window.__forgePosted.filter(message => message?.command === 'submit-message').length);
+  if (submitCountAfterEnhance !== submitCountBeforeEnhance) throw new Error('Prompt enhancement must not auto-submit the draft.');
+  const promptEnhancementScreenshot = path.join(artifacts, 'visual-smoke-prompt-enhancement.png');
+  await page.screenshot({ path: promptEnhancementScreenshot, fullPage: true });
+  await page.setViewportSize({ width: 520, height: 920 });
+  const promptEnhancementSidebarScreenshot = path.join(artifacts, 'visual-smoke-prompt-enhancement-sidebar.png');
+  await page.screenshot({ path: promptEnhancementSidebarScreenshot, fullPage: true });
+  await page.setViewportSize({ width: 1440, height: 920 });
+  await page.fill('[data-testid="chat-input"]', '');
   await page.click('[data-testid="sessions-toggle"]');
   await page.waitForSelector('[data-testid="sessions-menu"]');
   await page.waitForSelector('[data-testid="resume-session-forge-1783900000001-paused"]');
@@ -558,7 +611,7 @@ try {
   if (await page.locator('[data-testid="onboarding-api-key"]').inputValue()) throw new Error('Onboarding rendered a credential value.');
   const onboardingScreenshot = path.join(artifacts, 'visual-smoke-onboarding.png');
   await page.screenshot({ path: onboardingScreenshot, fullPage: true });
-  console.log(`visual smoke: PASS ${runScreenshot} ${proofScreenshot} ${difficultProofScreenshot} ${difficultProofResultScreenshot} ${screenshot} ${modesScreenshot} ${sessionsScreenshot} ${sessionsSidebarScreenshot} ${approvalScreenshot} ${approvalSidebarScreenshot} ${indexScreenshot} ${indexSidebarScreenshot} ${contextScreenshot} ${contextSidebarScreenshot} ${mentionScreenshot} ${mentionSidebarScreenshot} ${supportScreenshot} ${onboardingScreenshot}`);
+  console.log(`visual smoke: PASS ${runScreenshot} ${proofScreenshot} ${difficultProofScreenshot} ${difficultProofResultScreenshot} ${productionBenchmarkScreenshot} ${productionBenchmarkSidebarScreenshot} ${screenshot} ${mcpOnboardingScreenshot} ${mcpOnboardingSidebarScreenshot} ${promptEnhancementScreenshot} ${promptEnhancementSidebarScreenshot} ${modesScreenshot} ${sessionsScreenshot} ${sessionsSidebarScreenshot} ${approvalScreenshot} ${approvalSidebarScreenshot} ${indexScreenshot} ${indexSidebarScreenshot} ${contextScreenshot} ${contextSidebarScreenshot} ${mentionScreenshot} ${mentionSidebarScreenshot} ${supportScreenshot} ${onboardingScreenshot}`);
 } catch (err) {
   console.error(browserErrors.join('\n') || 'No browser errors captured.');
   throw err;

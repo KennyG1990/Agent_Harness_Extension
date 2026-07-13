@@ -25,7 +25,7 @@ export interface ChatUsage {
 
 export interface ChatOptions {
   modelId: string;
-  messages: { role: 'user' | 'system' | 'assistant'; content: string }[];
+  messages: { role: 'user' | 'system' | 'assistant'; content: string | Array<{ type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } }> }[];
   responseFormatSchema?: any;
   sessionId: string;
   fallbackModels?: string[];
@@ -63,6 +63,7 @@ function estimateCapabilities(modelId: string, contextLength = 128000): Provider
 }
 
 export class OpenRouterProvider implements Provider {
+  private readonly capabilityCache = new Map<string, ProviderCapabilities>();
   public static codingModel(): string {
     return configValue('defaultCodingModel', 'openrouter/pareto-code');
   }
@@ -80,7 +81,7 @@ export class OpenRouterProvider implements Provider {
   }
 
   public capabilities(modelId: string): ProviderCapabilities {
-    return estimateCapabilities(modelId, modelId.includes('auto') || modelId.includes('pareto') ? 200000 : 128000);
+    return this.capabilityCache.get(modelId) || estimateCapabilities(modelId, modelId.includes('auto') || modelId.includes('pareto') ? 200000 : 128000);
   }
 
   public async listModels(): Promise<ModelDescriptor[]> {
@@ -98,7 +99,9 @@ export class OpenRouterProvider implements Provider {
       if (!live.length) {
         return fallback;
       }
-      return [...fallback, ...live.filter((m: ModelDescriptor) => !fallback.some(f => f.id === m.id))];
+      const result = [...fallback, ...live.filter((m: ModelDescriptor) => !fallback.some(f => f.id === m.id))];
+      for (const model of result) this.capabilityCache.set(model.id, { structuredOutput: model.capabilities.includes('structured_output'), toolCalls: model.capabilities.includes('tool_calls'), vision: model.capabilities.includes('vision'), contextLength: model.contextLength });
+      return result;
     } catch {
       return fallback;
     }
@@ -125,7 +128,12 @@ export class OpenRouterProvider implements Provider {
         promptPrice: m.pricing?.prompt === undefined ? undefined : Number(m.pricing.prompt),
         completionPrice: m.pricing?.completion === undefined ? undefined : Number(m.pricing.completion),
         created: Number(m.created || 0),
-        supportedParameters: Array.isArray(m.supported_parameters) ? m.supported_parameters : []
+        supportedParameters: Array.isArray(m.supported_parameters) ? m.supported_parameters : [],
+        capabilities: [
+          'structured_output',
+          ...(Array.isArray(m.supported_parameters) && m.supported_parameters.includes('tools') ? ['tool_calls' as const] : estimateCapabilities(m.id || '').toolCalls ? ['tool_calls' as const] : []),
+          ...(Array.isArray(m.architecture?.input_modalities) && m.architecture.input_modalities.includes('image') ? ['vision' as const] : [])
+        ]
       }
     )).filter((m: ModelDescriptor) => Boolean(m.id));
   }
@@ -188,7 +196,7 @@ export class OpenRouterProvider implements Provider {
       provider: id.split('/')[0] || 'openrouter',
       contextLength,
       ...extra,
-      capabilities: [
+      capabilities: extra.capabilities || [
         'structured_output',
         ...(cap.toolCalls ? ['tool_calls' as const] : []),
         ...(cap.vision ? ['vision' as const] : [])

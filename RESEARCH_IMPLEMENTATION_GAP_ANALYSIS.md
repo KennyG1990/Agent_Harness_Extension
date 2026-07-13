@@ -228,6 +228,8 @@ Important limitation: the harness exists, but it is not yet mature. Current agen
 
 ## Recommended Next Build Order
 
+> Authoritative forward sequencing now lives in `ROADMAP.md`. Phase 86 corrects the current advisory-chat/governed-Run split by making one continuous conversation the front end to the unchanged deterministic harness. This is a product-loop requirement, not optional UX polish.
+
 1. Harden the real agency loop.
    - Status: first slice implemented in Phase 18.
    - Added schema/tool-call repair loops for malformed provider output.
@@ -771,3 +773,141 @@ UX result: the composer now says `Ask anything, @ to attach context, / for actio
 Proof: causal tests cover ranking, folders, caps, source exclusion, containment, tampering, persistence, and prompt delivery. Extension-host E2E proves registered APIs, exact live index selection, metadata-only results, and forged-path rejection. Visual automation proves keyboard selection and inspects desktop/sidebar screenshots. The full no-spend release matrix passes. Installed `@src` inspection exposed `.tmp` proof-workspace pollution; `.tmp` became an enforced index exclusion with a regression sentinel. The corrected installed index reports 140 files/2,105 symbols/zero `.tmp` paths, and Antigravity lists `0.84.0`.
 
 Remaining boundary: no `@symbol`, diagnostics mention, image attachment, remote URI, or semantic-neighbor expansion. A missing index must be built first. Stale index results are labeled and filesystem-revalidated, but not silently rebuilt. Live weak-model uplift attributable specifically to mention-scoped context is not yet measured.
+
+## Phase 85 - Governed Browser And Computer Use
+
+Status: **Implemented, causally tested, extension-host tested, visually inspected, packaged, installed, and activated in Antigravity**.
+
+Reconciled gap: `browser_validate` could prove a loopback page rendered but could not interact with it, and Forge had no bounded desktop authority. Adding generic scripts, selectors, coordinates, or raw input would have bypassed the blueprint firewall.
+
+Implemented result: `browser_inspect` returns bounded role/name targets and a screenshot from a loopback-only Playwright page; `browser_action` consumes exactly one inspected state for click/fill/press/select/wait and emits a fresh state. Windows-only `computer_inspect` uses Microsoft UI Automation against an exact native allowlist; `computer_action` consumes one state for invoke/set-value/focus. Computer use defaults off. Both action tools always enter the persisted digest-bound human approval gate even when ordinary workspace approval is `auto`. Forged, stale, replayed, remote, credentialed, coordinate, disabled-policy, and wrong-window paths reject. Interaction evidence persists separately and cannot impersonate the code oracle.
+
+Proof: compile/static plus real Edge browser, WPF/UIA desktop, and human-approval causal tests pass; broad readiness/session/index/context/support/progress/difficult-proof regressions pass; worker isolation passes 100/100; visual smoke passes; VS Code extension-host E2E exits 0 in 163.3s. `forge-agent-0.85.0.vsix` contains 155 files / 3,206,318 bytes with SHA-256 `C6C32A42E9FCB78F9BF1E613B05FED04A8640AE7B1624738413BC1209A88E4EA`. Antigravity installs and reports `kennyg.forge-agent@0.85.0`; installed runtime markers prove both tool families and unconditional approval. Direct inspection of the actual IDE shows Forge Studio active with its compact composer and live 345-model secret-backed provider settings.
+
+Remaining boundary: browser interaction is loopback-only; computer interaction is Windows-only, exact-title allowlisted, and limited to standard UIA patterns. There is no CAPTCHA, credential, payment, unrestricted remote browsing, arbitrary script, coordinate, OS-setting, or destructive desktop authority. Full conversational routing of these tools belongs to Phase 86.
+
+## Phase 86 - Unified Conversational Agent
+
+Status: **Implemented, causally tested, extension-host tested, visually inspected, packaged, installed, and interactively proven in Antigravity**.
+
+Reconciled gap: Forge previously exposed a tool-less advisory chat and a separate Run action. That was a product split, not a blueprint safety requirement. It prevented ordinary conversation from naturally entering, steering, clarifying, approving, and completing the governed loop.
+
+Implemented result: a host-owned `ConversationController` deterministically selects answer, start, continue, steer, clarification, approval, pause, resume, cancel, status, or research routes from trusted state. Mode ceilings remain authoritative. Consequential ambiguity asks instead of mutating. New work enters the existing `AgentHarnessLoop`; there is no parallel tool loop. Scheduling is serialized, chat/context promote into the run session, terminal runs do not resurrect, and cancellation persists to the next governed boundary before another provider call.
+
+UX result: the installed webview emits one `submit-message` action from one bottom composer. Play and single-step controls are absent from the normal composer. Progress, questions, approvals, and results remain in one timeline; explicit command APIs and compatibility aliases remain for automation.
+
+Proof: deterministic route tests cover mode ceilings and gate precedence. A disposable natural-language fixture performs a validated edit and records same-session green evidence; advisory, red-oracle, terminal-cancel, and boundary-cancel negatives pass. Static, broad regression, real Edge/UIA, worker 100/100, visual, and extension-host suites pass without paid calls. `forge-agent-0.86.0.vsix` is installed in VS Code and Antigravity. A fresh Antigravity window submitted `This could be useful.` and visibly received the non-mutating ask gate. Evidence: `artifacts/installed-unified-conversation-response-086.png`.
+
+Remaining boundary: deterministic regex routing is intentionally conservative and may ask more often than a bounded structured intent model would. A live paid model-driven implementation run through the installed unified path was not executed. Phase 87 external-tool integration, Phase 88 persistent isolated subagents, and later benchmark expansion remain open.
+
+## Phase 87 - Governed MCP And External Tools
+
+Status: **Implemented, causally tested, extension-host tested, visually inspected, packaged, installed, and interactively proven in Antigravity**.
+
+Reconciled gap: research places MCP beside native tools, but Forge currently has only a closed native tool registry. Automatic MCP discovery would violate the same design law the native firewall enforces because server schemas, outputs, credentials, and side effects are untrusted.
+
+Selected contract: one generic `external_tool` proposal resolves through an exact host-owned server/tool policy. Phase 87 supports official-SDK v1 local stdio and loopback Streamable HTTP; validates discovered schema, role, scope, path fields, side-effect class, approval, timeout, output cap, and evidence; stores credentials only in SecretStorage; and never lets MCP output mutate harness state or satisfy success gates. Unrestricted remote MCP is deferred until Phase 89 network isolation.
+
+Coordinator-pattern reconciliation: Anthropic's managed-agent cookbook separates scarce planning and judgment from token-heavy tool execution, keeps raw worker context out of the coordinator, scopes workers to narrow tools, and meters each role independently. Forge already has an Architect handoff and role model bindings, but persistent isolated weak-worker spawning and product-level per-role economics remain Phase 88 and Phase 90 gaps. Phase 87 therefore requires a causal weak-worker `external_tool` proof; it does not claim the full coordinator topology complete.
+
+Implemented result: `McpToolGateway` uses the official v1 SDK for local stdio and loopback Streamable HTTP. Host configuration owns exact tool authorization, side-effect class, role ceiling, scope, approval, path fields, timeout, and output cap. Ajv validates bounded payloads against discovered schemas; traversal, prototype keys, remote references, stale policy, undeclared tools, and role mismatch reject before invocation. Credentials are injected from SecretStorage and redacted. MCP output is inert, bounded, and unable to set an oracle or terminal state. Calls persist sanitized immutable records and run counters.
+
+Coordinator proof: a scripted strong Architect and separate weak Editor use isolated provider sessions. The Architect commits a typed handoff without direct tool authority; the weak worker receives only the focused plan/source/catalog context, calls an authorized MCP read, pauses before a workspace-writing MCP side effect even under auto approval, then reaches a green composite oracle only after exact host approval. Without handoff/discovery/authorization the lane rejects. This proves weak-model tool usability under the harness, not live weak-model uplift.
+
+Proof: `npm run test:mcp`, `npm test`, `npm run test:visual`, and the bundled `npm run test:e2e` pass. The final VSIX is `forge-agent-0.87.0.vsix` (1,795,285 bytes, SHA-256 `172C064AC826C3D9CDB69C2C9DC6EFAEA1A5EC80B0A021C982773632F65000B2`). VS Code and Antigravity both report `kennyg.forge-agent@0.87.0`. After reloading the actual Antigravity window, installed Settings visibly exposes the collapsed `EXTERNAL TOOLS (0 SERVERS · 0 TOOLS)` row while the live OpenRouter catalog remains ready with 345 models. Evidence: `artifacts/installed-governed-mcp-087.jpg`.
+
+Plans: `docs/plans/2026-07-13-governed-mcp-design.md` and `docs/plans/2026-07-13-governed-mcp-implementation.md`.
+
+Remaining boundary: remote non-loopback MCP requires Phase 89 network isolation. Phase 87 does not provide persistent autonomous workers, parallel fan-out, persistent role worktrees, or rigor-matched role economics. No paid OpenRouter call ran, so live weak-model uplift through MCP remains unclaimed.
+
+## Phase 88 - Persistent Isolated Sub-Agents
+
+Status: **Implemented, causally tested, extension-host tested, visually inspected, packaged, installed, and interactively proven in Antigravity**.
+
+Reconciled gap: Forge has isolated role provider sessions and short-lived role-tagged tool workers, but no durable worker lifecycle, bounded fan-out coordinator, persistent handoff queue, persistent worktree ownership, or independent Reviewer-controlled merge. The Phase 87 strong-planner/weak-worker fixture is a causal topology proof, not a persistent sub-agent implementation.
+
+Selected contract: task-scoped logical workers persist model/session/tool/lifecycle/usage state; typed handoffs replace raw context transfer; native mutations stage in a retained worktree/copy; complete staged verification and independent Reviewer approval are required before an optimistic, rollback-capable host merge; active-workspace verification then remains the only source of green success evidence. Depth, fan-out, count, retry, lifetime, files, and bytes are capped. Plans: `docs/plans/2026-07-13-persistent-subagents-design.md` and `docs/plans/2026-07-13-persistent-subagents-implementation.md`.
+
+Implemented result: the host coordinator now owns task-scoped Explorer, Architect, Editor, Reviewer, and Escalation workers with immutable role/model/tool routes, separate provider sessions, typed transcript-free handoffs, bounded lifecycle/fan-out/depth/retries, and per-worker/model usage. Native edits accumulate in one retained Git worktree or filtered copy while intermediate red oracles feed remediation rather than discarding the stage. An independent Reviewer gates the complete staged diff. The host then performs all-path optimistic conflict checks, atomic merge with byte rollback, and a fresh active-workspace composite oracle before normal success evidence can turn green. Repeated Editor failure transfers the retained stage to a distinct Escalation worker instead of mutating an existing worker's route.
+
+Persistent artifacts are `.forge/subagent-topology.json`, `.forge/subagent-handoffs.json`, `.forge/subagent-merges.json`, and `.forge/subagent-metrics.json`; native commands open each. The webview exposes only the compact `agents workers/merges` summary and does not receive staging roots or baseline backup paths.
+
+Proof: `npm run test:subagents` proves separate strong-Architect/weak-Editor sessions, focused prompt boundaries, cumulative two-file staging, active-byte immutability through review, staged-red non-success, blocked review, concurrent conflict, injected partial-merge rollback, missing/expired-root abandonment, and final active-green success. Reflection A/B remains +1.00 with honest halts. All no-spend browser, computer, MCP, workflow, readiness, approval, session, mode, context, index, support, difficult-proof, worker 100/100, static, visual, and bundled extension-host suites pass. The final E2E run exited 0 in 233 seconds; two transient extension-host unresponsive/profiling warnings recovered and are retained as a Phase 89 performance signal.
+
+Release proof: `forge-agent-0.88.0.vsix` is 1,816,851 bytes with SHA-256 `604E14C36202AF1C37052B668BB1937BE82215E852D5D8F199650FB2574D4006`. VS Code and Antigravity both report `kennyg.forge-agent@0.88.0`, and installed runtime files contain the sub-agent coordinator markers. Actual Antigravity opened Forge Studio from the command palette and visibly rendered the compact conversation surface plus `agents 0/0`; evidence is `artifacts/installed-persistent-subagents-088.jpg`.
+
+Remaining boundary: persistent staging currently applies to native `apply_patch` and `write_file`; workspace-writing MCP tools still use the Phase 87 checkpoint/approval transaction path. Mutating workers remain sequential, no kernel/container/socket isolation is claimed, deterministic review remains separately counted, and no paid live model run measured role-level savings. Those limits belong to Phases 89-91.
+
+## Phase 89 - Stronger Runtime Isolation
+
+Status: **Implemented and release-validated in 0.89.0**.
+
+Reconciled gap: command intent filtering, sanitized environments, child workers, and transactional workspaces reduce risk but do not prevent ambient reads, arbitrary descendant processes, resource exhaustion, or direct sockets. The current Windows host has Node 24 permission support but no detected Docker/Podman, usable WSL distribution, or proven non-elevated socket sandbox. Forge must expose that absence and fail closed for strict unattended execution rather than claiming containment from regex policy.
+
+Selected contract: host-classify command authority; apply Node permission and resource cages to native workers; probe optional real OS/container backends; require one for unattended network/unknown commands; persist exact effective guarantees and rejections. Plans: `docs/plans/2026-07-13-runtime-isolation-design.md` and `docs/plans/2026-07-13-runtime-isolation-implementation.md`.
+
+Implemented result: `RuntimeIsolationManager` classifies read, verify, workspace-write, network-read, network-write, and unknown authority independently of model claims. Native non-command workers run under Node permission flags with workspace/runtime read bounds, workspace write bounds, and child-process denial. Worker execution records 384 MiB memory, 2 MiB result output, timeout, truncation, and descendant-process cleanup evidence. Firewall mismatch and downgrade attempts reject before spawn. Unknown/network-read commands require a proven socket-isolating backend; network-write remains denied. Backend probes never install or pull an image.
+
+Proof: `npm run test:isolation` covers nine classifications/bypasses, forged expected authority, strict-unavailable rejection, permission-caged writes, child denial, output limits, timeout, and process-tree termination. Static, worker 100/100, sub-agent, MCP, browser, computer, conversation, visual, and extension-host gates pass. The final bundled E2E exited 0 in 247.9 seconds after moving deterministic `get_diff` back to the trusted coordinator; a transient extension-host unresponsive/profile warning recovered and remains a performance signal.
+
+Release proof: corrected `forge-agent-0.89.0.vsix` contains 54 runtime paths, is 3,102,603 bytes, and has SHA-256 `A72FBE24F9905F9C11808D069F1919289AC76CE6428E84FDB11AB611505D84BD`. VS Code and Antigravity both list `kennyg.forge-agent@0.89.0`; installed copies contain standalone `out/workerHost.js` and `out/harness/runtimeIsolation.js`. Actual Antigravity reload exposed and executed `Forge Agent: Open Runtime Isolation Report`; before a governed run it honestly reported that `.forge/runtime-isolation.json` did not yet exist.
+
+Remaining boundary: the current host has no configured Docker/Podman image, usable WSL distribution, bubblewrap, or other proven socket-containment backend. Process grade is not called a network sandbox. Direct browser/computer tools remain governed by their dedicated loopback/UIA allowlists and unconditional approvals. Phase 89 does not prove live paid unattended network work, parallel mutating workers, or role-economics uplift.
+
+## Phase 90 - Context And Model Optimization
+
+Status: **Implemented and release-closed in 0.90.0**.
+
+Reconciled gap: Forge already has deterministic prompt budgeting, optional hybrid embeddings, file/folder mentions, explicit host context, Architect/Editor rate splitting, persistent role workers, and role usage metrics. The missing value is not another context subsystem. It is symbol/image task entry, deterministic neighbor expansion, exact-model-aware budgets, opt-in least-expensive-capable worker pools, and a same-rigor product topology A/B.
+
+Selected contract: extend the validated index/context store; never trust webview bytes or paths; reserve model output headroom; route only within explicit configured pools before the first worker call; preserve mandatory role bindings; and compare plan-big/execute-small against a rigor-matched solo frontier lane. Plans: `docs/plans/2026-07-13-context-model-optimization-design.md` and `docs/plans/2026-07-13-context-model-optimization-implementation.md`.
+
+Implemented result: validated workspace indexing now exposes stable symbol candidates and bounded declaration/reference neighbors. Image context accepts contained regular PNG/JPEG/WebP files up to 2 MiB, persists only metadata/digest/provenance, revalidates before use, and rejects non-vision routes before a provider call. Exact model context windows now drive bounded role prompt/output profiles while preserving required sections and persisting sanitized allocation evidence.
+
+Routing result: cost-aware routing is disabled by default and requires an explicit configured worker pool. Host terrain signals filter Explorer/Editor candidates for structured output, tools, context, and known price before deterministic price/fit/config-order ranking. Architect and Reviewer bindings remain mandatory and each selected slug is recorded. No route changes after a worker's first call.
+
+Proof result: the scripted same-rigor product A/B solved both lanes with seven calls, zero provider failures, zero fallback, model-driven green evidence, and reviewed diffs. Reported scripted accounting was `$0.0140` for solo frontier and `$0.0102` for plan-big/execute-small, delta `$0.0038`. This proves product wiring and accounting, not live provider economics. The installed `0.90.0` Antigravity extension ran the exact command and opened `.forge/evals/latest-plan-big-execute-small.json` in a native editor.
+
+Release evidence: focused context/routing/topology tests, all no-spend regressions, worker-process stress 100/100, extension-host E2E, visual inspection, package inspection, VS Code/Antigravity installation, and actual Antigravity interaction pass. The VSIX is 3,119,583 bytes with SHA-256 `9B3F84B0BBA3144F07BCD294AB6DD88702A491A3410AE1D82E96550EAF7F7B48`.
+
+Remaining gap: live model-written compaction, retrieval uplift, and paid plan-big/execute-small economics remain unproven. Those claims require Phase 91's fixed 15-25 task benchmark, equal inputs, held-out judges, immutable reports, and explicit spend authorization.
+
+## Phase 91 - Production Benchmark And Release Discipline
+
+Status: **Implemented and installed in 0.91.0; live release-floor evidence pending explicit spend authorization**.
+
+Reconciled gap: the current repo has stronger evaluation machinery than the old five-task weak eval suggests. Tier 2 provides seven disposable held-out tasks, Tier 3 five context-stress tasks, and Tier 4 four symptom/spec tasks. The combined 16-task suite meets the roadmap size and diversity floor. However, raw Tier archives are rewritten during partial progress, latency is not elevated into benchmark accounting, release floors are prose rather than executable policy, and benchmark success is not separated from installed-product evidence.
+
+Selected contract: wrap the existing evaluator rather than fork it. Canonically digest equal task inputs and runner-only judges; keep raw partial reports as progress only; write final production evidence once; calculate false success, model-driven solve rate, cost, calls, failures, and wall-clock latency; require explicit live-spend consent before provider creation; and require independent exact-version/VSIX installed evidence before `release_ready`. Plans: `docs/plans/2026-07-13-production-benchmark-design.md` and `docs/plans/2026-07-13-production-benchmark-implementation.md`.
+
+Fable 5 reconciliation: Forge's deterministic contracts remain mandatory, but model-family behavioral prompting should follow current Anthropic guidance instead of accumulating generic legacy prose. A host-selected Fable/Mythos addendum may encourage action readiness, scope restraint, tool-grounded status, genuine ask boundaries, and autonomous continuation while explicitly avoiding reasoning reproduction. It cannot change tools, authority, workflow, or success semantics.
+
+Implemented result: `productionBenchmark.ts` composes the fixed 16-task suite, locks SHA-256 suite/input/judge digests, rejects partial/duplicate/missing/drifted task sets, normalizes bare/harness scorecards, and computes model-driven solve rate, false success, provider failure, cost, total wall-clock duration, and average wall-clock per provider call. Final production archives are written once with `wx`; benchmark floors remain false until persistence succeeds. Scripted runs, no uplift, false success, frontier substitution, missing consent, out-of-range bounds, and 15-task cherry-picking reject.
+
+Release policy: benchmark floors require 16-25 complete tasks, exact suite integrity, at least 40% model-driven harness solves, strict uplift over bare, zero false success, zero fallback credit, at most 10% provider failures, a live run, and an immutable archive. `releaseReady` additionally requires exact VSIX/version installation evidence for VS Code and Antigravity plus native report behavior. Score rate alone cannot release the product.
+
+Product result: `eval:production`, `forge-agent.runProductionBenchmark`, and `forge-agent.openProductionBenchmarkReport` are packaged. One collapsed Proof section owns an independent credit checkbox and honest benchmark/release summary. Actual installed Antigravity after reload displayed the Production Benchmark control and both native commands; Open Report reached Forge and correctly reported that no production report exists before an authorized paid run.
+
+Fable/Mythos result: exact selected Fable 5 and Mythos 5 slugs receive one required host-owned behavioral section. Other model families receive no addendum. Focused tests prove the profile requests no reproduced reasoning or context-count behavior. It does not alter response schema, tools, role ceilings, firewall, approvals, ask gates, review, oracle, or evidence.
+
+## Phase 92 - Prompt Enhancement And MCP Onboarding
+
+Status: **Implemented, adversarially tested, visually inspected, extension-host validated, packaged, installed, and interactively proven in Antigravity**.
+
+Reconciled gap: the visible wand currently performs a fixed React string rewrite. It makes no model call, has no dedicated inexpensive model route, cannot report usage, and does not implement the Anthropic-style behavioral prompt engineering requested by the user. Governed MCP execution is real, but adding a custom server and exact tool policies requires manual editing of `forge.mcpServers`; the installed product has no focused onboarding command.
+
+Implemented result: `promptEnhancer.ts` requests six strict fields from one exact configured inexpensive model, rejects invalid drafts before provider work, rejects malformed/extra/oversized output, and deterministically renders a draft for user review. The webview never auto-submits it and displays exact model/cost provenance. Native MCP add/replace/remove commands reuse the gateway's bounded transport, loopback, secret, argument and exact tool-policy validation; onboarding does not discover, invoke or authorize undeclared tools. `forge.mcpTimeoutMs` is bounded to 1-120 seconds. The installed Kilo 7.4.5 category audit is recorded in `docs/KILO_FEATURE_SETTING_AUDIT.md`; features already stronger in Forge, delegated to native IDE surfaces, or rejected for weakening authority are explicitly classified instead of copied cosmetically.
+
+Validation: `npm run test:prompt-enhancement`, `npm test`, governed MCP/conversation/model-profile suites, worker stress 100/100, desktop/sidebar visual smoke and a 219.5-second extension-host run pass. Actual Antigravity after reload shows 345 live models, the exact enhancement-model picker, collapsed Add/Remove MCP controls, command-palette entries, and empty-draft rejection without a provider call. No live rewrite-quality claim is made.
+
+Validation: the broad no-spend matrix exited 0 in 143.9 seconds, visual desktop/sidebar proof passes, worker stress is 100/100, and the final post-Fable extension-host suite exited 0 in 211.6 seconds. Two host unresponsive/responsive cycles recovered and remain an explicit performance warning. Package/install/installed proof is recorded in `BUILD_LOG.md`.
+
+Remaining boundary: no live 16-task benchmark ran because no provider spend was authorized. Consequently the current artifact is installed and mechanically ready for evaluation, but no fresh live uplift, cost, `benchmarkPassed`, or `releaseReady` result exists.
+
+## Phase 93 - Execution Contracts And Assurance Levels
+
+Status: **PLANNED**
+
+Reconciled gap: Forge has a goal contract, workflow acceptance contract, mode ceilings, budget, approval identities and terminal proof gates, but they are separate state objects. The user cannot select a machine-enforced assurance level, inspect one canonical authority contract before work, or force steering/model/budget/scope widening to invalidate prior authorization. Existing human approval is proposal-specific and must not be overloaded as run-contract authority.
+
+Selected result: compile those existing authorities into a canonical `ExecutionContractV1`; bind confirmation and revision history to SHA-256; enforce Standard, Verified and strict-unavailable Audited semantics in the host; preserve legacy Standard behavior; and expose only a compact composer control plus inline ask gate. Plans: `docs/plans/2026-07-13-execution-contract-assurance-design.md` and `docs/plans/2026-07-13-execution-contract-assurance-implementation.md`.

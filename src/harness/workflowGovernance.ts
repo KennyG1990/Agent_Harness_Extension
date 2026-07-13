@@ -52,10 +52,10 @@ export function createWorkflowGovernance(root: string, goalContract: GoalContrac
   return workflow;
 }
 
-export function validateWorkflowProposal(state: HarnessState, proposal: ToolProposal): { valid: boolean; reason?: string } {
+export function validateWorkflowProposal(state: HarnessState, proposal: ToolProposal, options: { implementation?: boolean } = {}): { valid: boolean; reason?: string } {
   const workflow = state.workflow;
   if (!workflow) return { valid: false, reason: '[workflow_gate_blocked] Workflow governance state is missing.' };
-  if (IMPLEMENTATION_TOOLS.has(proposal.name)) {
+  if (IMPLEMENTATION_TOOLS.has(proposal.name) || options.implementation === true) {
     if (!isComplete(workflow, 'baseline') || !isComplete(workflow, 'reconcile') || !isComplete(workflow, 'document_plan')) {
       return reject(workflow, proposal, `Implementation requires completed baseline, reconcile, and documented-plan stages.`);
     }
@@ -95,15 +95,15 @@ export function enforceWorkflowPlan(candidate: string, workflow: WorkflowGoverna
   return `${plan.trim()}\n`;
 }
 
-export function recordWorkflowEvent(state: HarnessState, proposal: ToolProposal, success: boolean): void {
+export function recordWorkflowEvent(state: HarnessState, proposal: ToolProposal, success: boolean, options: { implementation?: boolean; reconciliation?: boolean } = {}): void {
   if (!success || !state.workflow) return;
   const workflow = state.workflow;
-  if (['repo_search', 'symbol_search', 'read_file', 'read_range'].includes(proposal.name)) {
+  if (['repo_search', 'symbol_search', 'read_file', 'read_range'].includes(proposal.name) || options.reconciliation === true) {
     complete(workflow, 'reconcile', `${proposal.name} completed workspace reconciliation evidence.`);
     workflow.capabilityMapDelta = state.files && Object.keys(state.files).length ? `Reconciled ${Object.keys(state.files).length} remembered file(s); capability change requires close review.` : 'no capability-map delta';
   }
   if (proposal.name === 'update_plan') complete(workflow, 'document_plan', 'PLAN.md updated through the Architect role.');
-  if (IMPLEMENTATION_TOOLS.has(proposal.name)) {
+  if (IMPLEMENTATION_TOOLS.has(proposal.name) || options.implementation === true) {
     complete(workflow, 'implement', `${proposal.name} committed through deterministic validation.`);
     if (state.lastOraclePass) complete(workflow, 'validate', `Automatic post-${proposal.name} oracle passed.`);
   }

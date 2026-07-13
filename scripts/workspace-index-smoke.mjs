@@ -33,6 +33,10 @@ assert.ok(report.fileCount > 300, `expected >300 indexed files, got ${report.fil
 assert.ok(report.files.some(file => file.path === 'src/zzzz-target.ts'));
 assert.equal(report.files.some(file => /node_modules|\.tmp|dist|linked-outside|binary\.ts/.test(file.path)), false);
 assert.ok(report.symbolCount >= 321);
+const symbolMention = service.searchMentions('HiddenBeyondLegacyCap').candidates[0];
+assert.equal(symbolMention.kind, 'symbol');
+assert.equal(symbolMention.path, 'src/zzzz-target.ts');
+assert.equal(symbolMention.line, 1);
 const serialized = fs.readFileSync(path.join(root, '.forge', 'workspace-index.json'), 'utf8');
 assert.equal(serialized.includes(secretBody), false, 'workspace index must not serialize source bodies');
 

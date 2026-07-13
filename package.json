@@ -2,7 +2,7 @@
   "name": "forge-agent",
   "displayName": "Forge Agent",
   "description": "Success-driven AI coding agent with deterministic validation, native IDE workflows, and reversible checkpoints.",
-  "version": "0.85.0",
+  "version": "0.92.0",
   "publisher": "kennyg",
   "engines": {
     "vscode": "^1.80.0"
@@ -26,6 +26,7 @@
     "onCommand:forge-agent.openTerminal",
     "onCommand:forge-agent.openDiff",
     "onCommand:forge-agent.chat",
+    "onCommand:forge-agent.submitMessage",
     "onCommand:forge-agent.runAgentGoal",
     "onCommand:forge-agent.runIsolatedAgentGoal",
     "onCommand:forge-agent.runReflectionAbEval",
@@ -53,7 +54,27 @@
     "onCommand:forge-agent.resolveHumanApproval",
     "onCommand:forge-agent.buildWorkspaceIndex",
     "onCommand:forge-agent.getWorkspaceIndexStatus",
-    "onCommand:forge-agent.openWorkspaceIndex"
+    "onCommand:forge-agent.openWorkspaceIndex",
+    "onCommand:forge-agent.listMcpTools",
+    "onCommand:forge-agent.testMcpServer",
+    "onCommand:forge-agent.setMcpCredential",
+    "onCommand:forge-agent.clearMcpCredential",
+    "onCommand:forge-agent.openMcpCatalog",
+    "onCommand:forge-agent.openSubAgentTopology",
+    "onCommand:forge-agent.openSubAgentHandoffs",
+    "onCommand:forge-agent.openSubAgentMerges",
+    "onCommand:forge-agent.openSubAgentMetrics",
+    "onCommand:forge-agent.openRuntimeIsolationReport",
+    "onCommand:forge-agent.openContextOptimizationReport",
+    "onCommand:forge-agent.openModelRoutingReport",
+    "onCommand:forge-agent.runPlanBigExecuteSmallEval",
+    "onCommand:forge-agent.openPlanBigExecuteSmallReport",
+    "onCommand:forge-agent.runProductionBenchmark",
+    "onCommand:forge-agent.openProductionBenchmarkReport",
+    "onCommand:forge-agent.getAssuranceLevel",
+    "onCommand:forge-agent.setAssuranceLevel",
+    "onCommand:forge-agent.decideExecutionContract",
+    "onCommand:forge-agent.openExecutionContract"
   ],
   "contributes": {
     "commands": [
@@ -94,6 +115,10 @@
         "title": "Forge Agent: Open Artifact"
       },
       {
+        "command": "forge-agent.openExecutionContract",
+        "title": "Forge Agent: Open Execution Contract"
+      },
+      {
         "command": "forge-agent.openNativeSettings",
         "title": "Forge Agent: Open Native Settings"
       },
@@ -108,6 +133,10 @@
       {
         "command": "forge-agent.chat",
         "title": "Forge Agent: Chat"
+      },
+      {
+        "command": "forge-agent.submitMessage",
+        "title": "Forge Agent: Submit Message"
       },
       {
         "command": "forge-agent.runAgentGoal",
@@ -220,6 +249,90 @@
       {
         "command": "forge-agent.openWorkspaceIndex",
         "title": "Forge Agent: Open Workspace Index"
+      },
+      {
+        "command": "forge-agent.listMcpTools",
+        "title": "Forge Agent: Refresh MCP Tool Catalog"
+      },
+      {
+        "command": "forge-agent.testMcpServer",
+        "title": "Forge Agent: Test MCP Server"
+      },
+      {
+        "command": "forge-agent.setMcpCredential",
+        "title": "Forge Agent: Set MCP Credential"
+      },
+      {
+        "command": "forge-agent.clearMcpCredential",
+        "title": "Forge Agent: Clear MCP Credential"
+      },
+      {
+        "command": "forge-agent.openMcpCatalog",
+        "title": "Forge Agent: Open MCP Tool Catalog"
+      },
+      {
+        "command": "forge-agent.addMcpServer",
+        "title": "Forge Agent: Add Governed MCP Server"
+      },
+      {
+        "command": "forge-agent.removeMcpServer",
+        "title": "Forge Agent: Remove Governed MCP Server"
+      },
+      {
+        "command": "forge-agent.enhancePrompt",
+        "title": "Forge Agent: Enhance Prompt"
+      },
+      {
+        "command": "forge-agent.setPromptEnhancementModel",
+        "title": "Forge Agent: Set Prompt Enhancement Model"
+      },
+      {
+        "command": "forge-agent.getPromptEnhancementSettings",
+        "title": "Forge Agent: Get Prompt Enhancement Settings"
+      },
+      {
+        "command": "forge-agent.openSubAgentTopology",
+        "title": "Forge Agent: Open Sub-Agent Topology"
+      },
+      {
+        "command": "forge-agent.openSubAgentHandoffs",
+        "title": "Forge Agent: Open Sub-Agent Handoffs"
+      },
+      {
+        "command": "forge-agent.openSubAgentMerges",
+        "title": "Forge Agent: Open Sub-Agent Merges"
+      },
+      {
+        "command": "forge-agent.openSubAgentMetrics",
+        "title": "Forge Agent: Open Sub-Agent Metrics"
+      },
+      {
+        "command": "forge-agent.openRuntimeIsolationReport",
+        "title": "Forge Agent: Open Runtime Isolation Report"
+      },
+      {
+        "command": "forge-agent.openContextOptimizationReport",
+        "title": "Forge Agent: Open Context Optimization Report"
+      },
+      {
+        "command": "forge-agent.openModelRoutingReport",
+        "title": "Forge Agent: Open Model Routing Report"
+      },
+      {
+        "command": "forge-agent.runPlanBigExecuteSmallEval",
+        "title": "Forge Agent: Run Plan-Big/Execute-Small Eval"
+      },
+      {
+        "command": "forge-agent.openPlanBigExecuteSmallReport",
+        "title": "Forge Agent: Open Plan-Big/Execute-Small Report"
+      },
+      {
+        "command": "forge-agent.runProductionBenchmark",
+        "title": "Forge Agent: Run Production Weak-Model Benchmark"
+      },
+      {
+        "command": "forge-agent.openProductionBenchmarkReport",
+        "title": "Forge Agent: Open Production Benchmark Report"
       }
     ],
     "viewsContainers": {
@@ -292,10 +405,28 @@
           "default": "openrouter/auto",
           "description": "Default mixed/non-coding model route."
         },
+        "forge.promptEnhancementModel": {
+          "type": "string",
+          "default": "google/gemini-2.5-flash-lite",
+          "description": "Exact inexpensive model slug used only when the user explicitly clicks Enhance Prompt. Enhancement never auto-submits or mutates the workspace."
+        },
         "forge.semanticRetrievalEnabled": {
           "type": "boolean",
           "default": false,
           "description": "Opt in to sending bounded repository text to the configured embedding provider for hybrid semantic retrieval. Disabled by default for source privacy."
+        },
+        "forge.costAwareRoutingEnabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Opt in to host-owned least-expensive-capable routing for Explorer and Editor workers within the explicit worker model pool. Architect, Reviewer, and Escalation bindings remain authoritative."
+        },
+        "forge.workerModelPool": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "description": "Ordered exact model slugs eligible for cost-aware Explorer/Editor routing. Unknown-price models rank after known-price capable models."
         },
         "forge.humanApprovalPolicy": {
           "type": "string",
@@ -309,6 +440,17 @@
             "Commit validated actions automatically; deterministic firewall, review, checkpoint, and oracle gates remain enforced."
           ],
           "description": "Human approval policy for consequential workspace actions."
+        },
+        "forge.assuranceLevel": {
+          "type": "string",
+          "default": "standard",
+          "enum": ["standard", "verified", "audited"],
+          "enumDescriptions": [
+            "Current full harness compatibility with explicit execution-contract confirmation.",
+            "Require model-driven execution, zero fallback actions, green oracles, and independent diff review.",
+            "Verified requirements plus proven isolation, calibrated oracles, and signed attestations. Unavailable until those capabilities are proven."
+          ],
+          "description": "Assurance policy compiled into and confirmed with each execution contract."
         },
         "forge.computerUseEnabled": {
           "type": "boolean",
@@ -327,15 +469,77 @@
           "type": "string",
           "default": "openai/text-embedding-3-small",
           "description": "OpenRouter embedding model used when semantic retrieval is explicitly enabled."
+        },
+        "forge.mcpServers": {
+          "type": "array",
+          "default": [],
+          "description": "Governed local MCP servers. Each exposed tool requires an exact policy. Store credentials with Forge Agent: Set MCP Credential, never in this setting.",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "enabled",
+              "transport",
+              "tools"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "enabled": {
+                "type": "boolean"
+              },
+              "transport": {
+                "type": "string",
+                "enum": [
+                  "stdio",
+                  "streamable-http"
+                ]
+              },
+              "command": {
+                "type": "string"
+              },
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "cwd": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              },
+              "credentialBindings": {
+                "type": "object"
+              },
+              "tools": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "forge.mcpTimeoutMs": {
+          "type": "number",
+          "default": 30000,
+          "minimum": 1000,
+          "maximum": 120000,
+          "description": "Bounded timeout for MCP discovery and calls. Timeout does not weaken tool policy, approval, or evidence requirements."
         }
       }
     }
   },
   "scripts": {
     "vscode:prepublish": "npm run build",
-    "build": "tsc -p ./tsconfig.json && vite build",
+    "build": "tsc -p ./tsconfig.json && npm run bundle:extension && vite build",
     "watch": "tsc -watch -p ./tsconfig.json",
-    "compile": "tsc -p ./tsconfig.json && vite build",
+    "compile": "tsc -p ./tsconfig.json && npm run bundle:extension && vite build",
+    "bundle:extension": "esbuild src/extension.ts --bundle --platform=node --format=cjs --target=node18 --external:vscode --external:chromium-bidi/* --outfile=out/extension.js && esbuild src/harness/workerHost.ts --bundle --platform=node --format=cjs --target=node18 --external:vscode --external:chromium-bidi/* --outfile=out/workerHost.js && npm run copy:runtime-assets",
+    "copy:runtime-assets": "node scripts/copy-runtime-assets.mjs",
     "test": "node scripts/smoke-tests.mjs",
     "test:e2e": "node scripts/e2e-smoke.mjs",
     "test:visual": "node scripts/visual-smoke.mjs",
@@ -351,13 +555,24 @@
     "test:approvals": "npm run compile && node scripts/human-approval-smoke.mjs",
     "test:index": "npm run compile && node scripts/workspace-index-smoke.mjs",
     "test:context": "npm run compile && node scripts/composer-context-smoke.mjs",
+    "test:conversation": "npm run compile && node scripts/conversation-controller-smoke.mjs",
+    "test:mcp": "npm run compile && node scripts/mcp-gateway-smoke.mjs",
+    "test:subagents": "npm run compile && node scripts/persistent-subagent-smoke.mjs",
+    "test:isolation": "npm run compile && node scripts/runtime-isolation-smoke.mjs",
+    "test:optimization": "npm run compile && node scripts/context-model-optimization-smoke.mjs",
+    "test:topology": "npm run compile && node scripts/plan-big-execute-small-smoke.mjs",
+    "test:production-benchmark": "npm run compile && node scripts/production-benchmark-smoke.mjs",
+    "test:model-prompts": "npm run compile && node scripts/model-prompt-profile-smoke.mjs",
+    "test:prompt-enhancement": "npm run compile && node scripts/prompt-enhancement-mcp-onboarding-smoke.mjs",
+    "test:execution-contract": "npm run compile && node scripts/execution-contract-assurance-smoke.mjs",
     "test:workers": "npm run compile && node scripts/worker-process-stress.mjs 100",
     "eval": "npm run compile && node scripts/weak-model-eval.mjs",
     "eval:reflection": "npm run compile && node scripts/reflection-ab-eval.mjs",
     "eval:tier2": "npm run compile && node scripts/weak-model-eval-tier2.mjs",
     "eval:tier3": "npm run compile && node scripts/weak-model-eval-tier3.mjs",
     "eval:tier4": "npm run compile && node scripts/weak-model-eval-tier4.mjs",
-    "package": "vsce package --allow-missing-repository"
+    "eval:production": "npm run compile && node scripts/production-benchmark.mjs",
+    "package": "vsce package --allow-missing-repository --no-dependencies"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.14",
@@ -369,6 +584,7 @@
     "@vitejs/plugin-react": "^5.0.4",
     "@vscode/test-electron": "^3.0.0",
     "@vscode/vsce": "^3.9.2",
+    "esbuild": "^0.25.12",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
     "playwright": "^1.61.0",
@@ -379,6 +595,9 @@
     "vite": "^6.2.3"
   },
   "dependencies": {
-    "playwright-core": "^1.61.0"
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "ajv": "^8.18.0",
+    "playwright-core": "^1.61.0",
+    "zod": "^4.4.3"
   }
 }

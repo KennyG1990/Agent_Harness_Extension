@@ -11,6 +11,37 @@ export interface GoalContract {
 export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed';
 export type HarnessStatus = 'idle' | 'running' | 'paused' | 'awaiting_input' | 'awaiting_approval' | 'success' | 'failed' | 'gave_up';
 export type HumanApprovalPolicy = 'ask' | 'auto';
+export type AssuranceLevel = 'standard' | 'verified' | 'audited';
+
+export interface ExecutionContract {
+  schemaVersion: 1;
+  id: string;
+  sessionId: string;
+  revision: number;
+  status: 'pending' | 'confirmed' | 'rejected' | 'superseded';
+  authority: {
+    assurance: AssuranceLevel;
+    objective: string;
+    constraints: string[];
+    acceptanceCriteria: string[];
+    nonGoals: string[];
+    workspaceScopes: string[];
+    allowedTools: string[];
+    expectedFiles: string[];
+    requiredOracles: string[];
+    budget: { maxCostUsd: number; maxWallClockMs: number; maxSteps: number };
+    modelBindings: Record<string, string>;
+    approvalPolicy: HumanApprovalPolicy;
+    requirements: Record<string, boolean>;
+  };
+  availability: { available: boolean; missing: string[] };
+  digest: string;
+  compiledAt: string;
+  confirmedAt?: string;
+  rejectedAt?: string;
+  supersededAt?: string;
+  revisionReason?: string;
+}
 
 export interface HumanApprovalRecord {
   id: string;
@@ -134,21 +165,28 @@ export interface WorkspaceIndexStatus {
 
 export interface ComposerContextSummary {
   id: string;
-  kind: 'file' | 'folder' | 'selection' | 'diagnostics';
+  kind: 'file' | 'folder' | 'selection' | 'diagnostics' | 'symbol' | 'image';
   label: string;
   path?: string;
   lineStart?: number;
   lineEnd?: number;
   diagnosticCount?: number;
+  symbolName?: string;
+  neighborPaths?: string[];
+  mimeType?: 'image/png' | 'image/jpeg' | 'image/webp';
+  sha256?: string;
   byteCount: number;
   capturedAt: string;
 }
 
 export interface WorkspaceMentionCandidate {
-  kind: 'file' | 'folder';
+  kind: 'file' | 'folder' | 'symbol';
   path: string;
   label: string;
   detail: string;
+  symbolName?: string;
+  line?: number;
+  symbolKind?: string;
 }
 
 export interface AgentMode {
@@ -338,6 +376,8 @@ export interface BrowserValidationEvidence {
 // Full execution context that represents the overall harness state
 export interface HarnessState {
   sessionId?: string;
+  executionContract: ExecutionContract;
+  executionContractHistory: ExecutionContract[];
   goalContract: GoalContract;
   taskGraph: TaskGraph;
   planMd: string;
