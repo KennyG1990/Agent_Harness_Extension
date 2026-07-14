@@ -33,6 +33,7 @@ export interface ExecutionContractAuthority {
   };
   modelBindings: Record<string, string>;
   approvalPolicy: HumanApprovalPolicy;
+  customizationDigest?: string;
   requirements: AssuranceRequirements;
 }
 
@@ -69,6 +70,7 @@ export interface CompileExecutionContractOptions {
   maxSteps: number;
   modelBindings?: Record<string, string>;
   humanApprovalPolicy: HumanApprovalPolicy;
+  customizationDigest?: string;
   auditedCapabilities?: {
     provenIsolation?: boolean;
     oracleCalibration?: boolean;
@@ -132,6 +134,7 @@ export function compileExecutionContract(options: CompileExecutionContractOption
     },
     modelBindings: normalizeBindings(options.modelBindings || {}),
     approvalPolicy: options.humanApprovalPolicy === 'auto' ? 'auto' : 'ask',
+    ...(boundedToken(options.customizationDigest || '', 128) ? { customizationDigest: boundedToken(options.customizationDigest || '', 128) } : {}),
     requirements
   };
   const availability = assuranceAvailability(assurance, options.auditedCapabilities);
@@ -175,12 +178,21 @@ export function isAuthorityWidening(previous: ExecutionContractAuthority, next: 
   if (assuranceRank(next.assurance) < assuranceRank(previous.assurance)) return true;
   if (next.budget.maxCostUsd > previous.budget.maxCostUsd || next.budget.maxWallClockMs > previous.budget.maxWallClockMs || next.budget.maxSteps > previous.budget.maxSteps) return true;
   if (previous.approvalPolicy === 'ask' && next.approvalPolicy === 'auto') return true;
+  if ((previous.customizationDigest || '') !== (next.customizationDigest || '')) return true;
   if (!isSubset(next.allowedTools, previous.allowedTools)) return true;
   if (!isSubset(previous.acceptanceCriteria, next.acceptanceCriteria)) return true;
   if (!isSubset(previous.requiredOracles, next.requiredOracles)) return true;
   if (!isSubset(previous.nonGoals, next.nonGoals)) return true;
   if (!isScopeNarrowerOrEqual(next.workspaceScopes, previous.workspaceScopes)) return true;
-  if (canonicalJson(previous.modelBindings) !== canonicalJson(next.modelBindings)) return true;
+  if (canonicalJson(previous.modelBindings) !== canonicalJson(next.modelBindings)) {
+    // Standard preserves legacy callers that choose their initial model at the
+    // first governed step. Once any binding exists, rebinding is authority
+    // widening and always requires a new digest-bound confirmation.
+    const standardInitialBinding = previous.assurance === 'standard'
+      && Object.keys(previous.modelBindings).length === 0
+      && Object.keys(next.modelBindings).length > 0;
+    if (!standardInitialBinding) return true;
+  }
   return false;
 }
 
@@ -201,8 +213,11 @@ export function assuranceSuccessGate(state: HarnessState): { ready: boolean; mis
     if (!modelReview || !diffReview) missing.push('independent model and diff review');
   }
   if (contract.authority.requirements.provenIsolation && !contract.availability.available) missing.push('proven isolation');
-  if (contract.authority.requirements.oracleCalibration) missing.push('oracle calibration evidence');
-  if (contract.authority.requirements.signedAttestation) missing.push('signed attestation');
+  if (contract.authority.requirements.oracleCalibration && state.oracleCalibration?.available !== true) {
+    missing.push(`oracle calibration evidence${state.oracleCalibration?.reason ? ` (${state.oracleCalibration.reason})` : ''}`);
+  }
+  // Signing occurs after terminal persistence in the trusted extension host.
+  // Audited signing failures demote terminal success before it is returned.
   return { ready: missing.length === 0, missing: [...new Set(missing)] };
 }
 

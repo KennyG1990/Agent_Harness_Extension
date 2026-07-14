@@ -2,7 +2,7 @@
   "name": "forge-agent",
   "displayName": "Forge Agent",
   "description": "Success-driven AI coding agent with deterministic validation, native IDE workflows, and reversible checkpoints.",
-  "version": "0.92.0",
+  "version": "1.0.0",
   "publisher": "kennyg",
   "engines": {
     "vscode": "^1.80.0"
@@ -29,6 +29,15 @@
     "onCommand:forge-agent.submitMessage",
     "onCommand:forge-agent.runAgentGoal",
     "onCommand:forge-agent.runIsolatedAgentGoal",
+    "onCommand:forge-agent.runBranchCompare",
+    "onCommand:forge-agent.getBranchCompareReport",
+    "onCommand:forge-agent.openBranchCompareReport",
+    "onCommand:forge-agent.openBranchCandidateDiff",
+    "onCommand:forge-agent.approveBranchCandidate",
+    "onCommand:forge-agent.mergeBranchCandidate",
+    "onCommand:forge-agent.rebuildModelIntelligence",
+    "onCommand:forge-agent.getModelIntelligence",
+    "onCommand:forge-agent.openModelIntelligence",
     "onCommand:forge-agent.runReflectionAbEval",
     "onCommand:forge-agent.setGoal",
     "onCommand:forge-agent.pauseGoal",
@@ -37,6 +46,26 @@
     "onCommand:forge-agent.resumeAgentGoal",
     "onCommand:forge-agent.answerClarification",
     "onCommand:forge-agent.restoreCheckpoint",
+    "onCommand:forge-agent.refreshCustomizations",
+    "onCommand:forge-agent.getCustomizations",
+    "onCommand:forge-agent.openCustomizations",
+    "onCommand:forge-agent.attestLatestRun",
+    "onCommand:forge-agent.verifyLatestAttestation",
+    "onCommand:forge-agent.rotateAttestationKey",
+    "onCommand:forge-agent.openProofGraph",
+    "onCommand:forge-agent.openLatestAttestation",
+    "onCommand:forge-agent.runOracleCalibration",
+    "onCommand:forge-agent.getOracleCalibrationStatus",
+    "onCommand:forge-agent.openOracleCalibration",
+    "onCommand:forge-agent.startBackgroundSession",
+    "onCommand:forge-agent.listBackgroundSessions",
+    "onCommand:forge-agent.resumeBackgroundSession",
+    "onCommand:forge-agent.cancelBackgroundSession",
+    "onCommand:forge-agent.openBackgroundDiff",
+    "onCommand:forge-agent.openBackgroundLog",
+    "onCommand:forge-agent.resolveBackgroundSession",
+    "onCommand:forge-agent.approveBackgroundReview",
+    "onCommand:forge-agent.mergeBackgroundSession",
     "onCommand:forge-agent.runBrowserValidation",
     "onCommand:forge-agent.getProviderReadiness",
     "onCommand:forge-agent.setOpenRouterApiKey",
@@ -74,7 +103,13 @@
     "onCommand:forge-agent.getAssuranceLevel",
     "onCommand:forge-agent.setAssuranceLevel",
     "onCommand:forge-agent.decideExecutionContract",
-    "onCommand:forge-agent.openExecutionContract"
+    "onCommand:forge-agent.openExecutionContract",
+    "onCommand:forge-agent.startAgentGateway",
+    "onCommand:forge-agent.stopAgentGateway",
+    "onCommand:forge-agent.getAgentGatewayStatus",
+    "onCommand:forge-agent.rotateAgentGatewayToken",
+    "onCommand:forge-agent.copyAgentGatewayMcpConfig",
+    "onCommand:forge-agent.openAgentGatewayAudit"
   ],
   "contributes": {
     "commands": [
@@ -119,6 +154,50 @@
         "title": "Forge Agent: Open Execution Contract"
       },
       {
+        "command": "forge-agent.refreshCustomizations",
+        "title": "Forge Agent: Refresh Workspace Customizations"
+      },
+      {
+        "command": "forge-agent.getCustomizations",
+        "title": "Forge Agent: Get Workspace Customization Summary"
+      },
+      {
+        "command": "forge-agent.openCustomizations",
+        "title": "Forge Agent: Open Workspace Customization Report"
+      },
+      {
+        "command": "forge-agent.attestLatestRun",
+        "title": "Forge Agent: Attest Latest Terminal Run"
+      },
+      {
+        "command": "forge-agent.verifyLatestAttestation",
+        "title": "Forge Agent: Verify Latest Attestation"
+      },
+      {
+        "command": "forge-agent.rotateAttestationKey",
+        "title": "Forge Agent: Rotate Attestation Key"
+      },
+      {
+        "command": "forge-agent.openProofGraph",
+        "title": "Forge Agent: Open Proof Graph"
+      },
+      {
+        "command": "forge-agent.openLatestAttestation",
+        "title": "Forge Agent: Open Latest Attestation"
+      },
+      {
+        "command": "forge-agent.runOracleCalibration",
+        "title": "Forge Agent: Calibrate Test Oracle"
+      },
+      {
+        "command": "forge-agent.getOracleCalibrationStatus",
+        "title": "Forge Agent: Get Oracle Calibration Status"
+      },
+      {
+        "command": "forge-agent.openOracleCalibration",
+        "title": "Forge Agent: Open Oracle Calibration"
+      },
+      {
         "command": "forge-agent.openNativeSettings",
         "title": "Forge Agent: Open Native Settings"
       },
@@ -145,6 +224,42 @@
       {
         "command": "forge-agent.runIsolatedAgentGoal",
         "title": "Forge Agent: Run Isolated Goal"
+      },
+      {
+        "command": "forge-agent.runBranchCompare",
+        "title": "Forge Agent: Run Branch Comparison"
+      },
+      {
+        "command": "forge-agent.getBranchCompareReport",
+        "title": "Forge Agent: Get Branch Comparison Report"
+      },
+      {
+        "command": "forge-agent.openBranchCompareReport",
+        "title": "Forge Agent: Open Branch Comparison Report"
+      },
+      {
+        "command": "forge-agent.openBranchCandidateDiff",
+        "title": "Forge Agent: Review Recommended Candidate"
+      },
+      {
+        "command": "forge-agent.approveBranchCandidate",
+        "title": "Forge Agent: Approve Recommended Candidate"
+      },
+      {
+        "command": "forge-agent.mergeBranchCandidate",
+        "title": "Forge Agent: Merge Approved Candidate"
+      },
+      {
+        "command": "forge-agent.rebuildModelIntelligence",
+        "title": "Forge Agent: Rebuild Model Intelligence"
+      },
+      {
+        "command": "forge-agent.getModelIntelligence",
+        "title": "Forge Agent: Get Model Intelligence"
+      },
+      {
+        "command": "forge-agent.openModelIntelligence",
+        "title": "Forge Agent: Open Model Intelligence"
       },
       {
         "command": "forge-agent.runReflectionAbEval",
@@ -177,6 +292,42 @@
       {
         "command": "forge-agent.restoreCheckpoint",
         "title": "Forge Agent: Restore Checkpoint"
+      },
+      {
+        "command": "forge-agent.startBackgroundSession",
+        "title": "Forge Agent: Continue Run in Background"
+      },
+      {
+        "command": "forge-agent.listBackgroundSessions",
+        "title": "Forge Agent: List Background Sessions"
+      },
+      {
+        "command": "forge-agent.resumeBackgroundSession",
+        "title": "Forge Agent: Resume Background Session"
+      },
+      {
+        "command": "forge-agent.cancelBackgroundSession",
+        "title": "Forge Agent: Cancel Background Session"
+      },
+      {
+        "command": "forge-agent.openBackgroundDiff",
+        "title": "Forge Agent: Review Background Diff"
+      },
+      {
+        "command": "forge-agent.openBackgroundLog",
+        "title": "Forge Agent: Open Background Log"
+      },
+      {
+        "command": "forge-agent.resolveBackgroundSession",
+        "title": "Forge Agent: Resolve Background Ask Gate"
+      },
+      {
+        "command": "forge-agent.approveBackgroundReview",
+        "title": "Forge Agent: Approve Background Review"
+      },
+      {
+        "command": "forge-agent.mergeBackgroundSession",
+        "title": "Forge Agent: Merge Reviewed Background Session"
       },
       {
         "command": "forge-agent.runBrowserValidation",
@@ -333,6 +484,30 @@
       {
         "command": "forge-agent.openProductionBenchmarkReport",
         "title": "Forge Agent: Open Production Benchmark Report"
+      },
+      {
+        "command": "forge-agent.startAgentGateway",
+        "title": "Forge Agent: Start Agent Gateway"
+      },
+      {
+        "command": "forge-agent.stopAgentGateway",
+        "title": "Forge Agent: Stop Agent Gateway"
+      },
+      {
+        "command": "forge-agent.getAgentGatewayStatus",
+        "title": "Forge Agent: Get Agent Gateway Status"
+      },
+      {
+        "command": "forge-agent.rotateAgentGatewayToken",
+        "title": "Forge Agent: Rotate Agent Gateway Token"
+      },
+      {
+        "command": "forge-agent.copyAgentGatewayMcpConfig",
+        "title": "Forge Agent: Copy Agent Gateway MCP Configuration"
+      },
+      {
+        "command": "forge-agent.openAgentGatewayAudit",
+        "title": "Forge Agent: Open Agent Gateway Audit"
       }
     ],
     "viewsContainers": {
@@ -444,7 +619,11 @@
         "forge.assuranceLevel": {
           "type": "string",
           "default": "standard",
-          "enum": ["standard", "verified", "audited"],
+          "enum": [
+            "standard",
+            "verified",
+            "audited"
+          ],
           "enumDescriptions": [
             "Current full harness compatibility with explicit execution-contract confirmation.",
             "Require model-driven execution, zero fallback actions, green oracles, and independent diff review.",
@@ -456,6 +635,11 @@
           "type": "boolean",
           "default": false,
           "description": "Enable governed Windows UI Automation inspection. Computer actions still always require explicit approval."
+        },
+        "forge.customizationHooksEnabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Opt in to compatible workspace command hooks. Hooks run in disposable copies and may only deny, ask, narrow, or contribute untrusted candidates; they cannot grant authority or declare success."
         },
         "forge.computerUseAllowedWindows": {
           "type": "array",
@@ -529,6 +713,25 @@
           "minimum": 1000,
           "maximum": 120000,
           "description": "Bounded timeout for MCP discovery and calls. Timeout does not weaken tool policy, approval, or evidence requirements."
+        },
+        "forge.agentGatewayEnabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable the authenticated 127.0.0.1 Agent Gateway. External clients may submit goals and proposals but cannot approve, merge, author trusted evidence, select oracle truth, sign, or declare success."
+        },
+        "forge.agentGatewayPort": {
+          "type": "number",
+          "default": 43119,
+          "minimum": 0,
+          "maximum": 65535,
+          "description": "Loopback Agent Gateway port. Use 0 only for an explicitly ephemeral port; nonzero ports below 1024 are rejected."
+        },
+        "forge.agentGatewayRateLimitPerMinute": {
+          "type": "number",
+          "default": 60,
+          "minimum": 1,
+          "maximum": 600,
+          "description": "Authenticated Agent Gateway request ceiling per minute. This does not alter run budgets or provider limits."
         }
       }
     }
@@ -538,7 +741,7 @@
     "build": "tsc -p ./tsconfig.json && npm run bundle:extension && vite build",
     "watch": "tsc -watch -p ./tsconfig.json",
     "compile": "tsc -p ./tsconfig.json && npm run bundle:extension && vite build",
-    "bundle:extension": "esbuild src/extension.ts --bundle --platform=node --format=cjs --target=node18 --external:vscode --external:chromium-bidi/* --outfile=out/extension.js && esbuild src/harness/workerHost.ts --bundle --platform=node --format=cjs --target=node18 --external:vscode --external:chromium-bidi/* --outfile=out/workerHost.js && npm run copy:runtime-assets",
+    "bundle:extension": "esbuild src/extension.ts --bundle --platform=node --format=cjs --target=node18 --external:vscode --external:chromium-bidi/* --outfile=out/extension.js && esbuild src/harness/workerHost.ts --bundle --platform=node --format=cjs --target=node18 --external:vscode --external:chromium-bidi/* --outfile=out/workerHost.js && esbuild src/harness/backgroundRunner.ts --bundle --platform=node --format=cjs --target=node18 --external:vscode --external:chromium-bidi/* --outfile=out/backgroundRunner.js && esbuild src/harness/agentGatewayMcp.ts --bundle --platform=node --format=cjs --target=node18 --outfile=out/agentGatewayMcp.js && npm run copy:runtime-assets",
     "copy:runtime-assets": "node scripts/copy-runtime-assets.mjs",
     "test": "node scripts/smoke-tests.mjs",
     "test:e2e": "node scripts/e2e-smoke.mjs",
@@ -565,6 +768,13 @@
     "test:model-prompts": "npm run compile && node scripts/model-prompt-profile-smoke.mjs",
     "test:prompt-enhancement": "npm run compile && node scripts/prompt-enhancement-mcp-onboarding-smoke.mjs",
     "test:execution-contract": "npm run compile && node scripts/execution-contract-assurance-smoke.mjs",
+    "test:background": "npm run compile && node scripts/background-sessions-smoke.mjs",
+    "test:customizations": "npm run compile && node scripts/customization-compatibility-smoke.mjs",
+    "test:attestation": "npm run compile && node scripts/proof-graph-attestation-smoke.mjs",
+    "test:calibration": "npm run compile && node scripts/oracle-calibration-smoke.mjs",
+    "test:branch-compare": "npm run compile && node scripts/branch-compare-smoke.mjs",
+    "test:model-intelligence": "npm run compile && node scripts/model-intelligence-smoke.mjs",
+    "test:agent-gateway": "npm run compile && node scripts/agent-gateway-smoke.mjs",
     "test:workers": "npm run compile && node scripts/worker-process-stress.mjs 100",
     "eval": "npm run compile && node scripts/weak-model-eval.mjs",
     "eval:reflection": "npm run compile && node scripts/reflection-ab-eval.mjs",
@@ -597,7 +807,9 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "ajv": "^8.18.0",
+    "minimatch": "^10.2.5",
     "playwright-core": "^1.61.0",
+    "yaml": "^2.9.0",
     "zod": "^4.4.3"
   }
 }

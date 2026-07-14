@@ -163,6 +163,19 @@ export interface WorkspaceIndexStatus {
   error?: string;
 }
 
+export interface AgentGatewayStatus {
+  schemaVersion: 1;
+  enabled: boolean;
+  running: boolean;
+  host: '127.0.0.1';
+  port?: number;
+  url?: string;
+  startedAt?: string;
+  stoppedAt?: string;
+  authenticated: true;
+  capabilities: readonly ['submit_goal', 'submit_proposal', 'get_status', 'cancel'];
+}
+
 export interface ComposerContextSummary {
   id: string;
   kind: 'file' | 'folder' | 'selection' | 'diagnostics' | 'symbol' | 'image';
@@ -199,6 +212,7 @@ export interface AgentMode {
   inference: 'Instant' | 'Thinking';
   allowedTools: string[];
   builtIn: boolean;
+  imported?: boolean;
 }
 
 export interface SessionSummary {
@@ -212,6 +226,20 @@ export interface SessionSummary {
   steps: number;
   costUsd: number;
   resumable: boolean;
+}
+
+export interface BackgroundSessionSummary {
+  sessionId: string;
+  status: 'preparing' | 'running' | 'awaiting_input' | 'awaiting_approval' | 'awaiting_review' | 'completed_no_changes' | 'failed' | 'gave_up' | 'cancelled';
+  stale: boolean;
+  startedAt: string;
+  updatedAt: string;
+  steps?: number;
+  costUsd?: number;
+  modelBindings: Record<string, string>;
+  changedFiles: string[];
+  error?: string;
+  merge?: { status: 'pending' | 'merged' | 'blocked' | 'rolled_back'; reviewOpenedAt?: string; reviewOpenedDigest?: string; reviewedAt?: string; reviewDigest?: string; reviewerModelId?: string; mergedAt?: string; error?: string };
 }
 
 export interface ReflectionEntry {
@@ -278,6 +306,8 @@ export interface RunStats {
   providerFailures: number;
   fallbackProposals: number;
   modelDrivenProposals: number;
+  gatewayProposals?: number;
+  gatewayProposalRejections?: number;
   fallbackActions: number;
   repairAttempts: number;
   schemaFailures: number;
@@ -385,6 +415,15 @@ export interface HarnessState {
   evidenceLedger: EvidenceLedgerItem[];
   knowledge: RepositoryKnowledge;
   projectAdapter?: { ecosystem: string; packageManager?: string; manifest?: string };
+  oracleCalibration?: {
+    available: boolean;
+    reason: string;
+    sensitivity: number;
+    floor: number;
+    appliedMutants: number;
+    testSuiteDigest?: string;
+    calibrationId?: string;
+  };
   skills: SkillItem[];
   files: Record<string, WorkspaceFile>;
   firewall: FirewallAction;

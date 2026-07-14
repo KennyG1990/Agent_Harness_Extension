@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import { exec, execFile } from 'child_process';
+import { exec, execFile, spawn } from 'child_process';
 import { AgentHarnessLoop } from './harness/loop';
 import { HarnessState, HumanApprovalPolicy, ModePolicy } from './harness/types';
 import { BlueprintProofRunner } from './harness/proof';
@@ -26,6 +26,15 @@ import { runScriptedPlanBigExecuteSmallEval } from './harness/topologyEval';
 import { normalizeProductionBenchmarkRequest, runProductionBenchmark } from './harness/productionBenchmark';
 import { enhancePrompt, PromptEnhancementResult } from './harness/promptEnhancer';
 import { AssuranceLevel, normalizeAssuranceLevel } from './harness/executionContract';
+import { BackgroundSessionManager, BackgroundLaunchRequest } from './harness/backgroundSessionManager';
+import { BackgroundSessionV1 } from './harness/backgroundSessions';
+import { CustomizationSnapshotV1, discoverCustomizations, effectiveCustomizationDigest, importedAgentModes, persistCustomizationSnapshot } from './harness/customizationCompatibility';
+import { AttestationService, RunAttestationV1, verifyAttestation } from './harness/attestation';
+import { ProofGraphV1, verifyProofGraph } from './harness/proofGraph';
+import { assessOracleCalibration, OracleCalibrationReportV1, runOracleCalibration } from './harness/oracleCalibration';
+import { BranchCompareCoordinator, BranchCompareReport } from './harness/branchCompare';
+import { ModelIntelligenceReportV1, ModelIntelligenceService } from './harness/modelIntelligence';
+import { AgentGatewayCancelRequest, AgentGatewayDelegate, AgentGatewayGoalRequest, AgentGatewayProposalRequest, AgentGatewayServer, AgentGatewaySessionView, AgentGatewayStatus, generateAgentGatewayToken } from './harness/agentGateway';
 
 /** Research artifacts attached to the live chat context this extension-host session. */
 const attachedResearch: string[] = [];
@@ -35,6 +44,7 @@ const proofRunner = new BlueprintProofRunner();
 const weakEvalRunner = new WeakModelEvalRunner();
 
 const OPENROUTER_SECRET_KEY = 'forge.openRouterApiKey';
+const AGENT_GATEWAY_SECRET_KEY = 'forge.agentGatewayToken';
 
 export async function activate(context: vscode.ExtensionContext) {
   console.log('Forge Agent Extension is now active.');
@@ -44,9 +54,74 @@ export async function activate(context: vscode.ExtensionContext) {
 
   const provider = new ForgeStudioWebviewProvider(context.extensionUri, context, modeRegistry);
   activeProvider = provider;
+  const agentGateway = new AgentGatewayController(context, provider);
+  context.subscriptions.push(agentGateway);
+  const backgroundSessions = new BackgroundSessionController(context);
+  backgroundSessions.start();
+  context.subscriptions.push(backgroundSessions);
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider('forge-agent.studio', provider)
   );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('forge-agent.startBackgroundSession', async (options?: any) => backgroundSessions.startSession(options)),
+    vscode.commands.registerCommand('forge-agent.listBackgroundSessions', () => backgroundSessions.list()),
+    vscode.commands.registerCommand('forge-agent.resumeBackgroundSession', async (sessionId: string) => backgroundSessions.resume(sessionId)),
+    vscode.commands.registerCommand('forge-agent.cancelBackgroundSession', async (sessionId: string) => backgroundSessions.cancel(sessionId)),
+    vscode.commands.registerCommand('forge-agent.openBackgroundLog', async (sessionId: string) => backgroundSessions.openLog(sessionId)),
+    vscode.commands.registerCommand('forge-agent.openBackgroundDiff', async (sessionId: string) => backgroundSessions.openDiff(sessionId)),
+    vscode.commands.registerCommand('forge-agent.resolveBackgroundSession', async (sessionId: string) => backgroundSessions.resolveDecision(sessionId)),
+    vscode.commands.registerCommand('forge-agent.approveBackgroundReview', async (sessionId: string) => backgroundSessions.approveReview(sessionId)),
+    vscode.commands.registerCommand('forge-agent.mergeBackgroundSession', async (sessionId: string) => backgroundSessions.merge(sessionId))
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('forge-agent.runBranchCompare', async (options?: any) => {
+      if (options?.confirmLiveSpend !== true) throw new Error('Branch comparison makes live provider calls. Explicit action-time spend confirmation is required.');
+      const coordinator = new BranchCompareCoordinator(getWorkspaceRoot());
+      const configuredCostCap = vscode.workspace.getConfiguration('forge').get<number>('maxCostUsd', 2);
+      const report = await coordinator.run({
+        goal: String(options?.goal || '').trim(),
+        candidateModels: Array.isArray(options?.candidateModels) ? options.candidateModels : [],
+        reviewerModel: String(options?.reviewerModel || '').trim(),
+        maxSteps: options?.maxSteps,
+        runBudget: options?.runBudget || {},
+        maxTotalCostUsd: Number.isFinite(options?.maxTotalCostUsd) ? options.maxTotalCostUsd : configuredCostCap,
+        isolationMode: options?.isolationMode || 'auto',
+        keepCandidates: true,
+        provenance: 'live'
+      });
+      try { new ModelIntelligenceService(getWorkspaceRoot()).rebuild(); }
+      catch (error: any) { void vscode.window.showWarningMessage(`Branch comparison completed, but model intelligence did not rebuild: ${error.message}`); }
+      return report;
+    }),
+    vscode.commands.registerCommand('forge-agent.getBranchCompareReport', () => {
+      try { return new BranchCompareCoordinator(getWorkspaceRoot()).loadLatest(); } catch { return null; }
+    }),
+    vscode.commands.registerCommand('forge-agent.openBranchCompareReport', async () => openArtifact('branchCompare', proofRunner)),
+    vscode.commands.registerCommand('forge-agent.openBranchCandidateDiff', async (candidateId?: string) => openBranchCandidateDiff(candidateId)),
+    vscode.commands.registerCommand('forge-agent.approveBranchCandidate', async (candidateId?: string) => approveBranchCandidate(candidateId)),
+    vscode.commands.registerCommand('forge-agent.mergeBranchCandidate', async (candidateId?: string) => mergeBranchCandidate(candidateId))
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('forge-agent.rebuildModelIntelligence', () => new ModelIntelligenceService(getWorkspaceRoot()).rebuild()),
+    vscode.commands.registerCommand('forge-agent.getModelIntelligence', () => {
+      try { return new ModelIntelligenceService(getWorkspaceRoot()).loadLatest(); }
+      catch (error: any) { if (error?.code === 'ENOENT') return null; throw error; }
+    }),
+    vscode.commands.registerCommand('forge-agent.openModelIntelligence', () => openArtifact('modelIntelligence', proofRunner))
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('forge-agent.startAgentGateway', () => agentGateway.start()),
+    vscode.commands.registerCommand('forge-agent.stopAgentGateway', () => agentGateway.stop()),
+    vscode.commands.registerCommand('forge-agent.getAgentGatewayStatus', () => agentGateway.status()),
+    vscode.commands.registerCommand('forge-agent.rotateAgentGatewayToken', (options?: any) => agentGateway.rotateToken(options)),
+    vscode.commands.registerCommand('forge-agent.copyAgentGatewayMcpConfig', () => agentGateway.copyMcpConfig()),
+    vscode.commands.registerCommand('forge-agent.openAgentGatewayAudit', () => openArtifact('agentGatewayAudit', proofRunner))
+  );
+  void agentGateway.startIfEnabled();
 
   context.subscriptions.push(
     vscode.commands.registerCommand('forge-agent.openStudio', () => {
@@ -205,6 +280,21 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(vscode.commands.registerCommand('forge-agent.listModes', () => modeRegistry.list()));
   context.subscriptions.push(vscode.commands.registerCommand('forge-agent.upsertMode', async (mode: Partial<AgentMode>) => modeRegistry.upsert(mode || {})));
   context.subscriptions.push(vscode.commands.registerCommand('forge-agent.deleteMode', async (modeId: string) => modeRegistry.delete(modeId)));
+  context.subscriptions.push(vscode.commands.registerCommand('forge-agent.refreshCustomizations', () => provider.refreshCustomizations()));
+  context.subscriptions.push(vscode.commands.registerCommand('forge-agent.getCustomizations', () => provider.getCustomizations()));
+  context.subscriptions.push(vscode.commands.registerCommand('forge-agent.openCustomizations', () => openArtifact('customizations', proofRunner)));
+  context.subscriptions.push(
+    vscode.commands.registerCommand('forge-agent.attestLatestRun', () => provider.attestLatestRun()),
+    vscode.commands.registerCommand('forge-agent.verifyLatestAttestation', () => provider.verifyLatestAttestation()),
+    vscode.commands.registerCommand('forge-agent.rotateAttestationKey', () => provider.rotateAttestationKey()),
+    vscode.commands.registerCommand('forge-agent.openProofGraph', () => openArtifact('proofGraph', proofRunner)),
+    vscode.commands.registerCommand('forge-agent.openLatestAttestation', () => openArtifact('attestation', proofRunner))
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand('forge-agent.runOracleCalibration', () => provider.runOracleCalibration()),
+    vscode.commands.registerCommand('forge-agent.getOracleCalibrationStatus', () => assessOracleCalibration(getWorkspaceRoot())),
+    vscode.commands.registerCommand('forge-agent.openOracleCalibration', () => openArtifact('oracleCalibration', proofRunner))
+  );
   context.subscriptions.push(vscode.commands.registerCommand('forge-agent.reportProblem', async (options?: any) => {
     return createSupportReport(context, provider, options);
   }));
@@ -236,7 +326,10 @@ export async function activate(context: vscode.ExtensionContext) {
     const request = normalizeProductionBenchmarkRequest({ ...(options || {}), reportRoot: getWorkspaceRoot() });
     const readiness = await provider.refreshReadiness(false);
     if (!readiness.ready) throw new Error(readiness.blockers[0]?.message || 'Provider is not ready for the production benchmark.');
-    return runProductionBenchmark(request);
+    const report = await runProductionBenchmark(request);
+    try { new ModelIntelligenceService(getWorkspaceRoot()).rebuild(); }
+    catch (error: any) { void vscode.window.showWarningMessage(`Production benchmark completed, but model intelligence did not rebuild: ${error.message}`); }
+    return report;
   }));
   context.subscriptions.push(vscode.commands.registerCommand('forge-agent.openProductionBenchmarkReport', async () => openArtifact('productionBenchmark', proofRunner)));
 
@@ -286,7 +379,7 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('forge-agent.runAgentGoal', async (options?: any) => {
       const mode = modeRegistry.resolve(options?.modeId || 'code');
       if (mode.intent !== 'code') throw new Error(`Mode '${mode.name}' is non-mutating. Select a code-capable mode before starting a coding run.`);
-      const loop = new AgentHarnessLoop(createConfiguredProvider(), undefined, undefined, createMcpGateway(context));
+      const loop = new AgentHarnessLoop(createConfiguredProvider(), undefined, undefined, createMcpGateway(context), [], { signedAttestationAvailable: true });
       const rawGoal = String(options?.goal || 'Validate the workspace with Forge Agent.');
       const directive = parseGoalDirective(rawGoal);
       const goalOverrides = directive.isDirective
@@ -295,6 +388,14 @@ export async function activate(context: vscode.ExtensionContext) {
       let state = await loop.initializeHarness(directive.isDirective ? directive.goal : rawGoal, options?.modelBindings || {}, options?.runBudget || {}, { goalOverrides, modePolicy: toModePolicy(mode), humanApprovalPolicy: options?.humanApprovalPolicy === 'ask' ? 'ask' : 'auto', assuranceLevel: normalizeAssuranceLevel(options?.assuranceLevel || vscode.workspace.getConfiguration('forge').get<string>('assuranceLevel', 'standard')) });
       while (!['success', 'failed', 'gave_up', 'paused', 'awaiting_input', 'awaiting_approval'].includes(state.status) && state.currentStepIndex < state.maxSteps) {
         state = await loop.runStep(state, options?.modelBindings || {});
+      }
+      if (['success', 'failed', 'gave_up'].includes(state.status)) {
+        try { await attestTerminalState(context, state); }
+        catch (error: any) {
+          const invalidated = loop.invalidateAuditedTerminalSuccess(`attestation failed: ${String(error?.message || error)}`);
+          if (invalidated?.status === 'failed') state = invalidated;
+          else throw error;
+        }
       }
       return state;
     })
@@ -323,14 +424,14 @@ export async function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     vscode.commands.registerCommand('forge-agent.answerClarification', (answer: string, clarificationId?: string) => {
-      const loop = new AgentHarnessLoop(createConfiguredProvider(), undefined, undefined, createMcpGateway(context));
+      const loop = new AgentHarnessLoop(createConfiguredProvider(), undefined, undefined, createMcpGateway(context), [], { signedAttestationAvailable: true });
       return loop.answerClarification(answer, clarificationId);
     })
   );
 
   context.subscriptions.push(
     vscode.commands.registerCommand('forge-agent.restoreCheckpoint', async (checkpointId: string) => {
-      const loop = new AgentHarnessLoop(createConfiguredProvider(), undefined, undefined, createMcpGateway(context));
+      const loop = new AgentHarnessLoop(createConfiguredProvider(), undefined, undefined, createMcpGateway(context), [], { signedAttestationAvailable: true });
       return loop.restoreCheckpoint(checkpointId);
     })
   );
@@ -345,7 +446,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     vscode.commands.registerCommand('forge-agent.resumeAgentGoal', async (options?: any) => {
-      const loop = new AgentHarnessLoop(createConfiguredProvider(), undefined, undefined, createMcpGateway(context));
+      const loop = new AgentHarnessLoop(createConfiguredProvider(), undefined, undefined, createMcpGateway(context), [], { signedAttestationAvailable: true });
       let state = await loop.resumeFromDisk({
         additionalSteps: options?.additionalSteps,
         allowBudgetHaltResume: options?.allowBudgetHaltResume === true
@@ -355,6 +456,14 @@ export async function activate(context: vscode.ExtensionContext) {
       }
       while (!['success', 'failed', 'gave_up', 'paused', 'awaiting_input', 'awaiting_approval'].includes(state.status) && state.currentStepIndex < state.maxSteps) {
         state = await loop.runStep(state, options?.modelBindings || {});
+      }
+      if (['success', 'failed', 'gave_up'].includes(state.status)) {
+        try { await attestTerminalState(context, state); }
+        catch (error: any) {
+          const invalidated = loop.invalidateAuditedTerminalSuccess(`attestation failed: ${String(error?.message || error)}`);
+          if (invalidated?.status === 'failed') state = invalidated;
+          else throw error;
+        }
       }
       return state;
     })
@@ -389,16 +498,272 @@ class ForgeStudioWebviewProvider implements vscode.WebviewViewProvider {
   private workspaceIndexBuilding = false;
   private workspaceIndexError?: string;
   private runPromise?: Promise<HarnessState>;
+  private gatewaySessionId?: string;
   private readonly mcpGateway: McpToolGateway;
+  private customizationSnapshot?: CustomizationSnapshotV1;
 
   constructor(private readonly extensionUri: vscode.Uri, private readonly extensionContext: vscode.ExtensionContext, private readonly modeRegistry: ModeRegistry) {
     this.mcpGateway = createMcpGateway(extensionContext);
-    this.harnessLoop = new AgentHarnessLoop(createConfiguredProvider(), undefined, undefined, this.mcpGateway);
+    this.harnessLoop = new AgentHarnessLoop(createConfiguredProvider(), undefined, undefined, this.mcpGateway, [], { signedAttestationAvailable: true });
     void this.refreshMcpCatalog().catch(() => undefined);
+    void this.refreshCustomizations().catch(() => undefined);
+  }
+
+  public getCustomizations(): any {
+    const snapshot = this.customizationSnapshot;
+    return snapshot ? this.customizationSummary(snapshot) : null;
+  }
+
+  public async refreshCustomizations(): Promise<any> {
+    const snapshot = discoverCustomizations(getWorkspaceRoot());
+    persistCustomizationSnapshot(getWorkspaceRoot(), snapshot);
+    this.customizationSnapshot = snapshot;
+    this.modeRegistry.setImportedModes(importedAgentModes(snapshot));
+    const summary = this.customizationSummary(snapshot);
+    await this.publishModes();
+    await this.webview?.postMessage({ command: 'customizations-status', summary });
+    return summary;
+  }
+
+  private customizationSummary(snapshot: CustomizationSnapshotV1): any {
+    return {
+      digest: effectiveCustomizationDigest(snapshot),
+      skills: snapshot.skills.length,
+      agents: snapshot.agents.length,
+      compatibleAgents: snapshot.agents.filter(item => item.compatible).length,
+      rules: snapshot.rules.length,
+      hooks: snapshot.hooks.length,
+      hooksEnabled: vscode.workspace.getConfiguration('forge').get<boolean>('customizationHooksEnabled', false),
+      accepted: snapshot.diagnostics.filter(item => item.disposition === 'accepted').length,
+      rejected: snapshot.diagnostics.filter(item => item.disposition === 'rejected').length
+    };
   }
 
   public diagnostics(): any {
     return this.harnessLoop.getDiagnostics();
+  }
+
+  public async publishAgentGatewayStatus(status: AgentGatewayStatus): Promise<void> {
+    await this.webview?.postMessage({ command: 'agent-gateway-status', status });
+  }
+
+  public isGatewayManagedSession(sessionId?: string): boolean {
+    return Boolean(sessionId && this.gatewaySessionId === sessionId);
+  }
+
+  public async submitGatewayGoal(request: AgentGatewayGoalRequest): Promise<AgentGatewaySessionView> {
+    if (this.runPromise) throw new Error('[gateway_busy] The active Forge run is executing an internal bounded step.');
+    const current = this.harnessLoop.getDiagnostics()?.state as HarnessState | undefined;
+    if (current && !this.isTerminal(current)) throw new Error('[active_run_conflict] Finish or cancel the active Forge run before submitting a gateway goal.');
+    const mode = this.modeRegistry.resolve('code');
+    if (mode.intent !== 'code') throw new Error('[mode_unavailable] The built-in code mode is unavailable.');
+    const directive = parseGoalDirective(request.goal);
+    const config = vscode.workspace.getConfiguration('forge');
+    const budget = {
+      maxCostUsd: config.get<number>('maxCostUsd', 1),
+      maxWallClockMs: Math.max(1, config.get<number>('maxWallClockMinutes', 30)) * 60 * 1000
+    };
+    const goalOverrides = directive.isDirective ? directiveToGoalOverrides(directive) : { maxSteps: config.get<number>('maxSteps', 30) };
+    const state = await this.harnessLoop.initializeHarness(
+      directive.isDirective ? directive.goal : request.goal,
+      {},
+      budget,
+      {
+        reflectionEnabled: config.get<boolean>('reflectionEnabled', true),
+        goalOverrides,
+        modePolicy: toModePolicy(mode),
+        humanApprovalPolicy: 'ask',
+        assuranceLevel: this.getAssuranceLevel(),
+        userContext: []
+      }
+    );
+    this.gatewaySessionId = state.sessionId;
+    this.activeChatSessionId = undefined;
+    this.sessionStore().saveChat(state.sessionId, [{ role: 'user', content: request.goal, source: 'agent-gateway' }]);
+    this.sessionStore().saveContext(state.sessionId, []);
+    this.persistGatewayOwnership(state);
+    await this.publishState(state);
+    return this.gatewayView(state);
+  }
+
+  public async submitGatewayProposal(request: AgentGatewayProposalRequest): Promise<AgentGatewaySessionView> {
+    if (this.runPromise) throw new Error('[gateway_busy] The active Forge run is executing an internal bounded step.');
+    const state = this.requireGatewayState(request.sessionId);
+    if (state.executionContract.digest !== request.contractDigest) throw new Error('[stale_contract] Proposal contract digest does not match the current Forge execution contract.');
+    if (this.isTerminal(state)) throw new Error('[terminal_session] Terminal Forge sessions do not accept proposals.');
+    if (state.status === 'awaiting_approval' || state.status === 'awaiting_input' || state.status === 'paused') {
+      throw new Error(`[gateway_boundary_pending] Resolve the current native ${state.status} boundary before submitting another proposal.`);
+    }
+    const next = await this.harnessLoop.runSubmittedProposal(state, request.envelope, state.executionContract.authority.modelBindings || {});
+    await this.publishState(next);
+    if (this.isTerminal(next)) {
+      try { await this.attestLatestRun(); }
+      catch (error: any) { await this.webview?.postMessage({ command: 'host-error', message: `Gateway run finished, but attestation failed: ${error.message}` }); }
+    }
+    return this.gatewayView(next);
+  }
+
+  public async getGatewayStatus(sessionId: string): Promise<AgentGatewaySessionView> {
+    return this.gatewayView(this.requireGatewayState(sessionId));
+  }
+
+  public async cancelGatewaySession(request: AgentGatewayCancelRequest): Promise<AgentGatewaySessionView> {
+    const state = this.requireGatewayState(request.sessionId);
+    if (this.isTerminal(state)) return this.gatewayView(state);
+    const cancelled = this.harnessLoop.cancelRun('Cancelled through the authenticated Agent Gateway.');
+    await this.publishState(cancelled);
+    return this.gatewayView(cancelled);
+  }
+
+  private requireGatewayState(sessionId: string): HarnessState {
+    const state = this.harnessLoop.getDiagnostics()?.state as HarnessState | undefined;
+    if (state && state.sessionId === sessionId && this.gatewaySessionId !== sessionId) this.restoreGatewayOwnership(state);
+    if (!state || state.sessionId !== sessionId || this.gatewaySessionId !== sessionId) throw new Error('[unknown_gateway_session] The requested gateway session is not active in this extension host.');
+    return state;
+  }
+
+  private gatewayOwnershipPath(): string {
+    return path.join(getWorkspaceRoot(), '.forge', 'agent-gateway', 'active-session.json');
+  }
+
+  private persistGatewayOwnership(state: HarnessState): void {
+    if (this.gatewaySessionId !== state.sessionId) return;
+    writeJsonAtomic(this.gatewayOwnershipPath(), {
+      schemaVersion: 1,
+      sessionId: state.sessionId,
+      contractDigest: state.executionContract.digest,
+      updatedAt: new Date().toISOString()
+    });
+  }
+
+  private restoreGatewayOwnership(state: HarnessState): boolean {
+    try {
+      const marker = JSON.parse(fs.readFileSync(this.gatewayOwnershipPath(), 'utf8'));
+      if (marker?.schemaVersion !== 1 || marker?.sessionId !== state.sessionId || marker?.contractDigest !== state.executionContract.digest) return false;
+      this.gatewaySessionId = state.sessionId;
+      this.activeChatSessionId = undefined;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private gatewayView(state: HarnessState): AgentGatewaySessionView {
+    const activeTask = state.taskGraph.tasks.find(task => task.status === 'running' || task.status === 'pending');
+    const pending = state.executionContract.status === 'pending'
+      ? { kind: 'contract' as const, id: state.executionContract.digest, summary: `${state.executionContract.authority.assurance} execution contract revision ${state.executionContract.revision} requires native confirmation.` }
+      : state.pendingHumanApproval?.status === 'pending'
+        ? { kind: 'approval' as const, id: state.pendingHumanApproval.id, summary: String(state.pendingHumanApproval.summary || '').slice(0, 500) }
+        : state.clarifications.find(item => item.status === 'pending')
+          ? { kind: 'clarification' as const, id: state.clarifications.find(item => item.status === 'pending')!.id, summary: String(state.clarifications.find(item => item.status === 'pending')!.question || '').slice(0, 500) }
+          : undefined;
+    const stats = state.runStats;
+    return {
+      schemaVersion: 1,
+      sessionId: state.sessionId,
+      contractDigest: state.executionContract.digest,
+      contractStatus: state.executionContract.status,
+      status: state.status,
+      phase: state.firewall?.stage || 'IDLE',
+      ...(activeTask ? { activeTask: { id: activeTask.id, title: activeTask.title, role: activeTask.owner, status: activeTask.status } } : {}),
+      oracle: { green: state.lastOraclePass === true, lint: state.oracleStatuses.linter, typecheck: state.oracleStatuses.compiler, tests: state.oracleStatuses.tests, build: state.oracleStatuses.build || 'unchecked' },
+      ...(pending ? { pending } : {}),
+      latestProgress: (state.progressEvents || []).slice(-8).map(event => ({ sequence: event.sequence, kind: event.kind, status: event.status, summary: event.summary, ...(event.detail ? { detail: event.detail } : {}), role: event.role, ...(event.toolName ? { toolName: event.toolName } : {}) })),
+      proposalAccounting: { gateway: stats.gatewayProposals || 0, gatewayRejected: stats.gatewayProposalRejections || 0, provider: stats.modelDrivenProposals || 0, fallback: stats.fallbackProposals || 0, actuallyModelDriven: stats.actuallyModelDriven === true },
+      ...(state.haltReason ? { haltReason: String(state.haltReason).slice(0, 2_000) } : {})
+    };
+  }
+
+  public async attestLatestRun(): Promise<RunAttestationV1> {
+    try {
+      const { state, graph } = this.readAttestationInputs();
+      const attestation = await this.attestationService().attest(state, graph);
+      await this.publishProofIntegrity(attestation);
+      return attestation;
+    } catch (error: any) {
+      const invalidated = this.harnessLoop.invalidateAuditedTerminalSuccess(`attestation failed: ${String(error?.message || error)}`);
+      if (invalidated?.status === 'failed') await this.publishState(invalidated);
+      throw error;
+    }
+  }
+
+  public async verifyLatestAttestation(): Promise<any> {
+    const root = getWorkspaceRoot();
+    const graph = readJsonFile<ProofGraphV1>(path.join(root, '.forge', 'proof-graph.json'));
+    const attestation = readJsonFile<RunAttestationV1>(path.join(root, '.forge', 'latest-attestation.json'));
+    const graphVerification = verifyProofGraph(graph);
+    const attestationVerification = verifyAttestation(attestation, graph);
+    const result = {
+      schemaVersion: 1,
+      verifiedAt: new Date().toISOString(),
+      valid: graphVerification.valid && attestationVerification.valid,
+      graphValid: graphVerification.valid,
+      signatureValid: attestationVerification.valid,
+      claimsSuccess: attestation.statement.claimsSuccess,
+      keyId: attestation.statement.keyId,
+      errors: [...new Set([...graphVerification.errors, ...attestationVerification.errors])]
+    };
+    const target = path.join(root, '.forge', 'latest-attestation-verification.json');
+    writeJsonAtomic(target, result);
+    await this.publishProofIntegrity(attestation, result);
+    return result;
+  }
+
+  public async rotateAttestationKey(): Promise<any> {
+    const choice = await vscode.window.showWarningMessage('Rotate the Forge attestation key? Existing attestations remain independently verifiable, but future runs will use a new identity.', { modal: true }, 'Rotate Key');
+    if (choice !== 'Rotate Key') return { rotated: false };
+    const key = await this.attestationService().rotateKey();
+    await this.publishProofIntegrity();
+    return { rotated: true, keyId: key.keyId };
+  }
+
+  public async runOracleCalibration(): Promise<OracleCalibrationReportV1> {
+    const report = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Forge: calibrating the selected test oracle', cancellable: false }, () =>
+      runOracleCalibration({ workspaceRoot: getWorkspaceRoot(), maxMutants: 10 })
+    );
+    await this.publishProofIntegrity();
+    await this.webview?.postMessage({ command: 'oracle-calibration', assessment: assessOracleCalibration(getWorkspaceRoot()) });
+    return report;
+  }
+
+  private attestationService(): AttestationService {
+    return new AttestationService(this.extensionContext.secrets, getWorkspaceRoot(), String(this.extensionContext.extension.packageJSON.version || 'unknown'));
+  }
+
+  private readAttestationInputs(): { state: HarnessState; graph: ProofGraphV1 } {
+    const root = getWorkspaceRoot();
+    return {
+      state: readJsonFile<HarnessState>(path.join(root, '.forge', 'state.json')),
+      graph: readJsonFile<ProofGraphV1>(path.join(root, '.forge', 'proof-graph.json'))
+    };
+  }
+
+  private async publishProofIntegrity(attestation?: RunAttestationV1, verification?: any): Promise<any> {
+    const root = getWorkspaceRoot();
+    const graph = tryReadJsonFile<ProofGraphV1>(path.join(root, '.forge', 'proof-graph.json'));
+    const signed = attestation || tryReadJsonFile<RunAttestationV1>(path.join(root, '.forge', 'latest-attestation.json'));
+    const checked = verification || tryReadJsonFile<any>(path.join(root, '.forge', 'latest-attestation-verification.json'));
+    const calibration = assessOracleCalibration(root);
+    const summary = {
+      graph: graph ? { nodeCount: graph.nodes.length, edgeCount: graph.edges.length, complete: graph.completeness.complete, claimsSuccess: graph.completeness.claimsSuccess, valid: verifyProofGraph(graph).valid } : null,
+      attestation: signed ? { sessionId: signed.statement.sessionId, keyId: signed.statement.keyId, claimsSuccess: signed.statement.claimsSuccess, issuedAt: signed.statement.issuedAt } : null,
+      verification: checked ? { valid: checked.valid === true, verifiedAt: checked.verifiedAt, errors: checked.errors || [] } : null,
+      calibration: {
+        available: calibration.available,
+        reason: calibration.reason,
+        sensitivity: calibration.sensitivity,
+        floor: calibration.floor,
+        appliedMutants: calibration.appliedMutants,
+        calibrationId: calibration.calibrationId,
+        hasReport: Boolean(calibration.report)
+      }
+    };
+    await this.webview?.postMessage({ command: 'proof-integrity', summary });
+    return summary;
+  }
+
+  public async publishBackgroundSessions(sessions: Array<BackgroundSessionV1 & { stale: boolean }>): Promise<void> {
+    await this.webview?.postMessage({ command: 'background-sessions-list', sessions });
   }
 
   public async refreshReadiness(force = true): Promise<ProviderReadiness> {
@@ -495,7 +860,9 @@ class ForgeStudioWebviewProvider implements vscode.WebviewViewProvider {
   }
 
   public async resolveHumanApproval(decision: 'approve' | 'reject', approvalId: string, reason = '', modelBindings: Record<string, string> = {}): Promise<HarnessState> {
-    return this.harnessLoop.decideHumanApproval(decision, approvalId, reason, modelBindings);
+    const state = await this.harnessLoop.decideHumanApproval(decision, approvalId, reason, modelBindings);
+    await this.publishState(state);
+    return state;
   }
 
   public getAssuranceLevel(): AssuranceLevel {
@@ -512,7 +879,8 @@ class ForgeStudioWebviewProvider implements vscode.WebviewViewProvider {
   public async resolveExecutionContract(decision: 'confirm' | 'reject', digest: string, modelBindings: Record<string, string> = {}): Promise<HarnessState> {
     let state = await this.harnessLoop.decideExecutionContract(decision, digest);
     await this.publishState(state);
-    if (decision === 'confirm') state = await this.runUntilBoundary(state, modelBindings);
+    if (decision === 'confirm' && !this.isGatewayManagedSession(state.sessionId)) state = await this.runUntilBoundary(state, modelBindings);
+    else if (this.isTerminal(state)) await this.attestLatestRun();
     return state;
   }
 
@@ -624,6 +992,11 @@ class ForgeStudioWebviewProvider implements vscode.WebviewViewProvider {
     }
 
     if (!nextState) throw new Error(`Conversation route '${decision.route}' requires an active run.`);
+    if (this.isGatewayManagedSession(nextState.sessionId)) {
+      const text = this.authoritativeStatusText(nextState);
+      await this.publishConversationText(nextState.sessionId, messages, text);
+      return { decision, sessionId: nextState.sessionId, text, state: nextState };
+    }
     nextState = await this.runUntilBoundary(nextState, options.modelBindings || {});
     const text = this.authoritativeStatusText(nextState);
     await this.publishConversationText(nextState.sessionId, messages, text);
@@ -649,6 +1022,7 @@ class ForgeStudioWebviewProvider implements vscode.WebviewViewProvider {
       maxWallClockMs: Math.max(1, config.get<number>('maxWallClockMinutes', 30)) * 60 * 1000
     };
     const goalOverrides = directive.isDirective ? directiveToGoalOverrides(directive) : { maxSteps: config.get<number>('maxSteps', 30) };
+    this.gatewaySessionId = undefined;
     const next = await this.harnessLoop.initializeHarness(
       directive.isDirective ? directive.goal : rawGoal,
       options.modelBindings || {},
@@ -677,6 +1051,10 @@ class ForgeStudioWebviewProvider implements vscode.WebviewViewProvider {
           await this.publishState(state);
         }
       }
+      if (this.isTerminal(state)) {
+        try { await this.attestLatestRun(); }
+        catch (error: any) { await this.webview?.postMessage({ command: 'host-error', message: `Run finished, but attestation failed: ${error.message}` }); }
+      }
       return state;
     };
     this.runPromise = execute();
@@ -693,6 +1071,7 @@ class ForgeStudioWebviewProvider implements vscode.WebviewViewProvider {
   }
 
   private async publishState(state: HarnessState): Promise<void> {
+    this.persistGatewayOwnership(state);
     await this.webview?.postMessage({ command: 'state-update', state: this.webviewState(state) });
   }
 
@@ -812,7 +1191,7 @@ class ForgeStudioWebviewProvider implements vscode.WebviewViewProvider {
 
     webviewView.webview.html = this.getHtmlForWebview(webviewView.webview);
     void this.publishReadiness();
-    void this.publishModes();
+    void this.refreshCustomizations();
     void this.publishHumanApprovalPolicy();
     void this.publishAssuranceLevel();
     void this.publishWorkspaceIndexStatus();
@@ -848,6 +1227,7 @@ class ForgeStudioWebviewProvider implements vscode.WebviewViewProvider {
             const mode = this.modeRegistry.resolve(message.modeId || 'code');
             if (mode.intent !== 'code') throw new Error(`Mode '${mode.name}' is non-mutating. Select a code-capable mode before initializing a run.`);
             const userContext = this.currentComposerContext();
+            this.gatewaySessionId = undefined;
             const state = await this.harnessLoop.initializeHarness(message.goal, message.modelBindings, message.runBudget || {}, { modePolicy: toModePolicy(mode), humanApprovalPolicy: this.humanApprovalPolicy(), assuranceLevel: this.getAssuranceLevel(), userContext });
             this.sessionStore().saveContext(state.sessionId, userContext);
             this.activeChatSessionId = undefined;
@@ -861,8 +1241,10 @@ class ForgeStudioWebviewProvider implements vscode.WebviewViewProvider {
           try {
             const trustedState = this.harnessLoop.getDiagnostics()?.state as HarnessState | undefined;
             if (!trustedState) throw new Error('Initialize a Forge run before stepping it.');
+            if (this.isGatewayManagedSession(trustedState.sessionId)) throw new Error('Gateway-managed runs require the next authenticated external proposal.');
             const state = await this.harnessLoop.runStep(trustedState, message.modelBindings);
             webviewView.webview.postMessage({ command: 'state-update', state: this.webviewState(state) });
+            if (this.isTerminal(state)) await this.attestLatestRun();
           } catch (err: any) {
             vscode.window.showErrorMessage("Harness Run Step failed: " + err.message);
           }
@@ -1059,10 +1441,7 @@ class ForgeStudioWebviewProvider implements vscode.WebviewViewProvider {
           try {
             let state = await this.resolveHumanApproval(message.decision === 'approve' ? 'approve' : 'reject', String(message.approvalId || ''), String(message.reason || ''), message.modelBindings || {});
             webviewView.webview.postMessage({ command: 'state-update', state: this.webviewState(state) });
-            while (!['success', 'failed', 'gave_up', 'paused', 'awaiting_input', 'awaiting_approval'].includes(state.status) && state.currentStepIndex < state.maxSteps) {
-              state = await this.harnessLoop.runStep(state, message.modelBindings || {});
-              webviewView.webview.postMessage({ command: 'state-update', state: this.webviewState(state) });
-            }
+            if (!this.isGatewayManagedSession(state.sessionId)) state = await this.runUntilBoundary(state, message.modelBindings || {});
           } catch (err: any) {
             webviewView.webview.postMessage({ command: 'host-error', message: `Approval decision failed: ${err.message}` });
           }
@@ -1070,6 +1449,17 @@ class ForgeStudioWebviewProvider implements vscode.WebviewViewProvider {
         }
         case 'list-modes': {
           await this.publishModes();
+          break;
+        }
+        case 'load-customizations':
+        case 'refresh-customizations': {
+          try { await this.refreshCustomizations(); }
+          catch (err: any) { webviewView.webview.postMessage({ command: 'host-error', message: `Customization refresh failed: ${err.message}` }); }
+          break;
+        }
+        case 'open-customizations': {
+          try { await openArtifact('customizations', proofRunner); }
+          catch (err: any) { webviewView.webview.postMessage({ command: 'host-error', message: `Customization report is unavailable: ${err.message}` }); }
           break;
         }
         case 'save-mode': {
@@ -1128,6 +1518,7 @@ class ForgeStudioWebviewProvider implements vscode.WebviewViewProvider {
               if (active.state) {
                 this.harnessLoop.loadPersistedSession(active.meta.sessionId);
                 this.activeChatSessionId = undefined;
+                this.restoreGatewayOwnership(active.state);
               } else {
                 this.harnessLoop.clearActiveSession();
                 this.activeChatSessionId = active.meta.sessionId;
@@ -1135,9 +1526,77 @@ class ForgeStudioWebviewProvider implements vscode.WebviewViewProvider {
               webviewView.webview.postMessage({ command: 'session-loaded', ...active, state: active.state ? this.webviewState(active.state) : undefined, resumed: false });
             } else {
               const state = this.harnessLoop.loadPersistedSession();
-              if (state) webviewView.webview.postMessage({ command: 'state-update', state: this.webviewState(state) });
+              if (state) {
+                this.restoreGatewayOwnership(state);
+                webviewView.webview.postMessage({ command: 'state-update', state: this.webviewState(state) });
+              }
             }
           } catch (err) {}
+          await this.publishProofIntegrity();
+          break;
+        }
+        case 'load-proof-integrity': {
+          await this.publishProofIntegrity();
+          break;
+        }
+        case 'load-model-intelligence': {
+          let report: ModelIntelligenceReportV1 | null = null;
+          try { report = new ModelIntelligenceService(getWorkspaceRoot()).loadLatest(); }
+          catch (error: any) {
+            if (error?.code !== 'ENOENT') webviewView.webview.postMessage({ command: 'host-error', message: `Model intelligence is invalid: ${error.message}` });
+          }
+          webviewView.webview.postMessage({ command: 'model-intelligence-report', report });
+          break;
+        }
+        case 'rebuild-model-intelligence': {
+          try {
+            const report = new ModelIntelligenceService(getWorkspaceRoot()).rebuild();
+            webviewView.webview.postMessage({ command: 'model-intelligence-report', report });
+          } catch (err: any) {
+            webviewView.webview.postMessage({ command: 'host-error', message: `Model intelligence rebuild failed: ${err.message}` });
+          }
+          break;
+        }
+        case 'load-agent-gateway-status':
+        case 'start-agent-gateway':
+        case 'stop-agent-gateway':
+        case 'rotate-agent-gateway-token':
+        case 'copy-agent-gateway-mcp-config': {
+          const command = message.command === 'start-agent-gateway'
+            ? 'forge-agent.startAgentGateway'
+            : message.command === 'stop-agent-gateway'
+              ? 'forge-agent.stopAgentGateway'
+              : message.command === 'rotate-agent-gateway-token'
+                ? 'forge-agent.rotateAgentGatewayToken'
+                : message.command === 'copy-agent-gateway-mcp-config'
+                  ? 'forge-agent.copyAgentGatewayMcpConfig'
+                  : 'forge-agent.getAgentGatewayStatus';
+          try {
+            const result = await vscode.commands.executeCommand<any>(command);
+            webviewView.webview.postMessage({ command: 'agent-gateway-status', status: result?.status || result, action: message.command });
+          } catch (err: any) {
+            webviewView.webview.postMessage({ command: 'host-error', message: `Agent Gateway action failed: ${err.message}` });
+          }
+          break;
+        }
+        case 'open-agent-gateway-audit': {
+          try { await vscode.commands.executeCommand('forge-agent.openAgentGatewayAudit'); }
+          catch (err: any) { webviewView.webview.postMessage({ command: 'host-error', message: `Agent Gateway audit is unavailable: ${err.message}` }); }
+          break;
+        }
+        case 'attest-latest-run': {
+          try { await this.attestLatestRun(); }
+          catch (err: any) { webviewView.webview.postMessage({ command: 'host-error', message: `Attestation failed: ${err.message}` }); }
+          break;
+        }
+        case 'verify-latest-attestation': {
+          try { await this.verifyLatestAttestation(); }
+          catch (err: any) { webviewView.webview.postMessage({ command: 'host-error', message: `Attestation verification failed: ${err.message}` }); }
+          break;
+        }
+        case 'run-oracle-calibration': {
+          try { await this.runOracleCalibration(); }
+          catch (err: any) { webviewView.webview.postMessage({ command: 'host-error', message: `Oracle calibration failed: ${err.message}` }); }
           break;
         }
         case 'open-artifact': {
@@ -1235,6 +1694,32 @@ class ForgeStudioWebviewProvider implements vscode.WebviewViewProvider {
           }
           break;
         }
+        case 'run-branch-compare': {
+          try {
+            const report = await vscode.commands.executeCommand<BranchCompareReport>('forge-agent.runBranchCompare', message.options || {});
+            webviewView.webview.postMessage({ command: 'branch-compare-report', report });
+          } catch (err: any) {
+            webviewView.webview.postMessage({ command: 'host-error', message: `Branch comparison failed: ${err.message}` });
+          }
+          break;
+        }
+        case 'open-branch-candidate-diff': {
+          try { await vscode.commands.executeCommand('forge-agent.openBranchCandidateDiff', message.candidateId); }
+          catch (err: any) { webviewView.webview.postMessage({ command: 'host-error', message: `Candidate review failed: ${err.message}` }); }
+          break;
+        }
+        case 'approve-branch-candidate': {
+          try { await vscode.commands.executeCommand('forge-agent.approveBranchCandidate', message.candidateId); }
+          catch (err: any) { webviewView.webview.postMessage({ command: 'host-error', message: `Candidate approval failed: ${err.message}` }); }
+          break;
+        }
+        case 'merge-branch-candidate': {
+          try {
+            const result = await vscode.commands.executeCommand<any>('forge-agent.mergeBranchCandidate', message.candidateId);
+            webviewView.webview.postMessage({ command: 'branch-merge-result', result });
+          } catch (err: any) { webviewView.webview.postMessage({ command: 'host-error', message: `Candidate merge failed: ${err.message}` }); }
+          break;
+        }
         case 'open-native-settings': {
           try {
             await vscode.commands.executeCommand('forge-agent.openNativeSettings');
@@ -1283,6 +1768,45 @@ class ForgeStudioWebviewProvider implements vscode.WebviewViewProvider {
             webviewView.webview.postMessage({ command: 'sessions-list', ...this.listSessions() });
           } catch (err: any) {
             webviewView.webview.postMessage({ command: 'sessions-list', sessions: [], error: err.message });
+          }
+          break;
+        }
+        case 'list-background-sessions': {
+          try {
+            const sessions = await vscode.commands.executeCommand<any[]>('forge-agent.listBackgroundSessions');
+            webviewView.webview.postMessage({ command: 'background-sessions-list', sessions: sessions || [] });
+          } catch (err: any) {
+            webviewView.webview.postMessage({ command: 'background-sessions-list', sessions: [], error: err.message });
+          }
+          break;
+        }
+        case 'start-background-session':
+        case 'resume-background-session':
+        case 'cancel-background-session':
+        case 'resolve-background-session':
+        case 'approve-background-review':
+        case 'merge-background-session': {
+          try {
+            const command = message.command === 'start-background-session' ? 'forge-agent.startBackgroundSession'
+              : message.command === 'resume-background-session' ? 'forge-agent.resumeBackgroundSession'
+                : message.command === 'cancel-background-session' ? 'forge-agent.cancelBackgroundSession'
+                  : message.command === 'resolve-background-session' ? 'forge-agent.resolveBackgroundSession'
+                    : message.command === 'approve-background-review' ? 'forge-agent.approveBackgroundReview'
+                      : 'forge-agent.mergeBackgroundSession';
+            await vscode.commands.executeCommand(command, message.sessionId, message.options || {});
+            const sessions = await vscode.commands.executeCommand<any[]>('forge-agent.listBackgroundSessions');
+            webviewView.webview.postMessage({ command: 'background-sessions-list', sessions: sessions || [] });
+          } catch (err: any) {
+            webviewView.webview.postMessage({ command: 'host-error', message: `Background session action failed: ${err.message}` });
+          }
+          break;
+        }
+        case 'open-background-log':
+        case 'open-background-diff': {
+          try {
+            await vscode.commands.executeCommand(message.command === 'open-background-log' ? 'forge-agent.openBackgroundLog' : 'forge-agent.openBackgroundDiff', message.sessionId);
+          } catch (err: any) {
+            webviewView.webview.postMessage({ command: 'host-error', message: err.message });
           }
           break;
         }
@@ -1386,7 +1910,9 @@ class ForgeStudioWebviewProvider implements vscode.WebviewViewProvider {
   }
 
   private currentContextSessionId(): string | undefined {
-    return this.harnessLoop.getDiagnostics()?.state?.sessionId || this.activeChatSessionId;
+    const state = this.harnessLoop.getDiagnostics()?.state as HarnessState | undefined;
+    if (state && this.isGatewayManagedSession(state.sessionId) && this.isTerminal(state)) return this.activeChatSessionId;
+    return state?.sessionId || this.activeChatSessionId;
   }
 
   private currentComposerContext(sessionId = this.currentContextSessionId()): ComposerContextAttachment[] {
@@ -1416,10 +1942,10 @@ class ForgeStudioWebviewProvider implements vscode.WebviewViewProvider {
   }
 
   private ensureConversationSession(firstMessage: string): string {
-    const runSessionId = this.harnessLoop.getDiagnostics()?.state?.sessionId;
-    if (runSessionId) return runSessionId;
-    if (this.activeChatSessionId) {
-      try { this.sessionStore().load(this.activeChatSessionId); return this.activeChatSessionId; } catch { this.activeChatSessionId = undefined; }
+    const existingSessionId = this.currentContextSessionId();
+    if (existingSessionId) {
+      try { this.sessionStore().load(existingSessionId); return existingSessionId; }
+      catch { if (this.activeChatSessionId === existingSessionId) this.activeChatSessionId = undefined; }
     }
     const created = this.sessionStore().createChat(firstMessage);
     this.activeChatSessionId = created.meta.sessionId;
@@ -1495,6 +2021,121 @@ class ForgeStudioWebviewProvider implements vscode.WebviewViewProvider {
         <script type="module" src="${scriptUri}"></script>
       </body>
       </html>`;
+  }
+}
+
+class AgentGatewayController implements vscode.Disposable, AgentGatewayDelegate {
+  private server?: AgentGatewayServer;
+  private readonly configurationListener: vscode.Disposable;
+
+  constructor(private readonly context: vscode.ExtensionContext, private readonly provider: ForgeStudioWebviewProvider) {
+    this.configurationListener = vscode.workspace.onDidChangeConfiguration(event => {
+      if (!event.affectsConfiguration('forge.agentGatewayEnabled')) return;
+      if (this.enabled()) void this.start().catch(error => vscode.window.showErrorMessage(`Agent Gateway failed to start: ${error.message}`));
+      else void this.stop();
+    });
+  }
+
+  public async startIfEnabled(): Promise<AgentGatewayStatus> {
+    if (!this.enabled()) {
+      const status = this.status();
+      await this.provider.publishAgentGatewayStatus(status);
+      return status;
+    }
+    try { return await this.start(); }
+    catch (error: any) {
+      await this.provider.publishAgentGatewayStatus(this.status());
+      void vscode.window.showWarningMessage(`Forge Agent Gateway did not start: ${String(error?.message || error)}`);
+      return this.status();
+    }
+  }
+
+  public async start(): Promise<AgentGatewayStatus> {
+    if (!this.enabled()) throw new Error('Agent Gateway is disabled. Enable forge.agentGatewayEnabled in native settings first.');
+    await this.ensureToken();
+    if (!this.server) {
+      const config = vscode.workspace.getConfiguration('forge');
+      this.server = new AgentGatewayServer({
+        workspaceRoot: getWorkspaceRoot,
+        enabled: () => this.enabled(),
+        getToken: () => this.context.secrets.get(AGENT_GATEWAY_SECRET_KEY),
+        delegate: this,
+        port: config.get<number>('agentGatewayPort', 43119),
+        rateLimitPerMinute: config.get<number>('agentGatewayRateLimitPerMinute', 60),
+        version: String(this.context.extension.packageJSON.version || 'unknown')
+      });
+    }
+    const status = await this.server.start();
+    await this.provider.publishAgentGatewayStatus(status);
+    return status;
+  }
+
+  public async stop(): Promise<AgentGatewayStatus> {
+    const status = this.server ? await this.server.stop() : this.status();
+    this.server = undefined;
+    await this.provider.publishAgentGatewayStatus(status);
+    return status;
+  }
+
+  public status(): AgentGatewayStatus {
+    return this.server?.status() || {
+      schemaVersion: 1,
+      enabled: this.enabled(),
+      running: false,
+      host: '127.0.0.1',
+      authenticated: true,
+      capabilities: ['submit_goal', 'submit_proposal', 'get_status', 'cancel']
+    };
+  }
+
+  public async rotateToken(options?: { confirm?: boolean }): Promise<{ rotated: boolean; status: AgentGatewayStatus }> {
+    if (options?.confirm !== true) {
+      const choice = await vscode.window.showWarningMessage('Rotate the Agent Gateway token? Existing API and MCP clients will stop authenticating immediately.', { modal: true }, 'Rotate Token');
+      if (choice !== 'Rotate Token') return { rotated: false, status: this.status() };
+    }
+    await this.context.secrets.store(AGENT_GATEWAY_SECRET_KEY, generateAgentGatewayToken());
+    const status = this.status();
+    await this.provider.publishAgentGatewayStatus(status);
+    return { rotated: true, status };
+  }
+
+  public async copyMcpConfig(): Promise<{ copied: true; status: AgentGatewayStatus }> {
+    const status = this.status();
+    if (!status.running || !status.url) throw new Error('Start the Agent Gateway before copying its MCP configuration.');
+    const token = await this.ensureToken();
+    const config = {
+      mcpServers: {
+        'forge-agent': {
+          command: 'node',
+          args: [this.context.asAbsolutePath(path.join('out', 'agentGatewayMcp.js'))],
+          env: { FORGE_AGENT_GATEWAY_URL: status.url, FORGE_AGENT_GATEWAY_TOKEN: token }
+        }
+      }
+    };
+    await vscode.env.clipboard.writeText(JSON.stringify(config, null, 2));
+    void vscode.window.showInformationMessage('Authenticated Forge Agent Gateway MCP configuration copied. Treat it as a credential and rotate the token after sharing.');
+    return { copied: true, status };
+  }
+
+  public submitGoal(request: AgentGatewayGoalRequest): Promise<AgentGatewaySessionView> { return this.provider.submitGatewayGoal(request); }
+  public submitProposal(request: AgentGatewayProposalRequest): Promise<AgentGatewaySessionView> { return this.provider.submitGatewayProposal(request); }
+  public getStatus(sessionId: string): Promise<AgentGatewaySessionView> { return this.provider.getGatewayStatus(sessionId); }
+  public cancel(request: AgentGatewayCancelRequest): Promise<AgentGatewaySessionView> { return this.provider.cancelGatewaySession(request); }
+
+  public dispose(): void {
+    this.configurationListener.dispose();
+    void this.server?.dispose();
+    this.server = undefined;
+  }
+
+  private enabled(): boolean { return vscode.workspace.getConfiguration('forge').get<boolean>('agentGatewayEnabled', false) === true; }
+
+  private async ensureToken(): Promise<string> {
+    const existing = String(await this.context.secrets.get(AGENT_GATEWAY_SECRET_KEY) || '');
+    if (existing.length >= 32) return existing;
+    const token = generateAgentGatewayToken();
+    await this.context.secrets.store(AGENT_GATEWAY_SECRET_KEY, token);
+    return token;
   }
 }
 
@@ -1608,6 +2249,191 @@ function toModePolicy(mode: AgentMode): ModePolicy {
   return { id: mode.id, name: mode.name, intent: 'code', instructions: mode.instructions, allowedTools: [...mode.allowedTools] };
 }
 
+class BackgroundSessionController implements vscode.Disposable {
+  private timer?: NodeJS.Timeout;
+
+  constructor(private readonly context: vscode.ExtensionContext) {}
+
+  public start(): void {
+    void this.scan();
+    this.timer = setInterval(() => void this.scan(), 2_500);
+    this.timer.unref();
+  }
+
+  public dispose(): void {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = undefined;
+  }
+
+  public async startSession(options: any = {}): Promise<BackgroundSessionV1> {
+    const statePath = path.join(getWorkspaceRoot(), '.forge', 'state.json');
+    const stat = fs.statSync(statePath);
+    if (!stat.isFile() || stat.size > 20 * 1024 * 1024) throw new Error('Active Forge run state is missing or oversized.');
+    const state = JSON.parse(fs.readFileSync(statePath, 'utf8')) as HarnessState;
+    const session = await this.manager().start(state, options?.isolationMode || 'auto');
+    await this.publish();
+    return session;
+  }
+
+  public list(): Array<BackgroundSessionV1 & { stale: boolean }> {
+    return this.manager().list();
+  }
+
+  public async resume(sessionId: string): Promise<BackgroundSessionV1> {
+    const session = await this.manager().resume(String(sessionId || ''));
+    await this.publish();
+    return session;
+  }
+
+  public async cancel(sessionId: string): Promise<BackgroundSessionV1> {
+    const session = await this.manager().cancel(String(sessionId || ''));
+    await this.publish();
+    return session;
+  }
+
+  public async openLog(sessionId: string): Promise<void> {
+    const session = this.manager().store.load(String(sessionId || ''));
+    if (!fs.existsSync(session.logPath)) fs.writeFileSync(session.logPath, 'Background runner has not written a log entry.\n', 'utf8');
+    await vscode.window.showTextDocument(vscode.Uri.file(session.logPath), { preview: false });
+  }
+
+  public async openDiff(sessionId: string): Promise<void> {
+    const copies = this.manager().reviewCopies(String(sessionId || ''));
+    if (!copies.length) throw new Error('Background session has no changed files.');
+    let selected = copies[0];
+    if (copies.length > 1) {
+      const picked = await vscode.window.showQuickPick(copies.map(item => ({ label: item.path, item })), { placeHolder: 'Select a background change to review in the native diff editor' });
+      if (!picked) return;
+      selected = picked.item;
+    }
+    await vscode.commands.executeCommand('vscode.diff', vscode.Uri.file(selected.sourcePath), vscode.Uri.file(selected.isolatedPath), `Forge Background Review: ${selected.path}`);
+  }
+
+  public async approveReview(sessionId: string): Promise<BackgroundSessionV1> {
+    const session = this.manager().approveReview(String(sessionId || ''));
+    await this.publish();
+    return session;
+  }
+
+  public async resolveDecision(sessionId: string): Promise<BackgroundSessionV1 | undefined> {
+    const manager = this.manager();
+    const session = manager.store.load(String(sessionId || ''));
+    const state = JSON.parse(fs.readFileSync(session.statePath, 'utf8')) as HarnessState;
+    const loop = new AgentHarnessLoop(createConfiguredProvider(), session.isolatedRoot);
+    if (session.status === 'awaiting_input') {
+      const pending = (state.clarifications || []).find(item => item.status === 'pending');
+      if (!pending) throw new Error('Background session has no pending clarification.');
+      const answer = await vscode.window.showInputBox({
+        title: 'Forge background clarification',
+        prompt: `${pending.question}${pending.recommendedAnswer ? ` Recommended: ${pending.recommendedAnswer}` : ''}`,
+        ignoreFocusOut: true,
+        validateInput: value => value.trim() ? undefined : 'An answer is required.'
+      });
+      if (answer === undefined) return undefined;
+      loop.answerClarification(answer, pending.id);
+      return this.resume(sessionId);
+    }
+    if (session.status === 'awaiting_approval') {
+      const pending = state.pendingHumanApproval;
+      if (!pending || pending.status !== 'pending') throw new Error('Background session has no pending approval.');
+      const choice = await vscode.window.showWarningMessage(
+        `Approve validated background action ${pending.proposal.name}? ${pending.summary}`,
+        { modal: true, detail: 'The action remains confined to the retained isolated workspace. It cannot merge into the active workspace.' },
+        'Approve', 'Reject'
+      );
+      if (!choice) return undefined;
+      await loop.decideHumanApproval(choice === 'Approve' ? 'approve' : 'reject', pending.id, 'Resolved from the background-session ask gate.', session.modelBindings);
+      return this.resume(sessionId);
+    }
+    throw new Error(`Background session has no resolvable ask gate (${session.status}).`);
+  }
+
+  public async merge(sessionId: string): Promise<any> {
+    const result = await this.manager().merge(String(sessionId || ''));
+    await this.publish();
+    if (result.merged) void vscode.window.showInformationMessage(`Forge merged ${result.changedFiles.length} reviewed background change(s); fresh source verification passed.`);
+    else void vscode.window.showErrorMessage(`Forge rolled back the background merge because fresh source verification failed. ${result.oracle.summary}`);
+    return result;
+  }
+
+  private manager(): BackgroundSessionManager {
+    return new BackgroundSessionManager(getWorkspaceRoot(), request => this.launch(request));
+  }
+
+  private async launch(request: BackgroundLaunchRequest): Promise<{ pid: number }> {
+    const runnerPath = path.join(this.context.extensionUri.fsPath, 'out', 'backgroundRunner.js');
+    if (!fs.existsSync(runnerPath)) throw new Error('Packaged background runner is missing. Run Forge build/package again.');
+    fs.mkdirSync(path.dirname(request.logPath), { recursive: true });
+    const stdout = fs.openSync(request.logPath, 'a');
+    const stderr = fs.openSync(request.logPath, 'a');
+    const configuration = vscode.workspace.getConfiguration('forge');
+    const environment: NodeJS.ProcessEnv = {
+      ...backgroundBaseEnvironment(),
+      ELECTRON_RUN_AS_NODE: '1',
+      FORGE_PROVIDER_DEFAULT: configuration.get<string>('providerDefault', 'openrouter'),
+      FORGE_OPEN_AI_COMPATIBLE_BASE_URL: configuration.get<string>('openAiCompatibleBaseUrl', 'http://localhost:11434/v1'),
+      FORGE_DEFAULT_CODING_MODEL: configuration.get<string>('defaultCodingModel', 'openrouter/pareto-code'),
+      FORGE_DEFAULT_MIXED_MODEL: configuration.get<string>('defaultMixedModel', 'openrouter/auto'),
+      FORGE_ARCHITECT_MODEL: configuration.get<string>('architectModel', '')
+    };
+    const apiKey = await this.context.secrets.get(OPENROUTER_SECRET_KEY);
+    if (apiKey) environment.OPENROUTER_API_KEY = apiKey;
+    const child = spawn(process.execPath, [runnerPath, request.manifestPath], {
+      detached: true,
+      windowsHide: true,
+      stdio: ['ignore', stdout, stderr],
+      env: environment
+    });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        child.once('spawn', resolve);
+        child.once('error', reject);
+      });
+    } finally {
+      fs.closeSync(stdout);
+      fs.closeSync(stderr);
+    }
+    if (!child.pid) throw new Error('Background runner did not return a process ID.');
+    child.unref();
+    return { pid: child.pid };
+  }
+
+  private async scan(): Promise<void> {
+    if (!vscode.workspace.workspaceFolders?.length) return;
+    let sessions: Array<BackgroundSessionV1 & { stale: boolean }>;
+    try { sessions = this.list(); } catch { return; }
+    await activeProvider?.publishBackgroundSessions(sessions);
+    for (const session of sessions) {
+      const token = session.stale ? 'stale' : session.status;
+      if (session.notifiedStatus === token || token === 'running' || token === 'preparing') continue;
+      try { this.manager().store.markNotified(session.sessionId, token); } catch { continue; }
+      if (token === 'awaiting_review') {
+        const action = await vscode.window.showInformationMessage('Forge background work is green and ready for review.', 'Review');
+        if (action === 'Review') await this.openDiff(session.sessionId);
+      } else if (token === 'awaiting_input' || token === 'awaiting_approval') {
+        const action = await vscode.window.showWarningMessage(`Forge background session is ${token.replace('_', ' ')}.`, 'Open Forge');
+        if (action === 'Open Forge') await vscode.commands.executeCommand('forge-agent.openStudio');
+      } else if (token === 'failed' || token === 'gave_up' || token === 'stale') {
+        const action = await vscode.window.showErrorMessage(`Forge background session ${token.replace('_', ' ')}.`, 'Open Log');
+        if (action === 'Open Log') await this.openLog(session.sessionId);
+      } else if (token === 'completed_no_changes') {
+        void vscode.window.showInformationMessage('Forge background session completed with no workspace changes.');
+      }
+    }
+  }
+
+  private async publish(): Promise<void> {
+    await activeProvider?.publishBackgroundSessions(this.list());
+  }
+}
+
+function backgroundBaseEnvironment(): NodeJS.ProcessEnv {
+  const names = ['PATH', 'Path', 'SystemRoot', 'SYSTEMROOT', 'TEMP', 'TMP', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'ComSpec', 'PATHEXT', 'HOME', 'LANG'];
+  const result: NodeJS.ProcessEnv = {};
+  for (const name of names) if (process.env[name]) result[name] = process.env[name];
+  return result;
+}
+
 function getWorkspaceRoot(): string {
   const folders = vscode.workspace.workspaceFolders;
   if (!folders?.length) {
@@ -1716,6 +2542,54 @@ function resolveContainedWorkspacePath(relativePath: string): string {
   return fullPath;
 }
 
+async function openBranchCandidateDiff(candidateId?: string): Promise<string> {
+  const coordinator = new BranchCompareCoordinator(getWorkspaceRoot());
+  const report = coordinator.loadLatest();
+  const selectedId = String(candidateId || report.recommendedCandidateId || '');
+  if (!selectedId) throw new Error('No eligible branch candidate is available.');
+  const copies = coordinator.reviewCopies(selectedId);
+  let selected = copies[0];
+  if (copies.length > 1) {
+    const picked = await vscode.window.showQuickPick(copies.map(item => ({ label: item.path, item })), { placeHolder: 'Select a recommended candidate change to review' });
+    if (!picked) return '';
+    selected = picked.item;
+  }
+  await vscode.commands.executeCommand('vscode.diff', vscode.Uri.file(selected.sourcePath), vscode.Uri.file(selected.candidatePath), `Forge Candidate Review: ${selected.path}`);
+  return selectedId;
+}
+
+async function approveBranchCandidate(candidateId?: string): Promise<any> {
+  const coordinator = new BranchCompareCoordinator(getWorkspaceRoot());
+  const report = coordinator.loadLatest();
+  const selectedId = String(candidateId || report.recommendedCandidateId || '');
+  if (!selectedId) throw new Error('No eligible branch candidate is available.');
+  const candidate = report.candidates.find(item => item.candidateId === selectedId);
+  const choice = await vscode.window.showWarningMessage(
+    `Approve ${selectedId} (${candidate?.modelId || 'unknown model'}) for merge?`,
+    { modal: true, detail: 'Approval is bound to the current native diff, source baseline, candidate state, independent review, and comparison report. This step does not merge files.' },
+    'Approve'
+  );
+  if (choice !== 'Approve') return null;
+  return coordinator.approveCandidate(selectedId);
+}
+
+async function mergeBranchCandidate(candidateId?: string): Promise<any> {
+  const coordinator = new BranchCompareCoordinator(getWorkspaceRoot());
+  const report = coordinator.loadLatest();
+  const selectedId = String(candidateId || report.recommendedCandidateId || '');
+  if (!selectedId) throw new Error('No eligible branch candidate is available.');
+  const choice = await vscode.window.showWarningMessage(
+    `Merge reviewed ${selectedId} into the active workspace?`,
+    { modal: true, detail: 'Forge will recheck source/candidate/report identity, apply bounded files transactionally, run fresh source verification, and roll back on failure.' },
+    'Merge and Verify'
+  );
+  if (choice !== 'Merge and Verify') return null;
+  const result = await coordinator.mergeCandidate(selectedId);
+  if (result.merged) void vscode.window.showInformationMessage(`Forge merged ${result.changedFiles.length} branch-candidate change(s); fresh source verification passed.`);
+  else void vscode.window.showErrorMessage(`Forge rolled back the branch candidate because fresh source verification failed. ${result.oracle.summary}`);
+  return result;
+}
+
 async function openArtifact(artifact: string, runner: BlueprintProofRunner): Promise<string> {
   const artifactPaths: Record<string, string> = {
     plan: 'PLAN.md',
@@ -1760,9 +2634,22 @@ async function openArtifact(artifact: string, runner: BlueprintProofRunner): Pro
     budget: path.join('.forge', 'budget.json'),
     isolatedRun: path.join('.forge', 'isolated-runs', 'latest-isolated-run.json'),
     isolatedDiff: path.join('.forge', 'isolated-runs', 'latest-isolated-run.diff'),
+    branchCompare: path.join('.forge', 'branch-compare', 'latest.json'),
+    branchCompareSummary: path.join('.forge', 'branch-compare', 'latest-summary.md'),
+    branchCompareMerge: path.join('.forge', 'branch-compare', 'merge-evidence.json'),
+    modelIntelligence: path.join('.forge', 'model-intelligence', 'latest.json'),
+    modelIntelligenceSummary: path.join('.forge', 'model-intelligence', 'latest-summary.md'),
+    agentGatewayAudit: path.join('.forge', 'agent-gateway', 'audit.jsonl'),
     critiques: path.join('.forge', 'reviewer-critiques.json'),
     precommit: path.join('.forge', 'precommit-reviews.json'),
     proof: path.join('.forge', 'latest-proof-report.json'),
+    proofGraph: path.join('.forge', 'proof-graph.json'),
+    oracleCalibration: path.join('.forge', 'oracle-calibration.json'),
+    attestation: path.join('.forge', 'latest-attestation.json'),
+    attestationVerification: path.join('.forge', 'latest-attestation-verification.json'),
+    attestationPublicKey: path.join('.forge', 'attestation-public-key.json'),
+    customizations: path.join('.forge', 'customizations.json'),
+    customizationCandidates: path.join('.forge', 'customization-candidates.json'),
     weakEval: path.join('.forge', 'evals', 'latest-weak-model-eval.json'),
     reflectionAb: path.join('.forge', 'evals', 'latest-reflection-ab.json'),
     aar: path.join('.forge', 'aar.json'),
@@ -1878,6 +2765,31 @@ function writeRunControl(control: any): void {
   const filePath = runControlPath();
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, JSON.stringify(control, null, 2), 'utf8');
+}
+
+function readJsonFile<T>(filePath: string): T {
+  if (!isInsideWorkspace(filePath)) throw new Error('Forge proof artifact is outside the active workspace.');
+  if (!fs.existsSync(filePath)) throw new Error(`Forge proof artifact does not exist yet: ${path.relative(getWorkspaceRoot(), filePath)}`);
+  return JSON.parse(fs.readFileSync(filePath, 'utf8')) as T;
+}
+
+function tryReadJsonFile<T>(filePath: string): T | undefined {
+  try { return readJsonFile<T>(filePath); }
+  catch { return undefined; }
+}
+
+function writeJsonAtomic(filePath: string, value: unknown): void {
+  const relative = path.relative(getWorkspaceRoot(), filePath);
+  const target = resolveContainedWorkspacePath(relative);
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  const temp = `${target}.${process.pid}.${Date.now()}.tmp`;
+  fs.writeFileSync(temp, JSON.stringify(value, null, 2), 'utf8');
+  fs.renameSync(temp, target);
+}
+
+async function attestTerminalState(context: vscode.ExtensionContext, state: HarnessState): Promise<RunAttestationV1> {
+  const graph = readJsonFile<ProofGraphV1>(path.join(getWorkspaceRoot(), '.forge', 'proof-graph.json'));
+  return new AttestationService(context.secrets, getWorkspaceRoot(), String(context.extension.packageJSON.version || 'unknown')).attest(state, graph);
 }
 
 function isInsideWorkspace(filePath: string): boolean {

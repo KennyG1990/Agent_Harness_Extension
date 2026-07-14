@@ -26,6 +26,35 @@ async function runSuite(): Promise<void> {
   assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.setAssuranceLevel'), 'assurance selection command should be registered in the extension host.');
   assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.decideExecutionContract'), 'execution contract decision command should be registered in the extension host.');
   assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.openExecutionContract'), 'execution contract artifact command should be registered in the extension host.');
+  assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.attestLatestRun'), 'terminal attestation command should be registered in the extension host.');
+  assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.verifyLatestAttestation'), 'independent attestation verification command should be registered in the extension host.');
+  assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.openProofGraph'), 'proof graph artifact command should be registered in the extension host.');
+  assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.runOracleCalibration'), 'oracle calibration command should be registered in the extension host.');
+  assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.getOracleCalibrationStatus'), 'oracle calibration status command should be registered in the extension host.');
+  assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.openOracleCalibration'), 'oracle calibration artifact command should be registered in the extension host.');
+  assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.runBranchCompare'), 'branch comparison command should be registered in the extension host.');
+  assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.getBranchCompareReport'), 'branch comparison report command should be registered in the extension host.');
+  assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.openBranchCandidateDiff'), 'branch candidate native diff command should be registered in the extension host.');
+  assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.approveBranchCandidate'), 'branch candidate approval command should be registered in the extension host.');
+  assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.mergeBranchCandidate'), 'branch candidate merge command should be registered in the extension host.');
+  assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.rebuildModelIntelligence'), 'model intelligence rebuild command should be registered in the extension host.');
+  assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.getModelIntelligence'), 'model intelligence query command should be registered in the extension host.');
+  assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.openModelIntelligence'), 'model intelligence artifact command should be registered in the extension host.');
+  const modelIntelligence: any = await vscode.commands.executeCommand('forge-agent.rebuildModelIntelligence');
+  assert.equal(modelIntelligence.schemaVersion, 1);
+  assert.equal(modelIntelligence.measuredProfileCount, 0, 'extension-host smoke has no live comparable model samples and must not claim measured performance.');
+  assert.ok(await vscode.commands.executeCommand('forge-agent.openModelIntelligence'));
+  const calibrationStatus: any = await vscode.commands.executeCommand('forge-agent.getOracleCalibrationStatus');
+  assert.equal(typeof calibrationStatus.available, 'boolean');
+  assert.equal(typeof calibrationStatus.reason, 'string');
+  assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.startBackgroundSession'), 'background start command should be registered in the extension host.');
+  assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.listBackgroundSessions'), 'background list command should be registered in the extension host.');
+  assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.resumeBackgroundSession'), 'background resume command should be registered in the extension host.');
+  assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.cancelBackgroundSession'), 'background cancel command should be registered in the extension host.');
+  assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.openBackgroundDiff'), 'background native diff command should be registered in the extension host.');
+  assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.mergeBackgroundSession'), 'background merge command should be registered in the extension host.');
+  const backgroundSessions: any = await vscode.commands.executeCommand('forge-agent.listBackgroundSessions');
+  assert.ok(Array.isArray(backgroundSessions), 'background list command must return a machine-readable array.');
   assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.buildWorkspaceIndex'), 'workspace index build command should be registered in the extension host.');
   assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.getWorkspaceIndexStatus'), 'workspace index status command should be registered in the extension host.');
   assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.openWorkspaceIndex'), 'workspace index open command should be registered in the extension host.');
@@ -43,21 +72,13 @@ async function runSuite(): Promise<void> {
   assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.getComposerContext'), 'composer context query command should be registered in the extension host.');
   assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.searchContextMentions'), '@ mention search command should be registered in the extension host.');
   assert.ok((await vscode.commands.getCommands(true)).includes('forge-agent.attachContextMention'), '@ mention attach command should be registered in the extension host.');
+  for (const command of ['forge-agent.startAgentGateway', 'forge-agent.stopAgentGateway', 'forge-agent.getAgentGatewayStatus', 'forge-agent.rotateAgentGatewayToken', 'forge-agent.copyAgentGatewayMcpConfig', 'forge-agent.openAgentGatewayAudit']) {
+    assert.ok((await vscode.commands.getCommands(true)).includes(command), `${command} should be registered in the extension host.`);
+  }
   assert.equal(await vscode.commands.executeCommand('forge-agent.setHumanApprovalPolicy', 'auto'), 'auto');
   assert.equal(vscode.workspace.getConfiguration('forge').get('humanApprovalPolicy'), 'auto', 'approval policy must persist in native configuration.');
   assert.equal(await vscode.commands.executeCommand('forge-agent.setHumanApprovalPolicy', 'ask'), 'ask');
   await assert.rejects(async () => vscode.commands.executeCommand('forge-agent.resolveHumanApproval', 'approve', 'forged-webview-id'), /No pending human approval|No persisted Forge run/, 'webview intent cannot manufacture host approval authority.');
-  assert.equal(await vscode.commands.executeCommand('forge-agent.setAssuranceLevel', 'verified'), 'verified');
-  assert.equal(await vscode.commands.executeCommand('forge-agent.getAssuranceLevel'), 'verified');
-  const contractGateState: any = await vscode.commands.executeCommand('forge-agent.runAgentGoal', { goal: 'Confirm the contract before any provider call.', assuranceLevel: 'verified', humanApprovalPolicy: 'auto' });
-  assert.equal(contractGateState.status, 'awaiting_approval');
-  assert.equal(contractGateState.executionContract.status, 'pending');
-  assert.equal(contractGateState.runStats.providerCalls, 0, 'verified contract gate must stop before provider use.');
-  await assert.rejects(async () => vscode.commands.executeCommand('forge-agent.decideExecutionContract', 'confirm', 'forged-digest'), /digest does not match/, 'forged contract decisions must fail closed.');
-  const rejectedContract: any = await vscode.commands.executeCommand('forge-agent.decideExecutionContract', 'reject', contractGateState.executionContract.digest);
-  assert.equal(rejectedContract.status, 'gave_up');
-  assert.equal(rejectedContract.runStats.providerCalls, 0);
-  assert.equal(await vscode.commands.executeCommand('forge-agent.setAssuranceLevel', 'standard'), 'standard');
   await assert.rejects(async () => vscode.commands.executeCommand('forge-agent.runDifficultWeakModelProof', { model: 'anthropic/claude-opus-latest', reportRoot: process.cwd(), confirmLiveSpend: true }), /not approved/, 'frontier substitutions must reject before readiness or provider calls.');
   await assert.rejects(async () => vscode.commands.executeCommand('forge-agent.runDifficultWeakModelProof', { model: 'qwen/qwen-2.5-7b-instruct', reportRoot: process.cwd(), confirmLiveSpend: false }), /confirmation/, 'live proof must reject missing spend consent before readiness or provider calls.');
   await assert.rejects(async () => vscode.commands.executeCommand('forge-agent.runProductionBenchmark', { model: 'anthropic/claude-opus-latest', confirmLiveSpend: true }), /not approved/, 'production benchmark must reject frontier substitution before readiness or provider calls.');
@@ -69,6 +90,47 @@ async function runSuite(): Promise<void> {
   assert.ok(initialDiagnostics, 'diagnostics command should return an object.');
   const workspace = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   assert.ok(workspace, 'fixture workspace should be open.');
+  const forgeConfig = vscode.workspace.getConfiguration('forge');
+  await forgeConfig.update('assuranceLevel', 'standard', vscode.ConfigurationTarget.Workspace);
+  await forgeConfig.update('agentGatewayPort', 0, vscode.ConfigurationTarget.Workspace);
+  await forgeConfig.update('agentGatewayEnabled', true, vscode.ConfigurationTarget.Workspace);
+  const gatewayStatus: any = await vscode.commands.executeCommand('forge-agent.startAgentGateway');
+  assert.equal(gatewayStatus.running, true, 'extension-host gateway should bind an ephemeral loopback port.');
+  assert.match(gatewayStatus.url, /^http:\/\/127\.0\.0\.1:\d+$/);
+  const copiedGateway: any = await vscode.commands.executeCommand('forge-agent.copyAgentGatewayMcpConfig');
+  assert.equal(copiedGateway.copied, true);
+  assert.equal(Object.prototype.hasOwnProperty.call(copiedGateway, 'token'), false, 'gateway command results must not return bearer credentials.');
+  const mcpConfig = JSON.parse(await vscode.env.clipboard.readText());
+  const gatewayToken = mcpConfig.mcpServers['forge-agent'].env.FORGE_AGENT_GATEWAY_TOKEN;
+  assert.ok(typeof gatewayToken === 'string' && gatewayToken.length >= 32, 'explicit MCP config export should contain the SecretStorage-backed credential.');
+  const gatewayGoal = await gatewayJson(gatewayStatus.url, gatewayToken, '/v1/goals', 'POST', { requestId: 'e2e-gateway-goal', goal: 'Inspect the disposable extension-host fixture without making changes.' });
+  assert.equal(gatewayGoal.status, 200);
+  assert.equal(gatewayGoal.body.proposalAccounting.provider, 0);
+  assert.equal(gatewayGoal.body.proposalAccounting.fallback, 0);
+  const gatewayProposal = await gatewayJson(gatewayStatus.url, gatewayToken, `/v1/sessions/${gatewayGoal.body.sessionId}/proposals`, 'POST', {
+    requestId: 'e2e-gateway-read',
+    contractDigest: gatewayGoal.body.contractDigest,
+    envelope: { explanation: 'Inspect the fixture package manifest.', confidence: 95, materialUncertainty: false, uncertainties: [], proposal: { name: 'read_file', arguments: { path: 'package.json' } } }
+  });
+  assert.equal(gatewayProposal.status, 200);
+  assert.equal(gatewayProposal.body.proposalAccounting.gateway, 1);
+  assert.equal(gatewayProposal.body.proposalAccounting.provider, 0, 'externally submitted proposals must not be mislabeled as Forge provider proposals.');
+  assert.equal(gatewayProposal.body.proposalAccounting.fallback, 0);
+  assert.equal(gatewayProposal.body.proposalAccounting.actuallyModelDriven, false);
+  assert.equal((await gatewayJson(gatewayStatus.url, gatewayToken, `/v1/sessions/${gatewayGoal.body.sessionId}/approve`, 'POST', { requestId: 'e2e-forbidden-approve' })).status, 404, 'gateway must not expose host approval authority.');
+  const gatewayCancelled = await gatewayJson(gatewayStatus.url, gatewayToken, `/v1/sessions/${gatewayGoal.body.sessionId}/cancel`, 'POST', { requestId: 'e2e-gateway-cancel' });
+  assert.equal(gatewayCancelled.status, 200);
+  assert.equal(gatewayCancelled.body.status, 'gave_up');
+  assert.ok(await vscode.commands.executeCommand('forge-agent.openAgentGatewayAudit'));
+  assert.ok(fs.existsSync(path.join(workspace, '.forge', 'agent-gateway', 'active-session.json')), 'gateway ownership marker should persist without credentials.');
+  assert.ok(fs.existsSync(path.join(workspace, '.forge', 'agent-gateway', 'audit.jsonl')), 'gateway audit should persist under .forge.');
+  const gatewayArtifactText = fs.readFileSync(path.join(workspace, '.forge', 'agent-gateway', 'active-session.json'), 'utf8') + fs.readFileSync(path.join(workspace, '.forge', 'agent-gateway', 'audit.jsonl'), 'utf8');
+  assert.equal(gatewayArtifactText.includes(gatewayToken), false, 'gateway workspace artifacts must not serialize the bearer token.');
+  const stoppedGateway: any = await vscode.commands.executeCommand('forge-agent.stopAgentGateway');
+  assert.equal(stoppedGateway.running, false);
+  await forgeConfig.update('agentGatewayEnabled', undefined, vscode.ConfigurationTarget.Workspace);
+  await forgeConfig.update('agentGatewayPort', undefined, vscode.ConfigurationTarget.Workspace);
+  await forgeConfig.update('assuranceLevel', undefined, vscode.ConfigurationTarget.Workspace);
   const contextProbe = path.join(workspace, 'composer-context-e2e.ts');
   fs.writeFileSync(contextProbe, 'export const composerContextProbe = "host-owned";\n', 'utf8');
   const attachedContext: any[] = await vscode.commands.executeCommand('forge-agent.attachContextFile', contextProbe);
@@ -80,6 +142,27 @@ async function runSuite(): Promise<void> {
   assert.ok(contextSession, 'attaching context before chat must create a durable conversation session.');
   const loadedContextSession: any = await vscode.commands.executeCommand('forge-agent.openSession', contextSession.sessionId);
   assert.equal(loadedContextSession.context.length, 1, 'opening a session must restore its attached context.');
+  assert.equal(await vscode.commands.executeCommand('forge-agent.setAssuranceLevel', 'verified'), 'verified');
+  assert.equal(await vscode.commands.executeCommand('forge-agent.getAssuranceLevel'), 'verified');
+  const contractGateState: any = await vscode.commands.executeCommand('forge-agent.runAgentGoal', { goal: 'Confirm the contract before any provider call.', assuranceLevel: 'verified', humanApprovalPolicy: 'auto' });
+  assert.equal(contractGateState.status, 'awaiting_approval');
+  assert.equal(contractGateState.executionContract.status, 'pending');
+  assert.equal(contractGateState.runStats.providerCalls, 0, 'verified contract gate must stop before provider use.');
+  await vscode.commands.executeCommand('forge-agent.openSession', contractGateState.sessionId);
+  await assert.rejects(async () => vscode.commands.executeCommand('forge-agent.decideExecutionContract', 'confirm', 'forged-digest'), /digest does not match/, 'forged contract decisions must fail closed.');
+  const rejectedContract: any = await vscode.commands.executeCommand('forge-agent.decideExecutionContract', 'reject', contractGateState.executionContract.digest);
+  assert.equal(rejectedContract.status, 'gave_up');
+  assert.equal(rejectedContract.runStats.providerCalls, 0);
+  const rejectedAttestation: any = await vscode.commands.executeCommand('forge-agent.attestLatestRun');
+  assert.equal(rejectedAttestation.statement.terminalStatus, 'gave_up');
+  assert.equal(rejectedAttestation.statement.claimsSuccess, false, 'non-success terminal runs must never produce success claims.');
+  const rejectedVerification: any = await vscode.commands.executeCommand('forge-agent.verifyLatestAttestation');
+  assert.equal(rejectedVerification.valid, true, 'extension-host verifier must accept an untampered terminal attestation.');
+  assert.equal(fs.existsSync(path.join(workspace, '.forge', 'proof-graph.json')), true);
+  assert.equal(fs.existsSync(path.join(workspace, '.forge', 'latest-attestation.json')), true);
+  assert.equal(fs.existsSync(path.join(workspace, '.forge', 'latest-attestation-verification.json')), true);
+  assert.equal(await vscode.commands.executeCommand('forge-agent.setAssuranceLevel', 'standard'), 'standard');
+  await vscode.commands.executeCommand('forge-agent.openSession', contextSession.sessionId);
   await vscode.commands.executeCommand('forge-agent.clearComposerContext');
   assert.equal((await vscode.commands.executeCommand('forge-agent.getComposerContext') as any[]).length, 0);
   fs.rmSync(contextProbe, { force: true });
@@ -1693,4 +1776,32 @@ function createTempWorkspace(prefix: string): string {
     scripts: { test: 'node -e "process.exit(0)"' }
   }, null, 2));
   return root;
+}
+
+function gatewayJson(baseUrl: string, token: string, route: string, method: string, body?: unknown): Promise<{ status: number; body: any }> {
+  const target = new URL(route, baseUrl);
+  return new Promise((resolve, reject) => {
+    const request = http.request({
+      hostname: target.hostname,
+      port: Number(target.port),
+      path: `${target.pathname}${target.search}`,
+      method,
+      headers: {
+        Host: `${target.hostname}:${target.port}`,
+        Authorization: `Bearer ${token}`,
+        ...(body === undefined ? {} : { 'Content-Type': 'application/json' })
+      }
+    }, response => {
+      let text = '';
+      response.setEncoding('utf8');
+      response.on('data', chunk => { text += chunk; });
+      response.on('end', () => {
+        try { resolve({ status: response.statusCode || 0, body: JSON.parse(text) }); }
+        catch (error) { reject(error); }
+      });
+    });
+    request.on('error', reject);
+    if (body !== undefined) request.write(JSON.stringify(body));
+    request.end();
+  });
 }

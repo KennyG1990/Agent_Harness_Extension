@@ -1,6 +1,6 @@
-# FORGE AGENT — HANDOFF BRIEF (2026-07-08/09, Fable 5 session → Opus 4.8)
+# FORGE AGENT - HANDOFF BRIEF (current through Phase 100, 2026-07-13)
 
-Read this file, then `RESEARCH_IMPLEMENTATION_GAP_ANALYSIS.md` (source of truth for gaps/specs) and `BUILD_LOG.md` (evidence chain through Phase 68 plus hotfixes). CLAUDE.md's reference to the `...IDE__.md` research doc is stale — that content lives inside `OpenRouter First Blueprint...FULL RESEARCH.md`.
+Read `ROADMAP.md` first, then `RESEARCH_IMPLEMENTATION_GAP_ANALYSIS.md`, this handoff and `BUILD_LOG.md`. The active product is an IDE extension, not a standalone IDE or Code-OSS fork. Treat package, installed, visual and live-model proof as separate claim levels.
 
 ## 1. THE THESIS — NOW PROVEN LIVE
 A deterministic harness (PROPOSE → VALIDATE → COMMIT → NARRATE; oracle-gated success; evidence ledgers; honest halts) makes weak/cheap models reliably succeed at coding tasks. The model is never trusted: firewall validates every mutation, tests decide truth, all assistance is counted, false success is structurally impossible.
@@ -85,11 +85,19 @@ Exact match → whitespace-lenient SEARCH matching (unique-window-or-reject; too
 - 90: context and model optimization is release-closed. Forge now supports bounded symbol-neighbor and image context, exact-model prompt profiles, opt-in least-expensive-capable Explorer/Editor routing from explicit pools, and a same-rigor plan-big/execute-small product A/B with per-role accounting. All no-spend, host, visual, package, install, and actual Antigravity run/open gates pass. Installed version: 0.90.0. The A/B is scripted proof; live economics remain unclaimed.
 - 91: the production benchmark and release policy are implemented and installed in 0.91.0. A fixed 16-task live-only suite now enforces suite/judge digests, complete equal inputs, immutable final evidence, model-driven/false-success/cost/latency floors, independent installed-product evidence, and explicit spend consent. A Fable 5/Mythos 5 host prompt profile is also integrated without weakening Forge authority. All no-spend, visual, host, package, install, and actual Antigravity preflight gates pass. The paid benchmark itself has not run, so no live release pass is claimed.
 - 92: installed Kilo 7.4.5 was audited category by category. Forge now has a real host-owned structured prompt enhancer using a dedicated inexpensive exact model, user-review-before-send semantics, usage provenance, and strict malformed-output preservation. Governed MCP has native add/replace/remove onboarding and bounded timeout configuration without automatic tool trust. Focused, broad, worker, visual, extension-host, package/install and actual Antigravity gates pass in 0.92.0; no paid enhancement or benchmark call was made. Final VSIX SHA-256: `B59C5999D4D505EFA1BFB46EA9C2F8AA94699165C07919E96E6A0A8845D11E02` (3,140,076 bytes). Antigravity printed successful installation before a native CLI shutdown crash; use the running IDE verification, not the CLI exit alone, as installed proof.
+- 93: execution authority is now compiled into versioned SHA-256-bound contracts with Standard, Verified and Audited assurance. Verified stops before provider work until exact confirmation and cannot succeed with fallback-only work, red/missing composite truth or missing independent review. Audited honestly fails closed until Phases 96-97 provide attestations and calibration. Focused, static, host, worker 100/100, visual, package/install and actual reloaded Antigravity menu gates pass in 0.93.0 with no provider spend.
+- 94: confirmed runs can continue in retained isolated background workspaces with leases, heartbeat/PID recovery, native review/notifications and host-only transactional merge plus fresh oracle rollback. Installed version: 0.94.0.
+- 95: bounded `.agents`/`.github`/`.claude` skills, agents, rules and hooks integrate through existing authority ceilings, canonical contract binding and disabled-by-default isolated hook execution. Installed version: 0.95.0.
+- 96: canonical privacy-safe proof DAGs and SecretStorage-backed Ed25519 terminal attestations are implemented. The signer rebuilds the graph from authoritative terminal state; public verification rejects graph/payload/contract/terminal/completeness/key/signature tamper. Focused, regression, worker 100/100, host, visual, package/install and actual Antigravity gates pass in 0.96.0 without provider spend.
+- 97: bounded Node test-oracle calibration is release-closed in 0.97.0. Strong sensitivity is 8/8; weak is 0/8. Missing/red/weak/stale/tampered/unsupported reports fail closed; model file tools cannot overwrite `.forge`; full no-spend host/package/install and actual Antigravity interaction gates pass.
+- 98: branch-and-compare execution is release-closed in 0.98.0. Two or three exact-route candidates run concurrently from one frozen source/authority contract; red, fallback-only, unreviewed, stale and tampered results cannot be selected. Host-only native review/approval/merge with fresh-oracle rollback, full no-spend gates, dual install and actual Antigravity interaction pass.
+- 99: empirical model intelligence is release-closed in 0.99.0. Accepted immutable benchmark/comparison evidence is validated, deduplicated, cohort/provenance partitioned and compiled into confidence-aware exact-model profiles. The product now separates measured, provisional, heuristic and catalog-only guidance; no provider call ran.
+- 100: the Governed Agent Gateway is release-closed in 1.0.0. A disabled-by-default authenticated loopback API and four-tool stdio MCP facade let external agents submit goals/proposals, inspect sanitized status and cancel without receiving approval, evidence, oracle, merge, signing or success authority. Actual Antigravity completed a fresh Desktop mutation fixture through visible approvals, staged-red retention, green tests, diff review and same-run evidence with 6 gateway proposals, 0 provider calls and 0 fallbacks. The gateway was stopped and disabled after proof.
 
 ## 6. IMMEDIATE PATH FORWARD (in order)
-0. **CURRENT PRODUCT PRIORITY:** Run the installed 16-task production benchmark only after explicit action-time provider-credit authorization. Use the fixed approved `qwen/qwen-2.5-7b-instruct` slug; do not substitute a stronger model, change task count, or weaken floors. Preserve the immutable archive and separately attest the exact installed VSIX before claiming `releaseReady`.
+0. **CURRENT BUILD PRIORITY:** Phase 100 is complete. The next requested action is the paid hard Qwen 9B Desktop demonstration, but it remains blocked until explicit action-time provider-credit authorization. Calibration and signing are independent from proven socket isolation; Audited still fails closed on this host without that backend.
 1. **HOST GATES:** Phase 58 compile/smoke, archive-overwrite negative proof, partial-to-final same-archive proof, mocked Tier-3 architect 5/5, mocked Tier-4 architect 0/4, visual smoke, package, and extension-host E2E pass. The fresh 0.58.0 E2E exited 0 without the prior unresponsive-host messages, though it remains slow at about 101 seconds.
-2. **Installed build/product proof:** VS Code and Antigravity list `kennyg.forge-agent@0.91.0`. Final `forge-agent-0.91.0.vsix` is 3,131,408 bytes with SHA-256 `B98A7AF98D7839C2EA5B0AAECD6F423B0F2BECC9907EFE9AE46C13D35D010FEE`. Installed Antigravity after reload visibly exposes the collapsed Production Benchmark control and both native commands. Open Report reached Forge and correctly reported that `.forge/evals/latest-production-benchmark.json` does not exist before a paid run. Hot-installed webviews may require reload.
+2. **Installed build/product proof:** VS Code and Antigravity list `kennyg.forge-agent@1.0.0`. The final VSIX identity is recorded in `BUILD_LOG.md`. Actual Antigravity proved the installed gateway against `C:\Users\Moshi\Desktop\Forge-Gateway-Live-Proof-2`; hot-installed webviews may require reload.
 3. Run a fresh installed `/goal` with `plan=deepseek/deepseek-v4-pro` and `code=qwen/qwen-2.5-7b-instruct`; capture state, `.forge/architect-handoff.json`, model/cost counters, diff review, tests, and a valid Forge terminal screenshot. Current shell has no `OPENROUTER_API_KEY`.
 4. Revise terrain dispatch so architect is a routable lane for tier-3/4 shapes, but only after repeats set floors.
 5. **Phase 53 next slices:** exact-model budget selection is installed in Phase 90. Remaining research slices are live model-written compaction A/B, keyword-vs-semantic retrieval A/B, and further isolated-worker memory measurement.
@@ -109,3 +117,69 @@ PLAN → RECONCILE (search existing work first) → DOCUMENT plan in gap doc BEF
 `src/harness/`: loop.ts (main product loop), workflowGovernance.ts (universal task lifecycle), firewall.ts, tools.ts, transactionalEdits.ts, transactionalCommands.ts, proceduralSkills.ts, goalContract.ts, isolation.ts, research.ts, weakEval*.ts, reflectionAb.ts, types.ts. Artifacts in `.forge/` include workflow governance/task record, state, evidence, transaction ledgers, lessons, skill registry, AAR, control, evals/, isolated-runs/, and research/. Suggested commit titles are in BUILD_LOG.
 
 Keep every number honest; the failures are the product. Current measured frontier: coordinated multi-edit reasoning/execution, not single-file editing or context-starved haystacks.
+
+## 10. PHASE 94 DURABLE BACKGROUND SESSIONS - PASS
+
+- `backgroundSessions.ts`, `backgroundRunner.ts`, `backgroundSessionManager.ts` and shared isolation primitives provide atomic manifests, source/root identities, one-writer leases, heartbeat/PID recovery, cancellation, native reattachment/notifications/review and transactional merge/rollback. Detached browser, computer and external interactive tools are denied.
+- `npm run test:background` uses an actual detached worker plus scripted provider and proves launcher-exit continuation, source preservation, green reviewed merge, red-oracle byte rollback, stale-review rejection, stale recovery/resume, forged-contract and missing-root rejection, and ask/approval pause/resume with zero provider spend.
+- Compile, static, extension-host, visual and worker 100/100 gates pass. The causal suite found and fixed a real resume defect: disk reattachment can no longer widen the confirmed max-step contract.
+- VS Code and Antigravity list `kennyg.forge-agent@0.94.0`. Actual Antigravity visibly exposes one composer, Qwen 9B, assurance/background controls, a compact session popover and the native background-session command. Evidence: `artifacts/installed-antigravity-background-sessions-094.jpg`.
+- No paid provider call ran. This is durable local detached execution, not remote execution or a kernel sandbox. The IDE host remains the only merge authority. The final hard Qwen 9B desktop demonstration remains pending all roadmap phases plus explicit action-time spend authorization.
+- Next: Phase 95 Governed Workspace Customizations.
+- Suggested commit title: `Phase 95: add governed workspace customization compatibility`.
+
+## 11. PHASE 95 GOVERNED WORKSPACE CUSTOMIZATIONS - PASS
+
+- Bounded `.agents`, `.github` and `.claude` discovery now imports compatible skills, agents, rules and command hooks into a canonical `.forge/customizations.json` snapshot with provenance and diagnostics.
+- Skills disclose progressively; path rules remain untrusted context; agents enter the existing role picker only after requested tools intersect Forge ceilings. Incompatible coding agents are reported and excluded.
+- Hooks are disabled by default. Opted-in hooks run in disposable copies and can only deny, ask, narrow or emit untrusted candidates. They cannot approve, add authority, write trusted evidence, merge or declare success. Active-source mutation is restored and denied.
+- The effective customization digest binds execution contracts and retained background authority. Drift stops before provider or mutation work and requires a new confirmation.
+- Focused, execution-contract, detached-background, static, extension-host, 100-worker, visual and package/install gates pass. Actual Antigravity shows one bottom composer plus a collapsed `WORKSPACE CUSTOMIZATIONS` Settings section. No paid provider call ran.
+- Compatibility is selective: no arbitrary user-home scan, remote/prompt hooks, automatic skill scripts, imported MCP authority or vendor-behavior parity claim.
+
+## 12. PHASE 96 PROOF GRAPH AND SIGNED ATTESTATIONS - PASS
+
+- `proofGraph.ts` derives an acyclic privacy-safe requirement-to-terminal graph at every state persistence boundary and archives it per session. It reports completeness but cannot create evidence or terminal truth.
+- `attestation.ts` signs only terminal state using an Ed25519 private key held in extension SecretStorage. It rebuilds the graph from authoritative state before signing; public verification checks every bound identity and old attestations survive explicit key rotation.
+- The focused suite proves an 18-node/40-edge causal chain, privacy canaries, six tamper cases, a self-consistent forged-graph rejection, private-key nonexposure, rotation and false-success denial.
+- Compile, static, affected regressions, worker 100/100, extension-host, visual, package/install and actual Antigravity proof-surface interaction pass in 0.96.0. No provider call ran.
+- Local signing is not CA identity, trusted time, oracle calibration or proven socket isolation. Audited remains unavailable until those independent gates are real.
+- Next: Phase 97 Oracle Calibration.
+
+## 13. PHASE 97 ORACLE CALIBRATION - PASS
+
+- `oracleCalibration.ts` runs bounded syntax-preserving Node source mutants only in disposable copies, binds exact adapter/test/config identity, requires green baselines and persists canonical latest/immutable reports.
+- Audited requires at least five mutants and at least 80% sensitivity. Strong fixture: 8/8; weak fixture: 0/8. Red, unsupported, stale, tampered and truncated paths fail closed.
+- `.forge` is host-owned for model file mutations. Current calibration refreshes before every success gate, and an Audited host-signing failure demotes success to failure.
+- Full no-spend causal/regression/100-worker/extension-host/visual/package/install gates pass. Actual Antigravity was reloaded, expanded, and the installed Calibrate action was clicked; native report access enabled and unsupported status remained honest.
+- Evidence screenshot: `artifacts/installed-antigravity-oracle-calibration-097-final.png`.
+- Final document-closed artifact: `forge-agent-0.97.0.vsix`, 72 files, 4,737,880 bytes, SHA-256 `631A7856C3563A6DE1E6F80F95314BA46CBBD013A2597F8B6F4D700505043ABB`.
+- Next: explicitly authorized paid hard Qwen 9B Desktop demonstration; do not spend provider credits without action-time approval.
+
+## 14. PHASE 98 BRANCH-AND-COMPARE EXECUTION - PASS
+
+- `branchCompare.ts` runs two or three exact-route candidates concurrently in separate frozen-baseline worktrees/copies using the normal governed harness. Candidate model identity is the treatment variable; shared authority, source and reviewer policy remain digest-bound.
+- Eligibility requires terminal success, green composite oracle and same-run evidence, approved deterministic diff review, approved distinct model review, and model-driven proposals. Red and fallback-only results cannot enter ranking or merge.
+- Host commands own native diff review, approval and bounded merge. Current report/candidate/source/model identities are rechecked and a red fresh source oracle restores every changed byte.
+- Focused causal, static, desktop/sidebar, 100-worker, extension-host, package/install and actual Antigravity gates pass in 0.98.0. Installed proof shows Qwen 9B candidates, a distinct reviewer, unchecked spend authorization and disabled Compare. No provider call ran.
+- Evidence: `artifacts/visual-smoke-branch-compare-sidebar.png` and `artifacts/installed-antigravity-branch-compare-098.png`.
+- Final document-closed artifact: `forge-agent-0.98.0.vsix`, 73 files, 4,753,913 bytes, SHA-256 `ACD75846C887F1F69AF914322304B53F5A6E2DFA3A520D5EA53F598CA6BC3568`.
+- Honest boundary: real candidate quality/economics remain unmeasured until an explicitly authorized live run. Next: Phase 99 Empirical Model Intelligence.
+
+## 15. PHASE 99 EMPIRICAL MODEL INTELLIGENCE - PASS
+
+- `modelIntelligence.ts` accepts digest-bound production-benchmark and branch-comparison evidence, rejects unsupported legacy reports, deduplicates archives/latest aliases and partitions exact-model profiles by comparable cohort and live/scripted provenance.
+- Reports expose sample/live/verified counts, Wilson 95% confidence, model-driven solve and false-success rates, nullable schema reliability, provider failures, cost per verified task and fallback dependence. Measured status requires at least three live verified samples; scripted evidence remains provisional.
+- Report loading recomputes samples/profiles/rankings and revalidates source artifact digests. Duplicate, identity-collision, unlike-cohort, mixed-provenance, tampered-source, tampered-report, meta-route and live-impersonation negatives pass.
+- The installed picker now offers `Measured solve confidence`, explicitly labels catalog-derived guidance as heuristic, and keeps profile rebuild/open controls in one collapsed Proof disclosure. Actual Antigravity shows 342 live models and truthfully reports `0 measured / 0 provisional` before accepted evidence exists.
+- Focused, Phase 98 regression, compile/static, desktop/sidebar, 100-worker, extension-host, package/install and actual Antigravity gates pass without provider spend. Evidence: `artifacts/visual-smoke-model-intelligence-sidebar.png`, `artifacts/installed-antigravity-model-intelligence-099.jpg`, and `artifacts/installed-antigravity-model-routing-099.jpg`.
+- Final document-closed artifact: `forge-agent-0.99.0.vsix`, 74 files, 4,767,130 bytes, SHA-256 `42D25CC9E1CAE0B37AD196912F1B40E260A8C9A3C7E1B620D4D75F3F9D65A7C1`.
+- Honest boundary: mechanics and display semantics are proven; no live model-quality/economic ranking exists yet. Next: Phase 100 Governed Agent Gateway.
+
+## 16. PHASE 100 GOVERNED AGENT GATEWAY - PASS
+
+- `agentGateway.ts` exposes five authenticated loopback routes; `agentGatewayMcp.ts` exposes exactly four forwarding tools. `runSubmittedProposal` feeds external envelopes into the normal harness without inflating provider, fallback, or model-driven accounting.
+- External authority is limited to goal/proposal/status/cancel. Approval, trusted evidence, oracle selection, merge, attestation and terminal success remain host-owned and have no inbound route/tool.
+- Actual Antigravity proof changed a fresh Desktop fixture from 42 to 43 through two visible approvals. The first red staged edit did not alter active files; the bounded repair passed tests and merged. Final state: success, 6 gateway proposals, 2 green evidence entries, 0 provider calls, 0 fallbacks, forbidden approve route 404.
+- Review exposed approval-time UI model-binding widening and two unintended reviewer calls in the first attempt. That run was cancelled before merge. Approval now uses confirmed contract bindings only; focused regression injects hostile bindings and asserts zero calls.
+- Final gateway proof ended with the loopback server stopped, native setting off, and clipboard cleared. Paid Qwen 9B execution is still pending explicit action-time authorization.

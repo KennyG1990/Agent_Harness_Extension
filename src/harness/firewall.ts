@@ -167,6 +167,11 @@ export class Firewall {
       return { valid: true };
     }
 
+    const normalizedPath = maybePath.replace(/\\/g, '/').replace(/^\.\//, '').toLowerCase();
+    if ((proposal.name === 'write_file' || proposal.name === 'apply_patch') && (normalizedPath === '.forge' || normalizedPath.startsWith('.forge/'))) {
+      return { valid: false, reason: 'Access denied: .forge is a host-owned proof and control namespace.' };
+    }
+
     try {
       this.tools.resolveWorkspacePath(maybePath);
       return { valid: true };

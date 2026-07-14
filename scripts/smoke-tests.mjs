@@ -25,6 +25,11 @@ const modeRegistry = read('src/harness/modeRegistry.ts');
 const supportBundle = read('src/harness/supportBundle.ts');
 const sessionStore = read('src/harness/sessionStore.ts');
 const difficultProof = read('src/harness/difficultLiveProof.ts');
+const backgroundSessions = read('src/harness/backgroundSessions.ts');
+const backgroundManager = read('src/harness/backgroundSessionManager.ts');
+const backgroundRunner = read('src/harness/backgroundRunner.ts');
+const agentGateway = read('src/harness/agentGateway.ts');
+const agentGatewayMcp = read('src/harness/agentGatewayMcp.ts');
 assert.match(modeRegistry, /Built-in modes cannot be overwritten/, 'trusted registry must make built-ins immutable');
 assert.match(modeRegistry, /Custom mode limit reached \(20\)/, 'trusted registry must bound custom mode count');
 assert.match(modeRegistry, /REQUIRED_CODE_MODE_TOOLS/, 'agentic modes must retain workflow/proof tools');
@@ -36,6 +41,30 @@ assert.match(sessionStore, /isSymbolicLink/, 'session store must reject symlink 
 assert.match(sessionStore, /MAX_CHAT_BYTES/, 'session chat persistence must be bounded');
 assert.match(read('src/extension.ts'), /forge-agent\.resumeSession/, 'extension must expose explicit session resume');
 assert.match(read('src/webview/src/App.tsx'), /sessions-menu/, 'compact recent-session UX must be present');
+assert.match(backgroundSessions, /workspace\.lease/, 'background sessions must use one atomic workspace writer lease');
+assert.match(backgroundSessions, /heartbeatAt/, 'background sessions must persist bounded heartbeat state');
+assert.match(backgroundManager, /assuranceSuccessGate/, 'background merge must preserve the execution-contract success gate');
+assert.match(backgroundManager, /reviewOpenedDigest/, 'background approval must bind to the exact native diff opened for review');
+assert.match(backgroundManager, /restoreBackups/, 'red post-merge verification must restore source bytes');
+assert.match(backgroundRunner, /runtimeDeniedTools|browser_action/, 'detached background runtime must deny interactive host actions');
+assert.doesNotMatch(backgroundSessions + backgroundManager, /OPENROUTER_API_KEY|apiKey/, 'background manifests and managers must not serialize provider credentials');
+assert.match(agentGateway, /127\.0\.0\.1/, 'agent gateway must bind to literal IPv4 loopback');
+assert.match(agentGateway, /authorization/i, 'agent gateway must authenticate every request');
+assert.match(agentGateway, /timingSafeEqual/, 'agent gateway token comparison must be timing safe');
+assert.match(agentGateway, /Browser-origin requests are not accepted/, 'agent gateway must reject browser-origin requests');
+assert.match(agentGateway, /literal 127\.0\.0\.1 Host header/, 'agent gateway must reject DNS rebinding host headers');
+assert.match(agentGateway, /pending/, 'agent gateway must persist replay intent before dispatch');
+assert.doesNotMatch(agentGateway, /\/v1\/sessions\/[^'"`]*approve/, 'agent gateway must not expose an approval endpoint');
+assert.match(agentGatewayMcp, /forge_submit_goal/, 'stdio facade must expose goal submission');
+assert.match(agentGatewayMcp, /forge_submit_proposal/, 'stdio facade must expose proposal submission');
+assert.match(agentGatewayMcp, /forge_get_status/, 'stdio facade must expose status inspection');
+assert.match(agentGatewayMcp, /forge_cancel/, 'stdio facade must expose cancellation');
+assert.doesNotMatch(agentGatewayMcp, /forge_(approve|evidence|oracle|merge|success)/, 'stdio facade must not expose host authority tools');
+assert.match(read('src/extension.ts'), /active-session\.json/, 'gateway ownership must survive an extension-host reload');
+assert.equal(JSON.parse(read('package.json')).contributes.configuration.properties['forge.agentGatewayEnabled'].default, false, 'agent gateway must be disabled by default');
+assert.match(read('package.json'), /agentGatewayMcp\.js/, 'packaged build must include the stdio MCP facade');
+assert.match(read('src/extension.ts'), /ELECTRON_RUN_AS_NODE/, 'extension must launch the packaged runner independently of the extension host');
+assert.match(read('src/webview/src/App.tsx'), /testId="start-background-session"/, 'compact composer must expose one background action');
 assert.match(difficultProof, /APPROVED_WEAK_LIVE_MODELS/, 'difficult live proof must use an explicit weak-model allowlist');
 assert.match(difficultProof, /fallbackSolved: 0/, 'difficult live proof must make no-fallback accounting explicit');
 assert.match(difficultProof, /assertNoLeak/, 'difficult live proof must enforce the Tier-4 leak law');
@@ -415,6 +444,16 @@ assert.match(extension, /forge-agent\.runAgentGoal/, 'extension must expose auto
 assert.match(extension, /forge-agent\.decideExecutionContract/, 'extension must expose digest-bound execution contract decisions');
 assert.match(extension, /forge-agent\.setAssuranceLevel/, 'extension must expose assurance selection');
 assert.match(extension, /forge-agent\.runIsolatedAgentGoal/, 'extension must expose isolated goal run command');
+assert.match(extension, /forge-agent\.runBranchCompare/, 'extension must expose spend-gated branch comparison');
+assert.match(extension, /forge-agent\.getBranchCompareReport/, 'extension must expose machine-readable branch comparison state');
+assert.match(extension, /forge-agent\.openBranchCandidateDiff/, 'extension must expose native candidate diff review');
+assert.match(extension, /forge-agent\.approveBranchCandidate/, 'extension host must own branch candidate approval');
+assert.match(extension, /forge-agent\.mergeBranchCandidate/, 'extension host must own branch candidate merge');
+assert.match(extension, /Explicit action-time spend confirmation is required/, 'branch comparison must fail closed without live-spend confirmation');
+assert.match(extension, /branchCompare: path\.join\('\.forge', 'branch-compare', 'latest\.json'\)/, 'extension must expose branch comparison report in the native editor');
+assert.match(extension, /forge-agent\.rebuildModelIntelligence/, 'extension must expose host-owned empirical profile rebuild');
+assert.match(extension, /forge-agent\.getModelIntelligence/, 'extension must expose machine-readable empirical profiles');
+assert.match(extension, /modelIntelligence: path\.join\('\.forge', 'model-intelligence', 'latest\.json'\)/, 'extension must expose model intelligence in the native editor');
 assert.match(extension, /forge-agent\.runReflectionAbEval/, 'extension must expose reflection A/B eval command');
 assert.match(extension, /forge-agent\.setGoal/, 'extension must expose goal elicitation command');
 assert.match(extension, /forge-agent\.pauseGoal/, 'extension must expose pause command');
@@ -443,6 +482,13 @@ assert.ok(JSON.parse(read('package.json')).contributes.configuration.properties[
 assert.ok(JSON.parse(read('package.json')).contributes.configuration.properties['forge.reflectionEnabled'], 'reflection toggle must be a native setting');
 assert.ok(JSON.parse(read('package.json')).contributes.configuration.properties['forge.assuranceLevel'], 'assurance policy must be a native setting');
 assert.match(extension, /executionContract: path\.join\('\.forge', 'execution-contract\.json'\)/, 'extension must expose the active execution contract in the native editor');
+assert.match(extension, /proofGraph: path\.join\('\.forge', 'proof-graph\.json'\)/, 'extension must expose the proof graph in the native editor');
+assert.match(extension, /attestation: path\.join\('\.forge', 'latest-attestation\.json'\)/, 'extension must expose signed attestations in the native editor');
+assert.match(extension, /forge-agent\.verifyLatestAttestation/, 'extension must expose independent attestation verification');
+assert.match(extension, /forge-agent\.rotateAttestationKey/, 'extension must expose explicit attestation key rotation');
+assert.match(extension, /forge-agent\.runOracleCalibration/, 'extension must expose oracle calibration execution');
+assert.match(extension, /forge-agent\.getOracleCalibrationStatus/, 'extension must expose machine-readable calibration status');
+assert.match(extension, /oracleCalibration: path\.join\('\.forge', 'oracle-calibration\.json'\)/, 'extension must expose calibration reports in the native editor');
 assert.match(extension, /reflectionAb: path\.join\('\.forge', 'evals', 'latest-reflection-ab\.json'\)/, 'extension must expose reflection A/B artifact open path');
 assert.match(extension, /aar: path\.join\('\.forge', 'aar\.json'\)/, 'extension must expose AAR artifact open path');
 assert.match(extension, /lessons: path\.join\('\.forge', 'lessons\.json'\)/, 'extension must expose lessons artifact open path');
@@ -476,7 +522,7 @@ assert.match(workspaceIndex, /Math\.min\(20/, '@ mention search must enforce a 2
 const webview = read('src/webview/src/App.tsx');
 assert.match(webview, /testId="pause-run"/, 'webview must expose a pause button');
 assert.match(webview, /testId="resume-run"/, 'webview must expose a resume button');
-for (const testId of ['forge-agent-app', 'run-console', 'view-run', 'view-proof', 'view-settings', 'proof-panel', 'settings-panel', 'run-proof-matrix', 'refresh-models', 'agent-chat', 'chat-input', 'submit-message', 'role-menu-button', 'model-menu-button', 'inference-menu-button', 'assurance-menu-button', 'role-menu', 'composer-model-menu', 'composer-model-search', 'inference-menu', 'assurance-menu', 'execution-contract-card']) {
+for (const testId of ['forge-agent-app', 'run-console', 'view-run', 'view-proof', 'view-settings', 'proof-panel', 'proof-integrity', 'open-proof-graph', 'attest-latest-run', 'verify-attestation', 'open-attestation', 'run-oracle-calibration', 'open-oracle-calibration', 'settings-panel', 'run-proof-matrix', 'refresh-models', 'agent-chat', 'chat-input', 'submit-message', 'role-menu-button', 'model-menu-button', 'inference-menu-button', 'assurance-menu-button', 'role-menu', 'composer-model-menu', 'composer-model-search', 'inference-menu', 'assurance-menu', 'execution-contract-card', 'agent-gateway-settings', 'start-agent-gateway', 'rotate-agent-gateway-token', 'copy-agent-gateway-mcp', 'open-agent-gateway-audit']) {
   assert.match(webview, new RegExp(`(data-testid|testId)="${testId}"`), `missing webview selector ${testId}`);
 }
 assert.doesNotMatch(webview, /testId="initialize-run"/, 'normal product composer must not expose a separate Run control');
@@ -487,6 +533,28 @@ assert.match(webview, /run-verification-matrix/, 'webview must expose verificati
 assert.match(webview, /open-verification-matrix/, 'webview must expose verification matrix open button');
 assert.match(webview, /run-isolated-agent-goal/, 'webview must expose isolated run button');
 assert.match(webview, /open-isolated-run/, 'webview must expose isolated run report open button');
+for (const testId of ['branch-compare', 'branch-candidate-models', 'confirm-branch-spend', 'run-branch-compare', 'open-branch-compare', 'review-branch-candidate', 'approve-branch-candidate', 'merge-branch-candidate']) {
+  assert.match(webview, new RegExp(`data-testid="${testId}"`), `missing branch comparison selector ${testId}`);
+}
+assert.match(webview, /confirmLiveSpend: true/, 'branch comparison UI must send explicit action-time spend confirmation only after its user gate');
+const branchCompare = read('src/harness/branchCompare.ts');
+assert.match(branchCompare, /models\.length < 2 \|\| models\.length > MAX_CANDIDATES/, 'branch comparison must cap fanout at two or three candidates');
+assert.match(branchCompare, /reviewer model must differ from every candidate model/, 'branch comparison must require an independent reviewer model');
+assert.match(branchCompare, /requires exact concrete model slugs/, 'branch comparison must reject provider meta-routes that erase model identity');
+assert.match(branchCompare, /fallbackModels: \[\]/, 'branch comparison must disable provider fallback routing for exact candidate and reviewer identity');
+assert.match(branchCompare, /Promise\.all\(prepared\.map/, 'branch candidates must execute concurrently after isolation preparation');
+assert.match(branchCompare, /candidate is fallback-only or not model-driven/, 'fallback-only candidates must be ineligible');
+assert.match(branchCompare, /green composite oracle is missing/, 'red candidates must be ineligible');
+assert.match(branchCompare, /Only a deterministically eligible branch candidate can be approved or merged/, 'selection and merge must fail closed on ineligible candidates');
+assert.match(branchCompare, /Source workspace changed after branch comparison/, 'stale source must block candidate merge');
+assert.match(branchCompare, /restoreBackups/, 'failed source verification must roll back branch merge bytes');
+const modelIntelligence = read('src/harness/modelIntelligence.ts');
+assert.match(modelIntelligence, /MIN_MEASURED_LIVE_SAMPLES = 3/, 'measured profiles must require a minimum live sample floor');
+assert.match(modelIntelligence, /legacy weak-eval report lacks stable per-task input and judge digests/, 'legacy reports without comparison identity must remain unsupported');
+assert.match(modelIntelligence, /Explicit test samples must remain scripted provenance/, 'scripted samples must not impersonate live evidence');
+assert.match(modelIntelligence, /wilsonInterval/, 'empirical solve rates must include calibrated confidence intervals');
+assert.match(modelIntelligence, /collision or source tampering/, 'duplicate empirical identities with changed facts must fail closed');
+assert.match(modelIntelligence, /report digest mismatch/, 'persisted model intelligence must be tamper evident');
 assert.match(webview, /command: 'submit-message'/, 'webview must post every composer submission through the unified controller');
 assert.doesNotMatch(webview, /command: 'chat'/, 'product webview must not emit the legacy advisory-only bridge');
 assert.doesNotMatch(webview, /run-agent-loop/, 'product webview must not emit the legacy separate-run bridge');
@@ -504,6 +572,12 @@ assert.match(webview, /scoreModelForRole/, 'webview must rank models per role');
 assert.match(webview, /ModelSortSelect/, 'webview must expose model sorting controls');
 assert.match(webview, /reasoningRank/, 'webview must support reasoning rank sort');
 assert.match(webview, /codingRank/, 'webview must support coding rank sort');
+assert.match(webview, /Heuristic coding estimate/, 'catalog name scoring must be labeled heuristic');
+assert.match(webview, /Measured solve confidence/, 'model sorting must expose validated empirical confidence separately');
+assert.doesNotMatch(webview, /return 'best coding'|return 'best planning'|return `strong \$\{role\}`/, 'heuristic catalog labels must not masquerade as measured quality');
+for (const testId of ['model-intelligence', 'rebuild-model-intelligence', 'open-model-intelligence', 'model-intelligence-summary']) {
+  assert.match(webview, new RegExp(`data-testid="${testId}"`), `missing empirical model intelligence selector ${testId}`);
+}
 assert.match(webview, /modelCost/, 'webview must support cost sort');
 assert.match(webview, /formatCost/, 'webview must display model cost metadata');
 assert.match(webview, /SearchableModelPicker/, 'webview must expose searchable model pickers');
@@ -537,6 +611,16 @@ assert.ok(pkg.scripts.eval, 'package must expose npm run eval');
 assert.ok(pkg.scripts['eval:reflection'], 'package must expose npm run eval:reflection');
 assert.ok(pkg.scripts['test:index'], 'package must expose workspace index causal proof');
 assert.ok(pkg.scripts['test:context'], 'package must expose composer context causal proof');
+assert.ok(pkg.scripts['test:calibration'], 'package must expose oracle calibration causal proof');
+
+const oracleCalibration = read('src/harness/oracleCalibration.ts');
+assert.match(oracleCalibration, /AUDITED_ORACLE_SENSITIVITY_FLOOR = 0\.80/, 'audited calibration floor must be fixed at 80% or higher');
+assert.match(oracleCalibration, /AUDITED_ORACLE_MIN_MUTANTS = 5/, 'audited calibration must require a meaningful mutant sample');
+assert.match(oracleCalibration, /status: 'unsupported'/, 'unsupported ecosystems must fail closed');
+assert.match(oracleCalibration, /test suite or configuration changed/, 'test-suite drift must invalidate calibration');
+assert.match(oracleCalibration, /calibration report digest mismatch/, 'tampered calibration reports must fail closed');
+assert.doesNotMatch(oracleCalibration, /const operators = \[[^\n]*'>'/, 'policy v1 must not use ambiguous standalone angle mutations');
+assert.match(read('src/harness/firewall.ts'), /\.forge is a host-owned proof and control namespace/, 'model file tools must not overwrite host-owned proof artifacts');
 
 const verificationMatrix = read('src/harness/verificationMatrix.ts');
 for (const fixtureId of ['passing-tests', 'failing-tests', 'missing-test-suite', 'typecheck-failure', 'lint-failure', 'malformed-patch', 'out-of-workspace-path', 'blocked-command', 'unsolvable-step-cap']) {

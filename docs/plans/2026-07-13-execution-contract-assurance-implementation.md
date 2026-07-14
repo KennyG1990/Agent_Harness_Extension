@@ -39,4 +39,31 @@ Implement the selected Phase 93 design without beginning background runners, cus
 
 ## Document Close
 
-Pending implementation and executed evidence.
+PASS. Phase 93 adds canonical execution contracts, Standard/Verified/Audited policy, digest-bound confirmation/rejection, authority-revision invalidation, success gating, legacy normalization, native artifact access and a compact composer assurance control without a second loop.
+
+Executed evidence:
+
+- `npm run test:execution-contract`: PASS; all eight causal/negative checks green and zero provider calls before confirmation.
+- `npm test`: PASS.
+- `npm run test:e2e`: PASS after fixing legacy-array normalization and delayed Standard binding compatibility.
+- `npm run test:workers`: PASS 100/100; all children exited.
+- `npm run test:visual`: PASS with desktop and 520px assurance-menu/contract-card screenshots visually inspected.
+- `npm run package`: PASS; final package identity is recorded in `BUILD_LOG.md`.
+- Forced VS Code and actual Antigravity install/list: PASS. Reloaded Antigravity visibly opens Forge and exposes Standard, Verified and Audited in the compact composer.
+- No OpenRouter call or credit spend occurred.
+
+## Review
+
+- Authority bypass: pending contracts stop before provider work; webview messages carry intent only and must match the host digest.
+- False success: assurance requirements are consumed by every terminal-success path.
+- Stale authority: widening budget, model, scope, tools, criteria or oracle authority supersedes the prior revision. Standard permits only empty-to-initial binding hydration for legacy compatibility; later rebinding pauses.
+- Approval confusion: contract confirmation and per-tool approval remain separate identities and artifacts.
+- UI regression: one composer remains; detailed contracts open in a native editor.
+
+## AAR
+
+- Worked: compiling existing authority objects avoided a competing policy layer and made assurance deterministic.
+- Failed initially: legacy session fixtures omitted `doneWhen`; the compiler now treats missing historical arrays as empty. Existing tests also supply the first model binding at `runStep`; this was initially mistaken for mid-run widening.
+- Re-planning: visual proof was expanded from selector checks to explicit desktop/sidebar screenshots for both the assurance menu and pending contract card.
+- Reusable lesson: distinguish initial authority hydration from later authority widening, but permit the exception only in the compatibility tier and only once.
+- Next boundary: Phase 94 may carry confirmed contracts into background sessions, but merge authority and reattachment must remain host-owned.

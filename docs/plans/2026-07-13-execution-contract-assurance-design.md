@@ -46,3 +46,7 @@ Add one compact assurance chip beside role/model/inference. The menu explains ef
 - Audited rejects while calibration or isolation is unproven.
 - Legacy sessions normalize and run under Standard.
 - Static, full no-spend, worker, extension-host, desktop/sidebar visual, package, VS Code install and actual Antigravity interaction gates.
+
+## AAR
+
+The selected contract held through implementation. The main surprises were historical state shapes and delayed initial model binding in legacy callers, not a need for a second execution path. Canonical authority plus a narrow Standard compatibility rule preserved old behavior while keeping every later expansion digest-gated. Audited remains intentionally unavailable until the proof prerequisites are real.

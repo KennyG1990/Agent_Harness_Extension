@@ -14,6 +14,7 @@ export interface AgentMode {
   inference: 'Instant' | 'Thinking';
   allowedTools: ToolName[];
   builtIn: boolean;
+  imported?: boolean;
 }
 
 export interface ModeStorage {
@@ -41,10 +42,16 @@ export const BUILT_IN_MODES: AgentMode[] = [
 ];
 
 export class ModeRegistry {
+  private importedModes: AgentMode[] = [];
   public constructor(private readonly storage: ModeStorage) {}
 
   public list(): AgentMode[] {
-    return [...BUILT_IN_MODES.map(cloneMode), ...this.customModes()];
+    return [...BUILT_IN_MODES.map(cloneMode), ...this.customModes(), ...this.importedModes.map(cloneMode)];
+  }
+
+  public setImportedModes(modes: readonly AgentMode[]): void {
+    const reserved = new Set([...BUILT_IN_MODES, ...this.customModes()].map(mode => mode.id));
+    this.importedModes = modes.filter(mode => !reserved.has(mode.id)).map(cloneMode);
   }
 
   public resolve(id: string): AgentMode {
@@ -56,6 +63,7 @@ export class ModeRegistry {
   public async upsert(input: Partial<AgentMode>): Promise<AgentMode> {
     const custom = this.customModes();
     const requestedId = String(input.id || '').trim();
+    if (this.importedModes.some(mode => mode.id === requestedId)) throw new Error('Imported workspace agents cannot be overwritten; edit the source file and refresh customizations.');
     if (BUILT_IN_MODES.some(mode => mode.id === requestedId)) throw new Error('Built-in modes cannot be overwritten.');
     const id = requestedId || createModeId(String(input.name || 'custom-mode'));
     const existingIndex = custom.findIndex(mode => mode.id === id);
@@ -72,6 +80,7 @@ export class ModeRegistry {
   public async delete(id: string): Promise<boolean> {
     const normalized = String(id || '').trim();
     if (BUILT_IN_MODES.some(mode => mode.id === normalized)) throw new Error('Built-in modes cannot be deleted.');
+    if (this.importedModes.some(mode => mode.id === normalized)) throw new Error('Imported workspace agents cannot be deleted; edit the source file and refresh customizations.');
     const custom = this.customModes();
     const filtered = custom.filter(mode => mode.id !== normalized);
     if (filtered.length === custom.length) return false;

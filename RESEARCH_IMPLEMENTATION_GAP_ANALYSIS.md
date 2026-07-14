@@ -906,8 +906,132 @@ Remaining boundary: no live 16-task benchmark ran because no provider spend was 
 
 ## Phase 93 - Execution Contracts And Assurance Levels
 
-Status: **PLANNED**
+Status: **Implemented, adversarially tested, visually inspected, extension-host validated, packaged, installed, and interactively proven in Antigravity**.
 
 Reconciled gap: Forge has a goal contract, workflow acceptance contract, mode ceilings, budget, approval identities and terminal proof gates, but they are separate state objects. The user cannot select a machine-enforced assurance level, inspect one canonical authority contract before work, or force steering/model/budget/scope widening to invalidate prior authorization. Existing human approval is proposal-specific and must not be overloaded as run-contract authority.
 
 Selected result: compile those existing authorities into a canonical `ExecutionContractV1`; bind confirmation and revision history to SHA-256; enforce Standard, Verified and strict-unavailable Audited semantics in the host; preserve legacy Standard behavior; and expose only a compact composer control plus inline ask gate. Plans: `docs/plans/2026-07-13-execution-contract-assurance-design.md` and `docs/plans/2026-07-13-execution-contract-assurance-implementation.md`.
+
+Implemented result: `.forge/execution-contract.json` and `.forge/execution-contracts.json` carry the host-owned active contract and history. Verified blocks before provider use until its exact digest is confirmed; forged, replayed, rejected and widened contracts fail closed. Terminal success consumes the assurance gate, so red or missing composite truth, fallback-only work, or missing independent review cannot be mislabeled Verified. Standard retains current behavior, including a single initial legacy model binding, while any later rebinding is authority widening.
+
+Validation: `npm run test:execution-contract` proves canonical hashing, zero pre-confirmation provider calls, stale replay rejection, widening reconfirmation, non-mutating rejection, strict-unavailable Audited, legacy normalization and fallback-success blocking. Static, full extension-host, worker 100/100, desktop/sidebar visual, package/install and actual Antigravity interaction gates pass. Visual artifacts include `artifacts/visual-smoke-assurance-menu*.png` and `artifacts/visual-smoke-execution-contract*.png`.
+
+Remaining boundary: Audited is deliberately unavailable until Phase 96 supplies signed attestations and Phase 97 supplies calibrated oracle evidence. This is a fail-closed product state, not a partial claim that those capabilities exist. Phase 94 background sessions are not part of this implementation.
+
+## Phase 94 - Background Sessions And Native Notifications
+
+Status: **Implemented**
+
+Reconciled gap: durable session files and retained sub-agent staging exist, but execution is extension-host-bound. Closing the IDE stops orchestration. There is no detached runner lease/heartbeat, startup reattachment, background-native notification, or reviewed whole-session merge boundary. The existing isolated-run command is foreground-only and has no source merge authority.
+
+Selected result: launch one bounded detached runner against a retained isolated worktree/copy carrying the exact confirmed Phase 93 contract. Persist lifecycle and heartbeat outside the IDE process, keep API credentials out of disk artifacts, stop at input/approval/review boundaries, and make the extension host exclusively own conflict-checked reviewed merge plus fresh source verification and rollback. Plans: `docs/plans/2026-07-13-background-sessions-design.md` and `docs/plans/2026-07-13-background-sessions-implementation.md`.
+
+Implemented result: `backgroundRunner.js` is a packaged process entry point independent of the extension host. Session manifests persist contract digest/revision/assurance, source and isolated identities, budget, lifecycle, heartbeat, evidence and review/merge digests without credentials. Workspace leases prevent concurrent background writers; stale processes can be recovered only after identity revalidation; input and approval gates pause without mutating the source workspace.
+
+Merge result: the extension host opens native review copies/diffs, records approval against that exact digest, rechecks model and deterministic reviews, source baselines, path/file/byte limits and symlink exclusions, then applies a transactional bounded merge. Fresh source oracles decide completion; red verification restores all backed-up bytes. Detached sessions cannot self-merge and cannot use browser, computer or external interactive tools.
+
+Validation: the causal suite proves continued execution after launcher exit, isolated mutations, stale recovery/resume, forged-contract and missing-root rejection, ask/approval pauses and resumes, stale-review rejection, successful reviewed merge and red-oracle rollback with zero provider spend. Static, extension-host, worker 100/100, desktop/sidebar visual, package/install and actual Antigravity command/UI gates pass.
+
+Remaining boundary: this is durable local background execution, not a remote service or kernel sandbox. One live writer is allowed per source workspace, merges require the IDE host, and paid/live-provider continuation remains separately unproven. Phase 95 owns user customization; Phase 96 owns signed provenance.
+
+## Phase 95 - Skills, Agents, Rules, And Hooks Compatibility
+
+Status: **IMPLEMENTED / PASS**
+
+Reconciled gap: Forge has global custom modes, Forge-authored procedural skills, role/tool ceilings, governed external tools and workflow rules, but it does not discover common workspace customization formats. `.agents`, `.github` and `.claude` skills, agents, rules and hooks currently have no normalized provenance, no capability intersection, no path matching, no hook isolation and no run-bound snapshot identity.
+
+Selected result: add one bounded compatibility loader over existing authority. Skills progressively disclose instructions; agents normalize into constrained modes; rules contribute path-scoped untrusted context; command hooks execute only when explicitly enabled in disposable isolation and may deny, ask or narrow. Hook allow/context output never bypasses the firewall, and evidence candidates stay separate from the trusted ledger. Customization digests bind run/background continuity. Plans: `docs/plans/2026-07-13-customization-compatibility-design.md` and `docs/plans/2026-07-13-customization-compatibility-implementation.md`.
+
+Compatibility boundary: this phase does not promise byte-for-byte behavior of every vendor extension, execute remote/prompt/agent hooks, import MCP authority, scan arbitrary user-home content by default, or run bundled skill scripts automatically. Unsupported constructs are reported, not guessed.
+
+Implemented result: `customizationCompatibility.ts` discovers bounded non-symlink files from selected `.agents`, `.github` and `.claude` locations, parses Markdown frontmatter/YAML/JSON, records provenance and diagnostics, and produces a canonical digest-bound snapshot. Imported skills use query/path-driven progressive disclosure; compatible agents enter the existing mode registry with tool ceilings; always-on/path rules remain untrusted prompt context.
+
+Hook result: compatible command hooks are disabled by default and, when enabled, execute in disposable copies with sanitized environment, timeout/output caps and active-source byte restoration. Outputs normalize only to allow/deny/ask/narrow plus separately persisted untrusted candidates. Forbidden approval/success/evidence/merge claims reject, narrowed proposals pass the full deterministic validators again, and post-tool denial restores the Forge checkpoint when one exists.
+
+Continuity and proof: execution contracts bind the effective customization digest. Drift before a foreground step or retained background resume/merge invalidates the prior authority before provider or mutation work. Focused fixtures prove parser/location behavior, duplicate and symlink rejection, tool intersection, progressive disclosure, rule matching, forbidden claims, hook disablement/deny/narrow/source restoration and zero-provider-call drift. Static, extension-host, worker, visual, package/install and actual Antigravity gates pass.
+
+Remaining boundary: compatibility is deliberately selective. User-home scanning, arbitrary vendor behavior, remote/prompt hooks, automatic skill scripts and imported MCP authority remain unsupported. Stop-hook output is advisory and cannot rewrite terminal truth.
+
+## Phase 96 - Proof Graph And Signed Attestations
+
+Status: **Implemented, adversarially tested, extension-host validated, packaged, installed, and interactively proven in Antigravity**
+
+Reconciled gap: Forge persists nearly every required proof fact, but they remain separate JSON/Markdown artifacts without one deterministic linkage graph. Existing SHA-256 IDs prove local content identity only. There is no private signing key, independent public verifier, graph completeness contract or tamper-evident run statement.
+
+Selected result: derive a canonical privacy-safe DAG at the existing persistence choke point, then let only the extension host sign its digest with a SecretStorage-backed Ed25519 key. The graph cannot manufacture evidence or success; the signer refuses stale graph/state pairs and sets a success claim only for a complete terminal-success graph. Verification uses embedded public material and recomputed digests without SecretStorage.
+
+Plans: `docs/plans/2026-07-13-proof-graph-attestation-design.md` and `docs/plans/2026-07-13-proof-graph-attestation-implementation.md`.
+
+Implemented result: `proofGraph.ts` deterministically projects existing trusted state into a privacy-safe acyclic DAG and persists it at the shared state choke point plus per-session archives. Requirements connect through tasks, structured proposals, validation, changes, composite oracles, diff/model review, evidence and terminal state. Completeness is descriptive only and a success claim requires the existing terminal truth, green oracle event, same-run green evidence, required review and model-driven completion.
+
+Attestation result: `attestation.ts` holds Ed25519 private material only in extension `SecretStorage`, embeds public SPKI material, rebuilds the expected graph from terminal state before signing and supports explicit rotation without invalidating old statements. Public verification rejects graph, payload, contract, terminal, completeness, signature and key mismatches. Extension commands and one collapsed Proof disclosure expose native graph/signature artifacts without adding another dashboard or composer.
+
+Validation: an 18-node/40-edge fixture proves the full causal path, JSON-round-trip identity, privacy canaries, six direct tamper cases, a self-consistent forged-graph signer refusal, red/missing-evidence false-success denial, SecretStorage-only private keys, key rotation and truthful Audited capability accounting. Static, affected regression, 100-worker, extension-host, visual, package/install and actual Antigravity gates pass with no provider calls.
+
+Boundary: local signatures prove integrity under a local key, not third-party identity, remote timestamp or organizational trust. Phase 97 calibration and proven isolation remain independent Audited gates.
+
+## Phase 97 - Oracle Calibration
+
+Status: **Implemented, adversarially tested, extension-host validated, packaged, installed, and interactively proven in Antigravity**
+
+Reconciled gap: Forge can prove that selected test/build/lint/typecheck commands ran, but a green command may be insensitive to meaningful defects. Existing fixture matrices show pass/fail handling; they do not measure whether the actual selected test suite detects bounded semantic mutations. Audited currently names calibration as unavailable but has no report contract or enforceable floor.
+
+Selected result: for initially supported Node projects, generate syntax-preserving one-token source mutants only inside a disposable copy, run the exact adapter-selected test command, restore exact bytes and require green baselines before/after. Bind the resulting sensitivity to adapter/test-suite identity and a canonical report digest. Audited requires at least five applied mutants and an 80% sensitivity floor; users may raise but never lower it.
+
+Plans: `docs/plans/2026-07-13-oracle-calibration-design.md` and `docs/plans/2026-07-13-oracle-calibration-implementation.md`.
+
+Implemented result: `oracleCalibration.ts` binds the exact Node adapter/test command and test/config digest to a canonical report, runs bounded one-token semantic mutations only in a disposable copy, restores every mutant exactly and compares active-source/test identities before accepting a result. Policy v1 requires at least five mutants and at least 80% sensitivity. Unsupported/truncated projects run no command; red/flaky baselines, weak suites, too few candidates, stale identities and digest tampering remain unavailable.
+
+Harness result: current assessment is refreshed before every success decision and participates in Audited availability. The model cannot overwrite `.forge` through native file tools, command transactions exclude it from merge, and failed trusted-host attestation demotes Audited success. Native commands and one collapsed proof row expose status/report without adding a cloned IDE surface.
+
+Validation: a strong fixture killed 8/8 mutants while an always-green suite killed 0/8. Red baseline, unsupported nonexecution, source/test byte preservation, ordinary-source stability, test-suite staleness, report tamper, lexical canaries and host-owned namespace rejection pass. Compile/static, affected causal regressions, worker 100/100, extension-host, visual, package/install and actual reloaded Antigravity interaction pass without provider spend.
+
+Review corrections: lexical policy v1 initially mistook the `>` in JavaScript arrows for a semantic comparison and falsely counted syntax failures; ambiguous standalone angle mutations were removed. Installed interaction then exposed that unsupported reports were described as adapter drift because status checks ran too late; status now wins before identity-staleness checks.
+
+Boundary: calibration measures sampled oracle sensitivity, not exhaustive mutation coverage, source correctness or test quality certification. Policy v1 supports Node only and deliberately excludes ambiguous standalone angle mutations. Unsupported ecosystems and bounded-scan truncation remain unavailable rather than receiving heuristic credit. Audited also still requires a proven socket-isolating runtime backend.
+
+## Phase 98 - Branch-and-Compare Execution
+
+Status: **Implemented, adversarially tested, extension-host validated, packaged, installed, and interactively proven in Antigravity**
+
+Reconciled gap: Forge has temporary worktree/copy isolation, governed background runners, provider/reviewer accounting, source baselines, and host-owned reviewed merge. It does not yet freeze one comparison contract across two or three concurrent candidate runs, reject red or fallback-only candidates from selection, or rank eligible outcomes using measured fallback dependence, cost, and latency.
+
+Selected result: add a coordinator around the existing normal harness loop and isolation primitives. Every candidate receives one frozen task/authority/source contract; candidate model identity is recorded separately as the experimental variable. Deterministic eligibility precedes efficiency ranking, independent model review is mandatory, and only the extension host may approve or merge a candidate after native diff review and fresh source verification.
+
+Plans: `docs/plans/2026-07-13-branch-compare-design.md` and `docs/plans/2026-07-13-branch-compare-implementation.md`.
+
+Implemented result: a bounded coordinator prepares all candidate roots from one filtered source baseline, verifies common authority after removing only the explicit model treatment, disables provider fallback routing, rejects meta-routes/self-review, and runs two or three normal Forge loops concurrently. Reports preserve exact model/reviewer, provider/fallback, model-driven, cost, provider/wall latency, oracle, evidence, deterministic diff review, independent review, assurance, isolation, changed-file, contract, and candidate identities.
+
+Selection result: terminal success alone is insufficient. Red, missing-evidence, deterministic-review-only, fallback-only, stale, tampered, or authority-divergent candidates are ineligible before cost is considered. Eligible ranking is recomputed on load and orders fallback dependence, measured cost, measured latency, then stable identity.
+
+Host result: native diff review creates a digest-bound control record; explicit host approval is separate from merge. Merge revalidates the report, source baseline, candidate state/files, exact model bindings, independent review, changed-file/byte caps, then runs fresh source verification and restores backups on failure. Candidates receive no comparison/selection/merge authority.
+
+Validation: causal proof ran three overlapping scripted candidates and selected green model-driven work over cheaper red and fallback-only work; report/candidate tamper, stale source, rank order, reviewer identity, exact routes, red source oracle rollback, and green source merge passed. Static, full host, 100-worker, desktop/sidebar, package/install, and actual Antigravity gates pass without provider spend.
+
+Boundary: this proves governance and measurement mechanics, not live model superiority. Real comparative quality/cost/latency evidence remains absent until an explicitly authorized paid run.
+
+## Phase 99 - Empirical Model Intelligence
+
+Status: **Implemented, tested, packaged, installed, and interactively proven**
+
+Forge now compiles accepted immutable production-benchmark and branch-comparison artifacts into exact-model local profiles. The host validates source digests, task/judge or common-contract identity, deduplicates repeated aliases, partitions unlike cohorts and scripted/live provenance, calculates Wilson confidence, and reports solve, false-success, schema, provider-failure, verified-cost, and fallback metrics. Legacy weak-eval reports without stable task/judge identity are recorded as unsupported rather than pooled.
+
+The picker and Proof surface now distinguish measured, provisional, heuristic, and catalog-only guidance. A measured profile requires at least three live verified samples in the same cohort; scripted evidence remains provisional and cannot impersonate live evidence. Rankings are recomputed only within comparable cohorts, and stale/tampered source artifacts invalidate the report.
+
+Validation: focused production/branch adapters, tamper, duplicate, collision, cohort, provenance, threshold, Wilson, false-success, fallback, and meta-route negatives pass. Compile/static, Phase 98 regression, desktop/sidebar visual, 100-worker stress, extension-host E2E, package/install, and actual Antigravity UI interaction pass without a provider call.
+
+Boundary: this proves local evidence compilation and honest UI semantics, not live model quality. The installed workspace currently reports zero measured and zero provisional profiles because no accepted comparable live reports exist there. A quality or economic ranking remains unproven until explicitly authorized runs create sufficient live evidence.
+
+## Phase 100 - Governed Agent Gateway
+
+Status: **Implemented, adversarially tested, extension-host validated, packaged, installed, and interactively proven in Antigravity**
+
+Forge now exposes a disabled-by-default authenticated loopback gateway and optional four-tool stdio MCP facade. External clients may submit a goal, submit one structured proposal against the current contract digest, inspect a bounded sanitized status view, or request cancellation. Those proposals enter the same role, workflow, customization, schema, firewall, approval, transaction, oracle, diff-review, evidence, and terminal-state path as normal Forge work.
+
+Authority remains narrow. Direct approval, clarification answers, trusted-evidence authorship, oracle selection, merge, signing, key access, and success routes/tools are absent. SecretStorage tokens, literal `127.0.0.1` binding, Host/Origin checks, bounded canonical schemas, replay collision detection, rate/concurrency ceilings, contract identity, response bounds, and digest-only audit/replay artifacts are enforced by the extension host.
+
+Validation includes malformed and out-of-workspace proposals, false-success denial, token rotation, Host/Origin/auth/replay/rate/concurrency/oversize/stale-session negatives, a real stdio MCP client, static invariants, extension-host E2E, visual proof, package inspection, dual installation, and actual Antigravity interaction. The fresh live fixture terminaled success only after two visible approvals, green tests, required diff review, and same-run evidence; state recorded six gateway proposals, zero provider calls, zero fallbacks, and no model-driven credit.
+
+Review found one material integration defect: native approval originally accepted current webview model bindings and could widen an empty gateway execution contract, causing two unintended reviewer calls. The affected run was cancelled before merge. Approval now preserves only the confirmed contract bindings, and a hostile-binding regression asserts no provider spend.
+
+Boundary: this is a governed transport, not an external-agent identity or quality attestation. Unattested gateway proposals remain separately counted and never become Forge model-driven credit. The live paid Qwen 9B quality demonstration is a separate, explicitly authorized experiment.

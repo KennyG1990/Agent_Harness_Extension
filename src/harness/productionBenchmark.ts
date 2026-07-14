@@ -95,6 +95,8 @@ export interface ProductionBenchmarkReport {
   providerCalls: number;
   providerFailures: number;
   providerFailureRate: number;
+  schemaAttempts: number;
+  schemaSuccesses: number;
   costUsd: number;
   wallClockMs: number;
   averageWallClockPerProviderCallMs: number;
@@ -283,6 +285,8 @@ export function buildProductionBenchmarkReport(
     providerCalls,
     providerFailures,
     providerFailureRate,
+    schemaAttempts: raw.liveCanary ? 1 : 0,
+    schemaSuccesses: raw.liveCanary?.ok ? 1 : 0,
     costUsd: tasks.reduce((sum, task) => sum + task.costUsd, 0),
     wallClockMs: Math.max(0, Math.floor(wallClockMs)),
     averageWallClockPerProviderCallMs: providerCalls ? Math.max(0, wallClockMs) / providerCalls : 0,

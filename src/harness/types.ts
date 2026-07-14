@@ -660,6 +660,8 @@ export interface RunStats {
   providerFailures: number;
   fallbackProposals: number;
   modelDrivenProposals: number;
+  gatewayProposals: number;
+  gatewayProposalRejections: number;
   fallbackActions: number;
   repairAttempts: number;
   schemaFailures: number;
@@ -763,6 +765,32 @@ export interface HarnessState {
   knowledge: RepositoryKnowledge;
   projectAdapter: ProjectAdapterState;
   skills: SkillItem[];
+  customization?: {
+    snapshotDigest: string;
+    selectedSkillIds: string[];
+    selectedRuleIds: string[];
+    importedAgentId?: string;
+    hooksEnabled: boolean;
+    refreshedAt: string;
+  };
+  proofGraph?: {
+    digest: string;
+    nodeCount: number;
+    edgeCount: number;
+    complete: boolean;
+    missing: string[];
+    claimsSuccess: boolean;
+    generatedAt: string;
+  };
+  oracleCalibration?: {
+    available: boolean;
+    reason: string;
+    sensitivity: number;
+    floor: number;
+    appliedMutants: number;
+    testSuiteDigest?: string;
+    calibrationId?: string;
+  };
   files: Record<string, WorkspaceFile>;
   userContext?: import('./composerContext').ComposerContextAttachment[];
   firewall: FirewallAction;

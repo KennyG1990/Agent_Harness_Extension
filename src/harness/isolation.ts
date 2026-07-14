@@ -42,6 +42,17 @@ export interface IsolatedRunReport {
   sourceDirtyStatusPreserved: boolean;
 }
 
+export interface PreparedIsolation {
+  sourceRoot: string;
+  isolatedRoot: string;
+  tempParent: string;
+  requestedMode: IsolationMode;
+  mode: 'worktree' | 'copy';
+  fallbackReason: string | null;
+  baseCommit: string | null;
+  dirtyFilesOverlaid: string[];
+}
+
 const ISOLATION_EXCLUDED = new Set(['.git', '.forge', 'node_modules', 'out', 'dist', 'artifacts', '.vscode-test']);
 
 interface GitDetection {
@@ -56,48 +67,10 @@ export async function runIsolatedAgentGoal(options: IsolatedRunOptions = {}, pro
   const requestedMode: IsolationMode = options.isolationMode || 'auto';
   const git = detectGitRepo(sourceRoot);
 
-  let mode: 'worktree' | 'copy';
-  let fallbackReason: string | null = null;
-  if (requestedMode === 'copy') {
-    mode = 'copy';
-    fallbackReason = 'copy_mode_requested';
-  } else if (git.ok) {
-    mode = 'worktree';
-  } else if (requestedMode === 'worktree') {
-    throw new Error(`git worktree isolation is unavailable for this workspace: ${git.reason}`);
-  } else {
-    mode = 'copy';
-    fallbackReason = git.reason || 'git_unavailable';
-  }
-
   const sourceBefore = snapshotFiles(sourceRoot);
   const sourceDirtyBefore = git.ok ? normalizedDirtyStatus(sourceRoot) : null;
-
-  let tempParent: string;
-  let isolatedRoot: string;
-  let dirtyFilesOverlaid: string[] = [];
-  if (mode === 'worktree') {
-    tempParent = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-isolated-wt-'));
-    isolatedRoot = path.join(tempParent, 'worktree');
-    try {
-      runGit(sourceRoot, ['worktree', 'add', '--detach', isolatedRoot, 'HEAD']);
-      dirtyFilesOverlaid = overlayDirtyState(sourceRoot, isolatedRoot);
-    } catch (err: any) {
-      fs.rmSync(tempParent, { recursive: true, force: true });
-      if (requestedMode === 'worktree') {
-        throw new Error(`git worktree add failed: ${err?.message || err}`);
-      }
-      mode = 'copy';
-      fallbackReason = `worktree_add_failed: ${String(err?.message || err).slice(0, 200)}`;
-      tempParent = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-isolated-run-'));
-      isolatedRoot = tempParent;
-      copyWorkspace(sourceRoot, isolatedRoot);
-    }
-  } else {
-    tempParent = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-isolated-run-'));
-    isolatedRoot = tempParent;
-    copyWorkspace(sourceRoot, isolatedRoot);
-  }
+  const prepared = prepareIsolatedWorkspace(sourceRoot, requestedMode);
+  const { isolatedRoot, tempParent, mode, fallbackReason, dirtyFilesOverlaid } = prepared;
   const isolatedBefore = snapshotFiles(isolatedRoot);
 
   const loop = new AgentHarnessLoop(provider, isolatedRoot);
@@ -138,20 +111,73 @@ export async function runIsolatedAgentGoal(options: IsolatedRunOptions = {}, pro
     requestedIsolationMode: requestedMode,
     isolationMode: mode,
     isolationFallbackReason: fallbackReason,
-    baseCommit: mode === 'worktree' ? git.head || null : null,
+    baseCommit: prepared.baseCommit,
     dirtyFilesOverlaid,
     sourceDirtyStatusPreserved
   };
   report.reportPath = path.join(forgeDir, 'latest-isolated-run.json');
   fs.writeFileSync(report.reportPath, JSON.stringify(report, null, 2), 'utf8');
   if (!keptIsolated) {
-    if (mode === 'worktree') {
-      removeWorktree(sourceRoot, isolatedRoot, tempParent);
-    } else {
-      fs.rmSync(isolatedRoot, { recursive: true, force: true });
-    }
+    cleanupIsolatedWorkspace(prepared);
   }
   return report;
+}
+
+export function prepareIsolatedWorkspace(sourceRootInput: string, requestedMode: IsolationMode = 'auto'): PreparedIsolation {
+  const sourceRoot = fs.realpathSync(sourceRootInput);
+  const git = detectGitRepo(sourceRoot);
+  let mode: 'worktree' | 'copy';
+  let fallbackReason: string | null = null;
+  if (requestedMode === 'copy') {
+    mode = 'copy';
+    fallbackReason = 'copy_mode_requested';
+  } else if (git.ok) {
+    mode = 'worktree';
+  } else if (requestedMode === 'worktree') {
+    throw new Error(`git worktree isolation is unavailable for this workspace: ${git.reason}`);
+  } else {
+    mode = 'copy';
+    fallbackReason = git.reason || 'git_unavailable';
+  }
+
+  let tempParent: string;
+  let isolatedRoot: string;
+  let dirtyFilesOverlaid: string[] = [];
+  if (mode === 'worktree') {
+    tempParent = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-isolated-wt-'));
+    isolatedRoot = path.join(tempParent, 'worktree');
+    try {
+      runGit(sourceRoot, ['worktree', 'add', '--detach', isolatedRoot, 'HEAD']);
+      dirtyFilesOverlaid = overlayDirtyState(sourceRoot, isolatedRoot);
+    } catch (err: any) {
+      fs.rmSync(tempParent, { recursive: true, force: true });
+      if (requestedMode === 'worktree') throw new Error(`git worktree add failed: ${err?.message || err}`);
+      mode = 'copy';
+      fallbackReason = `worktree_add_failed: ${String(err?.message || err).slice(0, 200)}`;
+      tempParent = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-isolated-run-'));
+      isolatedRoot = tempParent;
+      copyWorkspace(sourceRoot, isolatedRoot);
+    }
+  } else {
+    tempParent = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-isolated-run-'));
+    isolatedRoot = tempParent;
+    copyWorkspace(sourceRoot, isolatedRoot);
+  }
+  return {
+    sourceRoot,
+    isolatedRoot,
+    tempParent,
+    requestedMode,
+    mode,
+    fallbackReason,
+    baseCommit: mode === 'worktree' ? git.head || null : null,
+    dirtyFilesOverlaid
+  };
+}
+
+export function cleanupIsolatedWorkspace(prepared: PreparedIsolation): void {
+  if (prepared.mode === 'worktree') removeWorktree(prepared.sourceRoot, prepared.isolatedRoot, prepared.tempParent);
+  else fs.rmSync(prepared.tempParent, { recursive: true, force: true });
 }
 
 function runGit(cwd: string, args: string[]): string {

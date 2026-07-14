@@ -57,11 +57,27 @@ await page.addInitScript(() => {
       if (message?.command === 'load-prompt-enhancement-settings') {
         setTimeout(() => window.postMessage({ command: 'prompt-enhancement-settings', modelId: 'google/gemini-2.5-flash-lite' }, '*'), 0);
       }
+      if (message?.command === 'load-agent-gateway-status') {
+        setTimeout(() => window.postMessage({ command: 'agent-gateway-status', status: {
+          schemaVersion: 1, enabled: false, running: false, host: '127.0.0.1', authenticated: true,
+          capabilities: ['submit_goal', 'submit_proposal', 'get_status', 'cancel']
+        }, action: 'load-agent-gateway-status' }, '*'), 0);
+      }
       if (message?.command === 'enhance-prompt') {
         setTimeout(() => window.postMessage({ command: 'prompt-enhanced', result: {
           modelId: 'google/gemini-2.5-flash-lite',
           enhancedPrompt: 'Objective:\nFix the parser defect.\n\nScope:\nChange only the parser and its focused tests.\n\nDone when:\n- Focused and existing parser tests pass.\n\nRequired evidence:\n- Focused test output and bounded diff.',
           usage: { totalCost: 0.00004 }
+        } }, '*'), 0);
+      }
+      if (message?.command === 'load-model-intelligence' || message?.command === 'rebuild-model-intelligence') {
+        setTimeout(() => window.postMessage({ command: 'model-intelligence-report', report: {
+          schemaVersion: 1, acceptedSourceCount: 2, measuredProfileCount: 1, provisionalProfileCount: 1,
+          samples: [{ sampleId: 'sample-a' }, { sampleId: 'sample-b' }, { sampleId: 'sample-c' }],
+          profiles: [
+            { modelId: 'qwen/qwen3.5-9b', cohortKey: 'cohort-a', claimLevel: 'measured', sampleCount: 3, solveRate: 0.67, solveRateConfidence: { low: 0.2, high: 0.94 } },
+            { modelId: 'qwen/qwen3.5-flash-02-23', cohortKey: 'cohort-b', claimLevel: 'provisional', sampleCount: 1, solveRate: 1, solveRateConfidence: { low: 0.21, high: 1 } }
+          ]
         } }, '*'), 0);
       }
     },
@@ -75,9 +91,7 @@ try {
   await page.waitForSelector('[data-testid="forge-agent-app"]', { timeout: 15000 });
   await page.waitForSelector('[data-testid="run-console"]', { timeout: 5000 });
   await page.evaluate(() => {
-    window.postMessage({
-      command: 'state-update',
-      state: {
+    const visualState = {
         sessionId: 'forge-1783900000000-visual',
         humanApprovalPolicy: 'ask',
         pendingHumanApproval: {
@@ -363,8 +377,9 @@ try {
         activeFilePath: '',
         oracleStatuses: { linter: 'pass', compiler: 'pass', tests: 'pass', build: 'fail' },
         lastOraclePass: false
-      }
-    }, '*');
+      };
+    window.__forgeVisualState = visualState;
+    window.postMessage({ command: 'state-update', state: visualState }, '*');
     window.postMessage({ command: 'chat-response', text: 'I found the build failure and prepared a validated patch. Review the pending action below; nothing has changed yet.' }, '*');
     window.postMessage({ command: 'provider-readiness', readiness: {
       provider: 'openrouter', ready: true, workspaceOpen: true,
@@ -384,8 +399,13 @@ try {
       { id: 'code', name: 'Code', description: 'Default governed coding agent.', instructions: 'Implement through Forge.', intent: 'code', modelRole: 'code', inference: 'Instant', allowedTools: [], builtIn: true },
       { id: 'architect', name: 'Architect', description: 'Architecture guidance without mutation.', instructions: 'Analyze and plan.', intent: 'architect', modelRole: 'plan', inference: 'Thinking', allowedTools: [], builtIn: true },
       { id: 'ask', name: 'Ask', description: 'Answer without changing files.', instructions: 'Explain clearly.', intent: 'ask', modelRole: 'plan', inference: 'Instant', allowedTools: [], builtIn: true },
-      { id: 'custom-no-shell', name: 'No Shell Code', description: 'Governed coding without shell commands.', instructions: 'Use file tools and tests.', intent: 'code', modelRole: 'code', inference: 'Thinking', allowedTools: ['update_plan', 'run_tests', 'get_diff', 'record_evidence', 'ask_user', 'declare_success', 'read_file', 'apply_patch', 'write_file'], builtIn: false }
+      { id: 'custom-no-shell', name: 'No Shell Code', description: 'Governed coding without shell commands.', instructions: 'Use file tools and tests.', intent: 'code', modelRole: 'code', inference: 'Thinking', allowedTools: ['update_plan', 'run_tests', 'get_diff', 'record_evidence', 'ask_user', 'declare_success', 'read_file', 'apply_patch', 'write_file'], builtIn: false },
+      { id: 'custom-imported-reviewer-visual', name: 'Workspace Reviewer', description: 'Imported review instructions.', instructions: 'Review only.', intent: 'review', modelRole: 'review', inference: 'Thinking', allowedTools: ['read_file', 'get_diff'], builtIn: false, imported: true }
     ] }, '*');
+    window.postMessage({ command: 'customizations-status', summary: {
+      digest: 'a'.repeat(64), skills: 2, agents: 1, compatibleAgents: 1, rules: 3, hooks: 1,
+      hooksEnabled: false, accepted: 7, rejected: 1
+    } }, '*');
     window.postMessage({ command: 'sessions-list', corruptCount: 1, sessions: [
       { sessionId: 'forge-1783900000001-paused', title: 'Repair authentication race', pinned: true, createdAt: '2026-07-12T17:00:00.000Z', updatedAt: new Date().toISOString(), status: 'paused', steps: 7, costUsd: 0.0432, resumable: true },
       { sessionId: 'forge-1783900000000-visual', title: 'Validate reflection UI counters', pinned: false, createdAt: '2026-07-12T16:00:00.000Z', updatedAt: new Date(Date.now() - 3600000).toISOString(), status: 'gave_up', steps: 4, costUsd: 0, resumable: false },
@@ -464,11 +484,49 @@ try {
         reportPath: 'F:/DEV_ENV/projects/Agent_Harness_Extension/.forge/isolated-runs/latest-isolated-run.json'
       }
     }, '*');
+    window.postMessage({ command: 'branch-compare-report', report: {
+      comparisonId: 'branch-compare-visual', candidateCount: 3, recommendedCandidateId: 'candidate-1', sourceMutated: false,
+      candidates: [
+        { candidateId: 'candidate-1', modelId: 'qwen/qwen3.5-9b', eligible: true, costUsd: 0.012, wallClockMs: 2200 },
+        { candidateId: 'candidate-2', modelId: 'qwen/qwen3.5-9b', eligible: false, rejectionReasons: ['green composite oracle is missing'] },
+        { candidateId: 'candidate-3', modelId: 'qwen/qwen3.5-9b', eligible: false, rejectionReasons: ['candidate is fallback-only or not model-driven'] }
+      ]
+    } }, '*');
   });
   await page.click('[data-testid="view-proof"]');
   await page.waitForSelector('[data-testid="proof-panel"]', { timeout: 5000 });
+  await page.evaluate(() => window.postMessage({ command: 'proof-integrity', summary: {
+    graph: { nodeCount: 23, edgeCount: 29, complete: true, claimsSuccess: true, valid: true },
+    attestation: { sessionId: 'forge-visual', keyId: 'a1b2c3d4e5f67890', claimsSuccess: true, issuedAt: new Date().toISOString() },
+    verification: { valid: true, verifiedAt: new Date().toISOString(), errors: [] },
+    calibration: { available: true, reason: 'calibrated', sensitivity: 1, floor: 0.8, appliedMutants: 8, calibrationId: 'calibration-visual', hasReport: true }
+  } }, '*'));
+  await page.click('[data-testid="proof-integrity"] summary');
+  await page.waitForSelector('[data-testid="verify-attestation"]', { timeout: 5000 });
+  await page.waitForSelector('[data-testid="run-oracle-calibration"]', { timeout: 5000 });
+  if (!(await page.locator('[data-testid="proof-integrity"]').textContent())?.includes('100% · 8 mutants')) throw new Error('Oracle calibration summary was not rendered in the compact proof panel.');
+  if (await page.locator('[data-testid="verify-attestation"]').isDisabled()) throw new Error('Persisted attestation should enable independent verification.');
   await page.waitForSelector('[data-testid="verification-matrix-summary"]', { timeout: 5000 });
   await page.waitForSelector('[data-testid="isolated-run-summary"]', { timeout: 5000 });
+  await page.click('[data-testid="model-intelligence"] summary');
+  await page.waitForSelector('[data-testid="model-intelligence-summary"]', { timeout: 5000 });
+  if (!(await page.locator('[data-testid="model-intelligence"]').textContent())?.includes('1 measured / 1 provisional')) throw new Error('Model intelligence must distinguish measured from provisional profiles.');
+  await page.click('[data-testid="rebuild-model-intelligence"]');
+  await page.setViewportSize({ width: 520, height: 920 });
+  await page.locator('[data-testid="model-intelligence"]').scrollIntoViewIfNeeded();
+  const modelIntelligenceSidebarScreenshot = path.join(artifacts, 'visual-smoke-model-intelligence-sidebar.png');
+  await page.screenshot({ path: modelIntelligenceSidebarScreenshot, fullPage: true });
+  await page.setViewportSize({ width: 1440, height: 920 });
+  await page.click('[data-testid="branch-compare"] summary');
+  await page.waitForSelector('[data-testid="branch-compare-summary"]', { timeout: 5000 });
+  if (!(await page.locator('[data-testid="run-branch-compare"]').isDisabled())) throw new Error('Branch comparison must remain disabled before explicit spend confirmation.');
+  await page.click('[data-testid="confirm-branch-spend"]');
+  if (await page.locator('[data-testid="run-branch-compare"]').isDisabled()) throw new Error('Branch comparison should enable after explicit spend confirmation with an independent reviewer binding.');
+  await page.setViewportSize({ width: 520, height: 920 });
+  await page.locator('[data-testid="branch-compare"]').scrollIntoViewIfNeeded();
+  const branchCompareSidebarScreenshot = path.join(artifacts, 'visual-smoke-branch-compare-sidebar.png');
+  await page.screenshot({ path: branchCompareSidebarScreenshot, fullPage: true });
+  await page.setViewportSize({ width: 1440, height: 920 });
   const proofScreenshot = path.join(artifacts, 'visual-smoke-proof.png');
   await page.screenshot({ path: proofScreenshot, fullPage: true });
   await page.evaluate(() => {
@@ -513,6 +571,17 @@ try {
   const screenshot = path.join(artifacts, 'visual-smoke.png');
   await page.screenshot({ path: screenshot, fullPage: true });
   await page.waitForSelector('[data-testid="model-picker-prompt"]');
+  await page.waitForSelector('[data-testid="agent-gateway-settings"]');
+  if (await page.locator('[data-testid="agent-gateway-settings"]').getAttribute('open')) throw new Error('Agent Gateway settings must be collapsed by default.');
+  await page.click('[data-testid="agent-gateway-settings"] summary');
+  await page.waitForSelector('[data-testid="agent-gateway-disabled"]');
+  if (!(await page.locator('[data-testid="start-agent-gateway"]').isDisabled())) throw new Error('Disabled-by-default gateway must not start from the webview.');
+  if (/bearer|token\s*[:=]\s*[A-Za-z0-9_-]{16,}/i.test(await page.locator('[data-testid="agent-gateway-settings"]').textContent() || '')) throw new Error('Gateway settings rendered credential material.');
+  await page.setViewportSize({ width: 520, height: 920 });
+  await page.locator('[data-testid="agent-gateway-settings"]').scrollIntoViewIfNeeded();
+  const gatewaySidebarScreenshot = path.join(artifacts, 'visual-smoke-agent-gateway-sidebar.png');
+  await page.screenshot({ path: gatewaySidebarScreenshot, fullPage: true });
+  await page.setViewportSize({ width: 1440, height: 920 });
   await page.click('[data-testid="mcp-settings"] summary');
   await page.waitForSelector('[data-testid="add-mcp-server"]');
   const mcpOnboardingScreenshot = path.join(artifacts, 'visual-smoke-mcp-onboarding.png');
@@ -524,6 +593,10 @@ try {
   await page.setViewportSize({ width: 1440, height: 920 });
   await page.click('[data-testid="custom-modes-settings"] summary');
   await page.waitForSelector('[data-testid="mode-name"]');
+  await page.click('[data-testid="customizations-settings"] summary');
+  await page.waitForSelector('[data-testid="refresh-customizations"]');
+  if (!(await page.locator('[data-testid="customizations-settings"]').textContent())?.includes('1/1 agents')) throw new Error('Customization summary did not render compatible imported agent counts.');
+  if (await page.locator('[data-testid="delete-mode-custom-imported-reviewer-visual"]').count()) throw new Error('Imported workspace agents must not expose a delete control.');
   const modesScreenshot = path.join(artifacts, 'visual-smoke-modes.png');
   await page.screenshot({ path: modesScreenshot, fullPage: true });
   await page.click('[data-testid="view-run"]');
@@ -541,9 +614,20 @@ try {
   await page.screenshot({ path: promptEnhancementSidebarScreenshot, fullPage: true });
   await page.setViewportSize({ width: 1440, height: 920 });
   await page.fill('[data-testid="chat-input"]', '');
+  await page.evaluate(() => {
+    window.postMessage({ command: 'background-sessions-list', sessions: [{
+      sessionId: 'forge-1783900000004-background', status: 'awaiting_review', stale: false,
+      startedAt: new Date(Date.now() - 45000).toISOString(), updatedAt: new Date().toISOString(), steps: 8, costUsd: 0.0137,
+      modelBindings: { Editor: 'qwen/qwen-9b-fixture', Reviewer: 'openrouter/reviewer' },
+      changedFiles: ['src/auth/session.ts', 'PLAN.md'],
+      merge: { status: 'pending', reviewOpenedAt: new Date().toISOString(), reviewOpenedDigest: 'a'.repeat(64) }
+    }] }, '*');
+  });
   await page.click('[data-testid="sessions-toggle"]');
   await page.waitForSelector('[data-testid="sessions-menu"]');
   await page.waitForSelector('[data-testid="resume-session-forge-1783900000001-paused"]');
+  await page.waitForSelector('[data-testid="background-session-forge-1783900000004-background"]');
+  await page.waitForSelector('[data-testid="review-background-forge-1783900000004-background"]');
   const sessionsScreenshot = path.join(artifacts, 'visual-smoke-sessions.png');
   await page.screenshot({ path: sessionsScreenshot, fullPage: true });
   await page.setViewportSize({ width: 520, height: 920 });
@@ -558,6 +642,55 @@ try {
   await page.setViewportSize({ width: 520, height: 920 });
   const approvalSidebarScreenshot = path.join(artifacts, 'visual-smoke-human-approval-sidebar.png');
   await page.screenshot({ path: approvalSidebarScreenshot, fullPage: true });
+  await page.setViewportSize({ width: 1440, height: 920 });
+  await page.click('[data-testid="assurance-menu-button"]');
+  await page.waitForSelector('[data-testid="assurance-menu"]');
+  await page.waitForSelector('[data-testid="assurance-option-audited"]');
+  const assuranceMenuScreenshot = path.join(artifacts, 'visual-smoke-assurance-menu.png');
+  await page.screenshot({ path: assuranceMenuScreenshot, fullPage: true });
+  await page.setViewportSize({ width: 520, height: 920 });
+  const assuranceMenuSidebarScreenshot = path.join(artifacts, 'visual-smoke-assurance-menu-sidebar.png');
+  await page.screenshot({ path: assuranceMenuSidebarScreenshot, fullPage: true });
+  await page.setViewportSize({ width: 1440, height: 920 });
+  await page.click('[data-testid="assurance-menu-button"]');
+  await page.evaluate(() => {
+    const prior = window.__forgeVisualState;
+    const executionContract = {
+      schemaVersion: 1,
+      id: 'execution-contract-forge-1783900000000-visual',
+      sessionId: prior.sessionId,
+      revision: 2,
+      digest: '8b1d26e74244f8fe2e8652f7a1cc78f3e460ad52904a35b9d68957fa92b57a55',
+      status: 'pending',
+      authority: {
+        assurance: 'verified',
+        objective: 'Repair the failing build without widening workspace or tool authority.',
+        constraints: ['Change only the validated authentication path.'],
+        acceptanceCriteria: ['Composite project oracle passes.'],
+        nonGoals: ['Do not change unrelated files.'],
+        workspaceScopes: ['src/auth/session.ts'],
+        allowedTools: ['read_file', 'apply_patch', 'run_tests', 'get_diff', 'record_evidence', 'declare_success'],
+        expectedFiles: ['src/auth/session.ts'],
+        requiredOracles: ['test: npm run test', 'build: npm run build'],
+        budget: { maxCostUsd: 2, maxWallClockMs: 1800000, maxSteps: 30 },
+        modelBindings: { code: 'qwen/qwen-2.5-7b-instruct', review: 'openrouter/auto' },
+        approvalPolicy: 'ask',
+        requirements: { explicitConfirmation: true, modelDrivenCompletion: true, fallbackFreeCompletion: true, independentReview: true, compositeOracle: true, signedAttestation: false, oracleCalibration: false, provenIsolation: false }
+      },
+      availability: { available: true, missing: [] },
+      compiledAt: new Date().toISOString(),
+      revisionReason: 'goal steering changed contract authority'
+    };
+    window.__forgeVisualState = { ...prior, pendingHumanApproval: undefined, executionContract, executionContractHistory: [executionContract], status: 'awaiting_approval', haltReason: 'Execution contract confirmation required.' };
+    window.postMessage({ command: 'state-update', state: window.__forgeVisualState }, '*');
+  });
+  await page.waitForSelector('[data-testid="execution-contract-card"]');
+  await page.waitForSelector('[data-testid="confirm-execution-contract"]');
+  const executionContractScreenshot = path.join(artifacts, 'visual-smoke-execution-contract.png');
+  await page.screenshot({ path: executionContractScreenshot, fullPage: true });
+  await page.setViewportSize({ width: 520, height: 920 });
+  const executionContractSidebarScreenshot = path.join(artifacts, 'visual-smoke-execution-contract-sidebar.png');
+  await page.screenshot({ path: executionContractSidebarScreenshot, fullPage: true });
   await page.setViewportSize({ width: 1440, height: 920 });
   await page.click('[data-testid="workspace-index-toggle"]');
   await page.waitForSelector('[data-testid="workspace-index-popover"]');
@@ -611,7 +744,7 @@ try {
   if (await page.locator('[data-testid="onboarding-api-key"]').inputValue()) throw new Error('Onboarding rendered a credential value.');
   const onboardingScreenshot = path.join(artifacts, 'visual-smoke-onboarding.png');
   await page.screenshot({ path: onboardingScreenshot, fullPage: true });
-  console.log(`visual smoke: PASS ${runScreenshot} ${proofScreenshot} ${difficultProofScreenshot} ${difficultProofResultScreenshot} ${productionBenchmarkScreenshot} ${productionBenchmarkSidebarScreenshot} ${screenshot} ${mcpOnboardingScreenshot} ${mcpOnboardingSidebarScreenshot} ${promptEnhancementScreenshot} ${promptEnhancementSidebarScreenshot} ${modesScreenshot} ${sessionsScreenshot} ${sessionsSidebarScreenshot} ${approvalScreenshot} ${approvalSidebarScreenshot} ${indexScreenshot} ${indexSidebarScreenshot} ${contextScreenshot} ${contextSidebarScreenshot} ${mentionScreenshot} ${mentionSidebarScreenshot} ${supportScreenshot} ${onboardingScreenshot}`);
+  console.log(`visual smoke: PASS ${runScreenshot} ${proofScreenshot} ${branchCompareSidebarScreenshot} ${modelIntelligenceSidebarScreenshot} ${difficultProofScreenshot} ${difficultProofResultScreenshot} ${productionBenchmarkScreenshot} ${productionBenchmarkSidebarScreenshot} ${screenshot} ${gatewaySidebarScreenshot} ${mcpOnboardingScreenshot} ${mcpOnboardingSidebarScreenshot} ${promptEnhancementScreenshot} ${promptEnhancementSidebarScreenshot} ${modesScreenshot} ${sessionsScreenshot} ${sessionsSidebarScreenshot} ${approvalScreenshot} ${approvalSidebarScreenshot} ${assuranceMenuScreenshot} ${assuranceMenuSidebarScreenshot} ${executionContractScreenshot} ${executionContractSidebarScreenshot} ${indexScreenshot} ${indexSidebarScreenshot} ${contextScreenshot} ${contextSidebarScreenshot} ${mentionScreenshot} ${mentionSidebarScreenshot} ${supportScreenshot} ${onboardingScreenshot}`);
 } catch (err) {
   console.error(browserErrors.join('\n') || 'No browser errors captured.');
   throw err;

@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   CircleHelp,
   Circle,
+  CloudCog,
   Database,
   ExternalLink,
   FileCode2,
@@ -30,7 +31,7 @@ import {
   Wand2,
   X,
 } from 'lucide-react';
-import { AgentMode, AssuranceLevel, ComposerContextSummary, HarnessState, HumanApprovalPolicy, ProviderReadiness, RunProgressEvent, SessionSummary, StepLog, WorkspaceIndexStatus, WorkspaceMentionCandidate } from './types';
+import { AgentGatewayStatus, AgentMode, AssuranceLevel, BackgroundSessionSummary, ComposerContextSummary, HarnessState, HumanApprovalPolicy, ProviderReadiness, RunProgressEvent, SessionSummary, StepLog, WorkspaceIndexStatus, WorkspaceMentionCandidate } from './types';
 import { DEFAULT_BINDINGS, PERSISTED_BINDINGS_KEY, STANDARD_MODELS } from './data/models';
 
 type ViewMode = 'run' | 'proof' | 'settings';
@@ -42,7 +43,7 @@ const SLASH_COMMANDS: Array<{ cmd: string; hint: string }> = [
 type ModelRole = 'code' | 'plan' | 'review' | 'prompt';
 type InferenceMode = 'Instant' | 'Thinking';
 type ChatMessage = { role: 'user' | 'assistant'; content: string; modelId?: string; error?: boolean };
-type ModelSortMode = 'recommended' | 'context' | 'reasoning' | 'coding' | 'cost' | 'newest';
+type ModelSortMode = 'recommended' | 'measured' | 'context' | 'reasoning' | 'coding' | 'cost' | 'newest';
 
 const FALLBACK_MODES: AgentMode[] = [
   { id: 'code', name: 'Code', description: 'Default governed coding agent.', instructions: 'Implement through the Forge workflow.', intent: 'code', modelRole: 'code', inference: 'Instant', allowedTools: [], builtIn: true },
@@ -88,6 +89,7 @@ export default function App() {
   });
   const [proofModels, setProofModels] = useState('openrouter/pareto-code\nopenrouter/auto\nmeta-llama/llama-3.3-70b-instruct');
   const [proofReport, setProofReport] = useState<any>(null);
+  const [proofIntegrity, setProofIntegrity] = useState<any>(null);
   const [weakEvalReport, setWeakEvalReport] = useState<any>(null);
   const [difficultProofReport, setDifficultProofReport] = useState<any>(null);
   const [difficultProofProgress, setDifficultProofProgress] = useState<any>(null);
@@ -98,6 +100,10 @@ export default function App() {
   const [productionBenchmarkReport, setProductionBenchmarkReport] = useState<any>(null);
   const [verificationMatrixReport, setVerificationMatrixReport] = useState<any>(null);
   const [isolatedRunReport, setIsolatedRunReport] = useState<any>(null);
+  const [branchCompareReport, setBranchCompareReport] = useState<any>(null);
+  const [modelIntelligence, setModelIntelligence] = useState<any>(null);
+  const [branchCandidateModels, setBranchCandidateModels] = useState(`${bindings.code}\n${bindings.code}`);
+  const [confirmBranchSpend, setConfirmBranchSpend] = useState(false);
   const [chatInput, setChatInput] = useState('');
   const [showCommandMenu, setShowCommandMenu] = useState(false);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
@@ -130,6 +136,7 @@ export default function App() {
   const [assuranceLevel, setAssuranceLevel] = useState<AssuranceLevel>('standard');
   const [workspaceIndexStatus, setWorkspaceIndexStatus] = useState<WorkspaceIndexStatus>({ status: 'missing', fileCount: 0, symbolCount: 0, ignoredCount: 0, truncated: false });
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const [backgroundSessions, setBackgroundSessions] = useState<BackgroundSessionSummary[]>([]);
   const [corruptSessionCount, setCorruptSessionCount] = useState(0);
   const [showSessionMenu, setShowSessionMenu] = useState(false);
   const [pendingDeleteSessionId, setPendingDeleteSessionId] = useState<string | null>(null);
@@ -139,6 +146,8 @@ export default function App() {
   const [mentionProvenance, setMentionProvenance] = useState<'ready' | 'stale' | 'missing'>('missing');
   const [mentionSelection, setMentionSelection] = useState(0);
   const [mcpCatalog, setMcpCatalog] = useState<{ serverCount: number; toolCount: number }>({ serverCount: 0, toolCount: 0 });
+  const [agentGateway, setAgentGateway] = useState<AgentGatewayStatus>({ schemaVersion: 1, enabled: false, running: false, host: '127.0.0.1', authenticated: true, capabilities: ['submit_goal', 'submit_proposal', 'get_status', 'cancel'] });
+  const [customizations, setCustomizations] = useState<{ digest: string; skills: number; agents: number; compatibleAgents: number; rules: number; hooks: number; hooksEnabled: boolean; accepted: number; rejected: number }>({ digest: '', skills: 0, agents: 0, compatibleAgents: 0, rules: 0, hooks: 0, hooksEnabled: false, accepted: 0, rejected: 0 });
   const mentionRequestRef = useRef('');
 
   useEffect(() => {
@@ -147,12 +156,17 @@ export default function App() {
     vscode?.postMessage({ command: 'load-readiness' });
     vscode?.postMessage({ command: 'list-modes' });
     vscode?.postMessage({ command: 'list-sessions' });
+    vscode?.postMessage({ command: 'list-background-sessions' });
     vscode?.postMessage({ command: 'load-human-approval-policy' });
     vscode?.postMessage({ command: 'load-assurance-level' });
     vscode?.postMessage({ command: 'load-workspace-index-status' });
     vscode?.postMessage({ command: 'load-composer-context' });
     vscode?.postMessage({ command: 'load-mcp-catalog' });
     vscode?.postMessage({ command: 'load-prompt-enhancement-settings' });
+    vscode?.postMessage({ command: 'load-customizations' });
+    vscode?.postMessage({ command: 'load-proof-integrity' });
+    vscode?.postMessage({ command: 'load-model-intelligence' });
+    vscode?.postMessage({ command: 'load-agent-gateway-status' });
 
     const handleMessage = (event: MessageEvent) => {
       const message = event.data;
@@ -204,6 +218,11 @@ export default function App() {
       if (message.command === 'assurance-level') setAssuranceLevel(message.level === 'verified' || message.level === 'audited' ? message.level : 'standard');
       if (message.command === 'workspace-index-status' && message.status) setWorkspaceIndexStatus(message.status);
       if (message.command === 'mcp-catalog') setMcpCatalog({ serverCount: Number(message.serverCount || 0), toolCount: Number(message.toolCount || 0) });
+      if (message.command === 'agent-gateway-status' && message.status) {
+        setAgentGateway(message.status);
+        if (message.action && message.action !== 'load-agent-gateway-status') setStatusMessage(`Agent Gateway ${message.status.running ? `running on 127.0.0.1:${message.status.port}` : message.status.enabled ? 'stopped' : 'disabled'}.`);
+      }
+      if (message.command === 'customizations-status' && message.summary) setCustomizations(message.summary);
       if (message.command === 'mcp-config-updated') setStatusMessage(`MCP server ${message.serverId} ${message.action}. Refresh the catalog after its explicit tool policies are ready.`);
       if (message.command === 'prompt-enhancement-settings') setPromptEnhancementModel(String(message.modelId || 'google/gemini-2.5-flash-lite'));
       if (message.command === 'prompt-enhanced') {
@@ -232,6 +251,10 @@ export default function App() {
         setCorruptSessionCount(Number(message.corruptCount || 0));
         setPendingDeleteSessionId(null);
       }
+      if (message.command === 'background-sessions-list') {
+        setBackgroundSessions(Array.isArray(message.sessions) ? message.sessions : []);
+        setIsBusy(false);
+      }
       if (message.command === 'session-loaded') {
         setState(message.state || null);
         setActiveSessionId(message.meta?.sessionId || null);
@@ -250,6 +273,15 @@ export default function App() {
         setProofReport(message.report);
         setIsBusy(false);
         setStatusMessage(message.report?.passed ? 'Proof matrix passed.' : 'Proof matrix finished with failures.');
+      }
+      if (message.command === 'proof-integrity') {
+        setProofIntegrity(message.summary || null);
+      }
+      if (message.command === 'oracle-calibration') {
+        setIsBusy(false);
+        setStatusMessage(message.assessment?.available
+          ? `Oracle calibrated at ${(Number(message.assessment.sensitivity || 0) * 100).toFixed(0)}% sensitivity.`
+          : `Oracle calibration unavailable: ${message.assessment?.reason || 'unknown reason'}.`);
       }
       if (message.command === 'weak-eval-report') {
         setWeakEvalReport(message.report);
@@ -280,6 +312,22 @@ export default function App() {
         setIsolatedRunReport(message.report);
         setIsBusy(false);
         setStatusMessage(message.report?.sourceMutated ? 'Isolated run finished, but source mutation was detected.' : 'Isolated run finished without source mutation.');
+      }
+      if (message.command === 'branch-compare-report') {
+        setBranchCompareReport(message.report);
+        setIsBusy(false);
+        setStatusMessage(message.report?.recommendedCandidateId
+          ? `Branch comparison recommends ${message.report.recommendedCandidateId}; native review is required before merge.`
+          : 'Branch comparison finished with no eligible candidate.');
+      }
+      if (message.command === 'model-intelligence-report') {
+        setModelIntelligence(message.report || null);
+        setIsBusy(false);
+        if (message.report) setStatusMessage(`Model intelligence rebuilt from ${message.report.samples?.length || 0} comparable sample(s); ${message.report.measuredProfileCount || 0} measured profile(s).`);
+      }
+      if (message.command === 'branch-merge-result') {
+        setIsBusy(false);
+        setStatusMessage(message.result?.merged ? 'Reviewed branch candidate merged and passed fresh source verification.' : 'Branch candidate merge was rolled back after red verification.');
       }
       if (message.command === 'chat-response') {
         if (message.sessionId) setActiveSessionId(message.sessionId);
@@ -358,14 +406,23 @@ export default function App() {
   const selectedModelId = bindings[selectedRoleBinding] || bindings.code || bindings.Editor || 'openrouter/pareto-code';
   const budgetSpent = state?.goalContract?.spent ?? 0;
   const budgetCap = state?.runBudget?.maxCostUsd ?? state?.goalContract?.budget ?? 0;
+  const backgroundForActive = backgroundSessions.find(session => session.sessionId === state?.sessionId);
+  const backgroundEligible = Boolean(state?.executionContract?.status === 'confirmed'
+    && state.executionContract.availability.available
+    && !['success', 'failed', 'gave_up', 'awaiting_input', 'awaiting_approval'].includes(state.status)
+    && !backgroundForActive);
+  const modelsWithIntelligence = useMemo(() => modelsCatalog.map(model => ({
+    ...model,
+    empirical: selectEmpiricalProfile(modelIntelligence, model.id)
+  })), [modelIntelligence, modelsCatalog]);
   const filteredComposerModels = useMemo(() => {
     const query = modelSearch.trim().toLowerCase();
-    return [...modelsCatalog]
+    return [...modelsWithIntelligence]
       .map(model => ({ model, score: scoreModelForRole(model, selectedRoleBinding, query) + (favoriteModels.includes(model.id) ? 40 : 0) }))
       .filter(item => item.score > -1000)
       .sort((a, b) => compareRankedModels(a, b, composerSortMode, selectedRoleBinding))
       .slice(0, 80);
-  }, [composerSortMode, favoriteModels, modelSearch, modelsCatalog, selectedRoleBinding]);
+  }, [composerSortMode, favoriteModels, modelSearch, modelsWithIntelligence, selectedRoleBinding]);
 
   const saveBindings = (next: Record<string, string>) => {
     setBindings(next);
@@ -473,6 +530,29 @@ export default function App() {
         keepIsolated: true
       }
     });
+  };
+
+  const runBranchCompare = () => {
+    const candidateModels = branchCandidateModels.split(/\r?\n/).map(value => value.trim()).filter(Boolean).slice(0, 3);
+    if (!confirmBranchSpend) {
+      setStatusMessage('Confirm provider-credit use before running branch comparison.');
+      return;
+    }
+    if (candidateModels.length < 2) {
+      setStatusMessage('Branch comparison requires two or three candidate model lines.');
+      return;
+    }
+    setIsBusy(true);
+    setBranchCompareReport(null);
+    setStatusMessage(`Running ${candidateModels.length} isolated contract-identical candidates...`);
+    vscode?.postMessage({ command: 'run-branch-compare', options: {
+      goal,
+      candidateModels,
+      reviewerModel: bindings.review,
+      maxSteps: 30,
+      isolationMode: 'auto',
+      confirmLiveSpend: true
+    } });
   };
 
   const openArtifact = (artifact: string) => {
@@ -622,7 +702,32 @@ export default function App() {
                   </div>
                 );
               })}
-              {!sessions.length && <div className="py-5 text-center text-[10px] text-slate-500">No saved Forge sessions in this workspace.</div>}
+              {backgroundSessions.length > 0 && <div className="px-1 pt-2 text-[9px] font-semibold uppercase text-slate-500">Background</div>}
+              {backgroundSessions.slice(0, 10).map(session => {
+                const status = session.stale ? 'stale' : session.merge?.status === 'merged' ? 'merged' : session.status;
+                const model = session.modelBindings.Editor || session.modelBindings.code || Object.values(session.modelBindings)[0] || 'configured model';
+                const resumable = session.stale || ['gave_up', 'cancelled'].includes(session.status);
+                return (
+                  <div key={`background-${session.sessionId}`} data-testid={`background-session-${session.sessionId}`} className="rounded border border-slate-700 bg-[#151518] p-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-200"><Circle size={7} fill="currentColor" className={status === 'running' ? 'text-[#dfff2e]' : status === 'awaiting_review' ? 'text-cyan-300' : status === 'failed' || status === 'stale' ? 'text-rose-400' : 'text-slate-500'} /><span className="truncate">{status.replace(/_/g, ' ')}</span></div>
+                        <div className="mt-0.5 truncate text-[9px] text-slate-500">{model} · step {session.steps || 0} · ${Number(session.costUsd || 0).toFixed(4)} · {session.changedFiles.length} files</div>
+                      </div>
+                      <div className="flex shrink-0 flex-wrap justify-end gap-1">
+                        {(session.status === 'awaiting_input' || session.status === 'awaiting_approval') && <button data-testid={`resolve-background-${session.sessionId}`} className="rounded border border-amber-500/50 px-1.5 py-1 text-[9px] text-amber-200" onClick={() => vscode?.postMessage({ command: 'resolve-background-session', sessionId: session.sessionId })}>Answer</button>}
+                        {session.status === 'awaiting_review' && session.merge?.status !== 'merged' && <button data-testid={`review-background-${session.sessionId}`} className="rounded border border-cyan-500/50 px-1.5 py-1 text-[9px] text-cyan-200" onClick={() => vscode?.postMessage({ command: 'open-background-diff', sessionId: session.sessionId })}>Review</button>}
+                        {session.status === 'awaiting_review' && Boolean(session.merge?.reviewOpenedDigest) && !session.merge?.reviewDigest && <button data-testid={`approve-background-${session.sessionId}`} className="rounded border border-slate-600 px-1.5 py-1 text-[9px] text-slate-300" onClick={() => vscode?.postMessage({ command: 'approve-background-review', sessionId: session.sessionId })}>Approve</button>}
+                        {session.status === 'awaiting_review' && Boolean(session.merge?.reviewDigest) && session.merge?.status !== 'merged' && <button data-testid={`merge-background-${session.sessionId}`} className="rounded border border-[#dfff2e]/50 px-1.5 py-1 text-[9px] text-[#dfff2e]" onClick={() => vscode?.postMessage({ command: 'merge-background-session', sessionId: session.sessionId })}>Merge</button>}
+                        {resumable && <button data-testid={`resume-background-${session.sessionId}`} className="rounded border border-[#dfff2e]/50 px-1.5 py-1 text-[9px] text-[#dfff2e]" onClick={() => vscode?.postMessage({ command: 'resume-background-session', sessionId: session.sessionId })}>Resume</button>}
+                        {session.status === 'running' && <button data-testid={`cancel-background-${session.sessionId}`} className="rounded border border-rose-500/50 px-1.5 py-1 text-[9px] text-rose-300" onClick={() => vscode?.postMessage({ command: 'cancel-background-session', sessionId: session.sessionId })}>Stop</button>}
+                        <IconButton title="Open background log" onClick={() => vscode?.postMessage({ command: 'open-background-log', sessionId: session.sessionId })}><Terminal size={12} /></IconButton>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+              {!sessions.length && !backgroundSessions.length && <div className="py-5 text-center text-[10px] text-slate-500">No saved Forge sessions in this workspace.</div>}
             </div>
           </div>
         )}
@@ -882,6 +987,14 @@ export default function App() {
                         <RotateCcw size={14} />
                       </IconButton>
                     )}
+                    <IconButton
+                      title={backgroundForActive ? `Background session ${backgroundForActive.stale ? 'stale' : backgroundForActive.status}` : backgroundEligible ? 'Continue this confirmed run in an isolated background session' : 'Background requires an eligible confirmed run'}
+                      testId="start-background-session"
+                      disabled={!backgroundEligible}
+                      onClick={() => { setIsBusy(true); setStatusMessage('Preparing isolated background session...'); vscode?.postMessage({ command: 'start-background-session' }); }}
+                    >
+                      <CloudCog size={14} className={backgroundForActive?.status === 'running' ? 'text-[#dfff2e]' : ''} />
+                    </IconButton>
                     <IconButton title="Checkpoint history" testId="checkpoint-history-toggle" onClick={() => { setPendingRestoreId(null); setOpenComposerMenu(openComposerMenu === 'checkpoint' ? null : 'checkpoint'); }}>
                       <History size={14} />
                     </IconButton>
@@ -1068,6 +1181,27 @@ export default function App() {
 
         {activeView === 'proof' && (
           <section data-testid="proof-panel" className="h-full space-y-3 overflow-y-auto p-3">
+            <details data-testid="proof-integrity" className="rounded border border-slate-800 bg-[#151518] p-3">
+              <summary className="cursor-pointer text-xs font-bold text-slate-200">
+                Proof integrity · {proofIntegrity?.graph ? `${proofIntegrity.graph.nodeCount} nodes` : 'no graph'} · {proofIntegrity?.verification?.valid ? 'verified' : proofIntegrity?.attestation ? 'signed' : 'unsigned'}
+              </summary>
+              <div className="mt-3 space-y-2 text-[11px]">
+                <KeyValue label="Graph" value={proofIntegrity?.graph ? `${proofIntegrity.graph.valid ? 'valid' : 'invalid'} · ${proofIntegrity.graph.complete ? 'complete' : 'incomplete'} · ${proofIntegrity.graph.edgeCount} edges` : 'not generated'} />
+                <KeyValue label="Success claim" value={proofIntegrity?.graph?.claimsSuccess ? 'supported' : 'not claimed'} />
+                <KeyValue label="Attestation" value={proofIntegrity?.attestation ? `key ${String(proofIntegrity.attestation.keyId).slice(0, 12)}…` : 'not signed'} />
+                <KeyValue label="Calibration" value={proofIntegrity?.calibration?.available
+                  ? `${(Number(proofIntegrity.calibration.sensitivity || 0) * 100).toFixed(0)}% · ${proofIntegrity.calibration.appliedMutants} mutants`
+                  : proofIntegrity?.calibration?.reason || 'not calibrated'} />
+                <div className="grid grid-cols-2 gap-2">
+                  <button data-testid="open-proof-graph" onClick={() => openArtifact('proofGraph')} className="forge-secondary"><ExternalLink size={13} /> Open Graph</button>
+                  <button data-testid="attest-latest-run" onClick={() => vscode?.postMessage({ command: 'attest-latest-run' })} disabled={!state || !['success', 'failed', 'gave_up'].includes(state.status)} className="forge-secondary"><ShieldCheck size={13} /> Attest Run</button>
+                  <button data-testid="verify-attestation" onClick={() => vscode?.postMessage({ command: 'verify-latest-attestation' })} disabled={!proofIntegrity?.attestation} className="forge-secondary"><CheckCircle2 size={13} /> Verify</button>
+                  <button data-testid="open-attestation" onClick={() => openArtifact('attestation')} disabled={!proofIntegrity?.attestation} className="forge-secondary"><ExternalLink size={13} /> Open Signature</button>
+                  <button data-testid="run-oracle-calibration" onClick={() => { setIsBusy(true); vscode?.postMessage({ command: 'run-oracle-calibration' }); }} disabled={isBusy} className="forge-secondary"><ShieldCheck size={13} /> Calibrate</button>
+                  <button data-testid="open-oracle-calibration" onClick={() => openArtifact('oracleCalibration')} disabled={!proofIntegrity?.calibration?.hasReport} className="forge-secondary"><ExternalLink size={13} /> Open Calibration</button>
+                </div>
+              </div>
+            </details>
             <Panel title="Model Matrix">
               <p className="text-[11px] text-slate-400 mb-2">One model slug per line. The proof report separates model-driven success from harness fallback.</p>
               <textarea
@@ -1162,6 +1296,50 @@ export default function App() {
               </div>
             </details>
 
+            <details data-testid="branch-compare" className="rounded border border-slate-800 bg-[#151518] p-3">
+              <summary className="cursor-pointer text-xs font-bold text-slate-200">Branch and compare</summary>
+              <div className="mt-3 space-y-2">
+                <p className="text-[11px] text-slate-400">Runs two or three isolated candidates under one frozen task contract. Red, fallback-only, or unreviewed candidates cannot be recommended or merged.</p>
+                <label className="block text-[10px] text-slate-400">Candidate models, one per line</label>
+                <textarea data-testid="branch-candidate-models" rows={3} value={branchCandidateModels} onChange={event => setBranchCandidateModels(event.target.value)} className="w-full resize-none rounded border border-slate-700 bg-[#0c0c0f] px-2 py-1.5 font-mono text-[10px] text-slate-200 outline-none focus:border-[#dfff2e]" />
+                <div className="rounded border border-slate-800 bg-[#0c0c0f] p-2 text-[10px] text-slate-400">Independent reviewer: <span className="font-mono text-slate-200">{bindings.review || 'not configured'}</span></div>
+                <label className="flex items-start gap-2 rounded border border-amber-900/50 bg-amber-950/20 p-2 text-[10px] text-amber-200">
+                  <input data-testid="confirm-branch-spend" type="checkbox" checked={confirmBranchSpend} onChange={event => setConfirmBranchSpend(event.target.checked)} className="mt-0.5" />
+                  <span>I authorize the live provider calls for these candidates and the independent reviewer. Cost and latency are recorded.</span>
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button data-testid="run-branch-compare" onClick={runBranchCompare} disabled={isBusy || !confirmBranchSpend || !bindings.review} className="forge-primary"><Play size={13} /> Compare</button>
+                  <button data-testid="open-branch-compare" onClick={() => openArtifact('branchCompare')} className="forge-secondary"><ExternalLink size={13} /> Report</button>
+                  <button data-testid="review-branch-candidate" onClick={() => vscode?.postMessage({ command: 'open-branch-candidate-diff', candidateId: branchCompareReport?.recommendedCandidateId })} disabled={!branchCompareReport?.recommendedCandidateId} className="forge-secondary"><FileCode2 size={13} /> Review</button>
+                  <button data-testid="approve-branch-candidate" onClick={() => vscode?.postMessage({ command: 'approve-branch-candidate', candidateId: branchCompareReport?.recommendedCandidateId })} disabled={!branchCompareReport?.recommendedCandidateId} className="forge-secondary"><ShieldCheck size={13} /> Approve</button>
+                  <button data-testid="merge-branch-candidate" onClick={() => vscode?.postMessage({ command: 'merge-branch-candidate', candidateId: branchCompareReport?.recommendedCandidateId })} disabled={!branchCompareReport?.recommendedCandidateId || isBusy} className="forge-secondary col-span-2"><CheckCircle2 size={13} /> Merge and verify</button>
+                </div>
+                {branchCompareReport && <div data-testid="branch-compare-summary" className="rounded border border-slate-800 bg-[#0c0c0f] p-2 text-[11px]">
+                  <KeyValue label="Recommended" value={branchCompareReport.recommendedCandidateId || 'none'} />
+                  <KeyValue label="Eligible" value={String((branchCompareReport.candidates || []).filter((candidate: any) => candidate.eligible).length)} />
+                  <KeyValue label="Source mutated" value={String(Boolean(branchCompareReport.sourceMutated))} />
+                  <KeyValue label="Candidates" value={String(branchCompareReport.candidateCount || 0)} />
+                </div>}
+              </div>
+            </details>
+
+            <details data-testid="model-intelligence" className="rounded border border-slate-800 bg-[#151518] p-3">
+              <summary className="cursor-pointer text-xs font-bold text-slate-200">Model intelligence · {modelIntelligence ? `${modelIntelligence.measuredProfileCount || 0} measured / ${modelIntelligence.provisionalProfileCount || 0} provisional` : 'not built'}</summary>
+              <div className="mt-3 space-y-2">
+                <p className="text-[11px] text-slate-400">Compiles local comparable evidence without provider calls. Catalog and name-based recommendations remain heuristic unless a profile is explicitly marked measured.</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <button data-testid="rebuild-model-intelligence" onClick={() => { setIsBusy(true); vscode?.postMessage({ command: 'rebuild-model-intelligence' }); }} disabled={isBusy} className="forge-secondary"><RotateCcw size={13} /> Rebuild</button>
+                  <button data-testid="open-model-intelligence" onClick={() => openArtifact('modelIntelligenceSummary')} disabled={!modelIntelligence} className="forge-secondary"><ExternalLink size={13} /> Open Summary</button>
+                </div>
+                {modelIntelligence && <div data-testid="model-intelligence-summary" className="rounded border border-slate-800 bg-[#0c0c0f] p-2 text-[11px]">
+                  <KeyValue label="Sources" value={String(modelIntelligence.acceptedSourceCount || 0)} />
+                  <KeyValue label="Samples" value={String(modelIntelligence.samples?.length || 0)} />
+                  <KeyValue label="Measured" value={String(modelIntelligence.measuredProfileCount || 0)} />
+                  <KeyValue label="Provisional" value={String(modelIntelligence.provisionalProfileCount || 0)} />
+                </div>}
+              </div>
+            </details>
+
             <Panel title="Isolated Run">
               <p className="text-[11px] text-slate-400 mb-2">
                 Runs the harness in a git worktree (copy fallback for non-git workspaces) and proves whether the source changed.
@@ -1237,10 +1415,10 @@ export default function App() {
                   <RotateCcw size={12} className={isRefreshingModels ? 'animate-spin' : ''} /> Refresh
                 </button>
               </div>
-              <SearchableModelPicker role="code" label="Coding model" value={bindings.code || bindings.Editor || ''} models={modelsCatalog} onChange={value => saveBindings({ ...bindings, code: value, Editor: value })} />
-              <SearchableModelPicker role="plan" label="Plan model" value={bindings.plan || bindings.Architect || ''} models={modelsCatalog} onChange={value => saveBindings({ ...bindings, plan: value, Architect: value })} />
-              <SearchableModelPicker role="review" label="Review model" value={bindings.review || bindings.Reviewer || ''} models={modelsCatalog} onChange={value => saveBindings({ ...bindings, review: value, Reviewer: value })} />
-              <SearchableModelPicker role="prompt" label="Prompt enhancement model" value={promptEnhancementModel} models={modelsCatalog} onChange={value => { setPromptEnhancementModel(value); vscode?.postMessage({ command: 'set-prompt-enhancement-model', modelId: value }); }} />
+              <SearchableModelPicker role="code" label="Coding model" value={bindings.code || bindings.Editor || ''} models={modelsWithIntelligence} onChange={value => saveBindings({ ...bindings, code: value, Editor: value })} />
+              <SearchableModelPicker role="plan" label="Plan model" value={bindings.plan || bindings.Architect || ''} models={modelsWithIntelligence} onChange={value => saveBindings({ ...bindings, plan: value, Architect: value })} />
+              <SearchableModelPicker role="review" label="Review model" value={bindings.review || bindings.Reviewer || ''} models={modelsWithIntelligence} onChange={value => saveBindings({ ...bindings, review: value, Reviewer: value })} />
+              <SearchableModelPicker role="prompt" label="Prompt enhancement model" value={promptEnhancementModel} models={modelsWithIntelligence} onChange={value => { setPromptEnhancementModel(value); vscode?.postMessage({ command: 'set-prompt-enhancement-model', modelId: value }); }} />
             </Panel>
 
             <Panel title="Hybrid Settings">
@@ -1273,10 +1451,27 @@ export default function App() {
               </div>
             </details>
 
+            <details data-testid="agent-gateway-settings" className="rounded border border-slate-800 bg-[#17171b] p-3">
+              <summary className="cursor-pointer text-[11px] font-bold uppercase text-slate-300">Agent gateway <span className="font-normal text-slate-500">({agentGateway.running ? `running · 127.0.0.1:${agentGateway.port}` : agentGateway.enabled ? 'enabled · stopped' : 'off'})</span></summary>
+              <div className="mt-3 space-y-2 text-[11px] text-slate-500">
+                <p>Authenticated loopback access for external goal and proposal clients. Approval, evidence, oracle, merge, signing, and success authority remain host-owned.</p>
+                {!agentGateway.enabled && <p data-testid="agent-gateway-disabled" className="text-amber-400">Disabled by default. Enable it in native Forge settings before starting.</p>}
+                <div className="grid grid-cols-2 gap-2">
+                  {!agentGateway.running
+                    ? <button data-testid="start-agent-gateway" onClick={() => vscode?.postMessage({ command: 'start-agent-gateway' })} disabled={!agentGateway.enabled} className="forge-secondary"><Play size={12} /> Start</button>
+                    : <button data-testid="stop-agent-gateway" onClick={() => vscode?.postMessage({ command: 'stop-agent-gateway' })} className="forge-secondary"><Pause size={12} /> Stop</button>}
+                  <button data-testid="rotate-agent-gateway-token" onClick={() => vscode?.postMessage({ command: 'rotate-agent-gateway-token' })} className="forge-secondary"><ShieldCheck size={12} /> Rotate token</button>
+                </div>
+                <button data-testid="copy-agent-gateway-mcp" onClick={() => vscode?.postMessage({ command: 'copy-agent-gateway-mcp-config' })} disabled={!agentGateway.running} className="forge-link-button w-full"><ExternalLink size={12} /> Copy authenticated MCP config</button>
+                <button data-testid="open-agent-gateway-audit" onClick={() => vscode?.postMessage({ command: 'open-agent-gateway-audit' })} className="forge-link-button w-full"><BookOpen size={12} /> Open gateway audit</button>
+                <button data-testid="configure-agent-gateway" onClick={() => vscode?.postMessage({ command: 'open-native-settings' })} className="forge-link-button w-full"><Settings size={12} /> Configure gateway</button>
+              </div>
+            </details>
+
             <details data-testid="custom-modes-settings" className="rounded border border-slate-800 bg-[#17171b] p-3">
-              <summary className="cursor-pointer text-[11px] font-bold uppercase text-slate-300">Custom modes <span className="font-normal text-slate-500">({modes.filter(mode => !mode.builtIn).length}/20)</span></summary>
+              <summary className="cursor-pointer text-[11px] font-bold uppercase text-slate-300">Custom modes <span className="font-normal text-slate-500">({modes.filter(mode => !mode.builtIn && !mode.imported).length}/20)</span></summary>
               <div className="mt-3 space-y-2">
-                {modes.filter(mode => !mode.builtIn).map(mode => (
+                {modes.filter(mode => !mode.builtIn && !mode.imported).map(mode => (
                   <div key={mode.id} className="flex items-start justify-between gap-2 border-b border-slate-800 pb-2 text-[11px]">
                     <div className="min-w-0"><div className="font-semibold text-slate-200">{mode.name}</div><div className="truncate text-slate-500">{mode.intent} · {mode.allowedTools.length} tools</div></div>
                     <button data-testid={`delete-mode-${mode.id}`} onClick={() => vscode?.postMessage({ command: 'delete-mode', modeId: mode.id })} className="text-rose-400 hover:text-rose-300">Delete</button>
@@ -1294,6 +1489,17 @@ export default function App() {
                 </div>}
                 {modeError && <div data-testid="mode-error" className="text-[10px] text-rose-400">{modeError}</div>}
                 <button data-testid="save-custom-mode" onClick={saveCustomMode} disabled={!modeName.trim() || !modeDescription.trim() || !modeInstructions.trim()} className="forge-primary w-full">Create mode</button>
+              </div>
+            </details>
+
+            <details data-testid="customizations-settings" className="rounded border border-slate-800 bg-[#17171b] p-3">
+              <summary className="cursor-pointer text-[11px] font-bold uppercase text-slate-300">Workspace customizations <span className="font-normal text-slate-500">({customizations.skills} skills · {customizations.compatibleAgents}/{customizations.agents} agents · {customizations.rules} rules · {customizations.hooks} hooks)</span></summary>
+              <div className="mt-3 space-y-2 text-[11px] text-slate-500">
+                <p>Imported context cannot expand Forge tools, approvals, workspace scope, or success authority. Command hooks are {customizations.hooksEnabled ? 'enabled' : 'disabled'}.</p>
+                {customizations.rejected > 0 && <p className="text-amber-400">{customizations.rejected} customization file(s) were rejected. Open the report for details.</p>}
+                <button data-testid="refresh-customizations" onClick={() => vscode?.postMessage({ command: 'refresh-customizations' })} className="forge-secondary w-full"><RotateCcw size={12} /> Refresh customizations</button>
+                <button data-testid="open-customizations" onClick={() => vscode?.postMessage({ command: 'open-customizations' })} className="forge-link-button w-full"><ExternalLink size={12} /> Open compatibility report</button>
+                <button onClick={() => vscode?.postMessage({ command: 'open-native-settings' })} className="forge-link-button w-full"><Settings size={12} /> Configure hook execution</button>
               </div>
             </details>
 
@@ -1497,9 +1703,10 @@ function ModelSortSelect({ value, onChange }: { value: ModelSortMode; onChange: 
         className="min-w-0 flex-1 rounded border border-slate-700 bg-[#111113] px-2 py-1 text-[11px] text-slate-200 outline-none"
       >
         <option value="recommended">Recommended for role</option>
+        <option value="measured">Measured solve confidence</option>
         <option value="context">Largest context</option>
-        <option value="reasoning">Reasoning rank</option>
-        <option value="coding">Coding rank</option>
+        <option value="reasoning">Heuristic reasoning estimate</option>
+        <option value="coding">Heuristic coding estimate</option>
         <option value="cost">Lowest cost</option>
         <option value="newest">Newest</option>
       </select>
@@ -1547,6 +1754,14 @@ function scoreModelForRole(model: any, role: ModelRole, query: string): number {
 }
 
 function compareRankedModels(a: { model: any; score: number }, b: { model: any; score: number }, sortMode: ModelSortMode, role: ModelRole): number {
+  if (sortMode === 'measured') {
+    const aMeasured = a.model.empirical?.claimLevel === 'measured' ? a.model.empirical : null;
+    const bMeasured = b.model.empirical?.claimLevel === 'measured' ? b.model.empirical : null;
+    if (aMeasured && bMeasured) return Number(bMeasured.solveRateConfidence?.low || 0) - Number(aMeasured.solveRateConfidence?.low || 0) || Number(bMeasured.sampleCount || 0) - Number(aMeasured.sampleCount || 0) || byName(a.model, b.model);
+    if (aMeasured) return -1;
+    if (bMeasured) return 1;
+    return byName(a.model, b.model);
+  }
   if (sortMode === 'context') {
     return Number(b.model.contextLength || 0) - Number(a.model.contextLength || 0) || byName(a.model, b.model);
   }
@@ -1596,12 +1811,21 @@ function byName(a: any, b: any): number {
 }
 
 function categoryLabel(model: any, role: ModelRole, score: number): string {
-  if (model.id === 'openrouter/pareto-code' && role === 'code') return 'best coding';
-  if (model.id === 'openrouter/auto' && role === 'plan') return 'best planning';
-  if (model.id === 'google/gemini-2.5-flash-lite' && role === 'prompt') return 'best quick task';
-  if (score >= 100) return `strong ${role}`;
-  if (score >= 60) return `good ${role}`;
-  return 'available';
+  if (model.empirical?.claimLevel === 'measured') return `measured ${(Number(model.empirical.solveRate || 0) * 100).toFixed(0)}% · n=${model.empirical.sampleCount}`;
+  if (model.empirical?.claimLevel === 'provisional') return `provisional · n=${model.empirical.sampleCount}`;
+  if (model.id === 'openrouter/pareto-code' && role === 'code') return 'heuristic coding route';
+  if (model.id === 'openrouter/auto' && role === 'plan') return 'heuristic planning route';
+  if (score >= 100) return `heuristic ${role} fit`;
+  if (score >= 60) return `heuristic ${role} candidate`;
+  return 'catalog only';
+}
+
+function selectEmpiricalProfile(report: any, modelId: string): any | null {
+  const profiles = Array.isArray(report?.profiles) ? report.profiles.filter((profile: any) => profile.modelId === modelId) : [];
+  return profiles.sort((a: any, b: any) => {
+    const claim = (b.claimLevel === 'measured' ? 2 : 1) - (a.claimLevel === 'measured' ? 2 : 1);
+    return claim || Number(b.sampleCount || 0) - Number(a.sampleCount || 0) || String(a.cohortKey).localeCompare(String(b.cohortKey));
+  })[0] || null;
 }
 
 function formatContext(contextLength: number): string {
